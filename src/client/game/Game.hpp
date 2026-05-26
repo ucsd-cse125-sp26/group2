@@ -468,7 +468,10 @@ private:
     int tpTuneWeaponIdx_ = 0;                   ///< Which weapon type is being tuned.
     int tpAnchorTuneStanceIdx_ = 0;             ///< Which HoldStance the right-hand anchor sliders are editing.
     float tpAnchorRotStepDeg_ = 5.0f;           ///< Delta-rotation step (degrees) for the gimbal-free anchor rotation buttons.
+    float tpAnchorWorldRotStepDeg_ = 5.0f;      ///< Delta-rotation step (degrees) for the WORLD-space rotation buttons.
     bool tpAnchorShowDebugMarker_ = true;       ///< Render the red-cube anchor wish-point marker when the 3P tweaker is open.
+    bool tpEnableJointConstraints_ = true;      ///< Debug toggle: pass enableJointConstraints into the arm IK targets. Off = no shoulder/elbow/wrist clamps (useful while authoring extreme anchor positions).
+    bool tpEnableReachFade_ = true;             ///< Debug toggle: pass enableReachFade into the arm IK targets. Off = no fade-out when target is past arm reach.
     bool showTPWeaponUI_ = false;               ///< Show the 3P Weapon Tweaker window.
 
     // Hand mount tuning for third-person player IK / weapon grips.

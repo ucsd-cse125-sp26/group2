@@ -633,8 +633,11 @@ void CharacterAnimator::applyHandIkTargetsImpl(const HandIkTargets& targets, boo
         // over a small margin past full-extension distance.
         constexpr float k_reachFadeMargin = 4.0f; // model units (~4 cm).
         const float rawReach = upperLen + foreLen;
-        const float reachWeight =
+        const float reachWeightRaw =
             std::clamp(1.0f - (targetDist - rawReach) / k_reachFadeMargin, 0.0f, 1.0f);
+        // Debug toggle (Right-Hand Hold Anchor tweaker): when fade is disabled
+        // the IK always applies at full strength regardless of target distance.
+        const float reachWeight = target.enableReachFade ? reachWeightRaw : 1.0f;
         if (reachWeight <= 0.0f)
             return false;
 
@@ -672,13 +675,16 @@ void CharacterAnimator::applyHandIkTargetsImpl(const HandIkTargets& targets, boo
         // Phase D shoulder constraint: clamp deviation from rest to a 110°
         // cone + ±60° twist. Prevents the IK from putting the elbow behind
         // the head or over-twisting the shoulder when targeting an extreme grip.
+        // Skipped when the debug toggle disables joint constraints.
         constexpr float k_shoulderMaxSwingRad = 1.91986f; // 110 degrees.
         constexpr float k_shoulderMaxTwistRad = 1.04720f; // 60 degrees.
-        applyJointConstraint(chain.upperArm,
-                             chain.upperArmRestLocal,
-                             chain.upperDescendants,
-                             k_shoulderMaxSwingRad,
-                             k_shoulderMaxTwistRad);
+        if (target.enableJointConstraints) {
+            applyJointConstraint(chain.upperArm,
+                                 chain.upperArmRestLocal,
+                                 chain.upperDescendants,
+                                 k_shoulderMaxSwingRad,
+                                 k_shoulderMaxTwistRad);
+        }
 
         const glm::vec3 currentElbow = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.foreArm)]);
         const glm::vec3 currentWrist = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chain.hand)]);
@@ -687,19 +693,17 @@ void CharacterAnimator::applyHandIkTargetsImpl(const HandIkTargets& targets, boo
         applyDeltaToMask(impl_->jointModelMats, chain.foreDescendants, rotateAround(currentElbow, foreRot));
 
         // Phase D elbow hinge constraint: large swing budget (~160°) but very
-        // little twist (~5°). The elbow is anatomically a single-DOF hinge —
-        // most of its motion is bending along one axis; twist about the
-        // forearm is supposed to live in the wrist or the lower-arm twist
-        // bone, not in this joint. The big swing budget lets the IK still
-        // reach extreme grip distances; the tiny twist budget guarantees the
-        // forearm doesn't spin around its own length.
+        // little twist (~5°). The elbow is anatomically a single-DOF hinge.
+        // Skipped when the debug toggle disables joint constraints.
         constexpr float k_elbowMaxSwingRad = 2.79253f; // 160 degrees.
         constexpr float k_elbowMaxTwistRad = 0.08727f; // 5 degrees.
-        applyJointConstraint(chain.foreArm,
-                             chain.foreArmRestLocal,
-                             chain.foreDescendants,
-                             k_elbowMaxSwingRad,
-                             k_elbowMaxTwistRad);
+        if (target.enableJointConstraints) {
+            applyJointConstraint(chain.foreArm,
+                                 chain.foreArmRestLocal,
+                                 chain.foreDescendants,
+                                 k_elbowMaxSwingRad,
+                                 k_elbowMaxTwistRad);
+        }
         return true;
     };
 
@@ -719,9 +723,10 @@ void CharacterAnimator::applyHandIkTargetsImpl(const HandIkTargets& targets, boo
         // decomposing `delta` into swing+twist around this axis lets us preserve
         // the swing (pointing the palm) while limiting how far the wrist can
         // counter-rotate when the desired orientation demands a hyperextended twist.
+        // Skipped when the debug toggle disables joint constraints.
         const glm::vec3 elbowPos = matrixTranslation(impl_->jointModelMats[foreIdx]);
         const glm::vec3 forearmDir = wrist - elbowPos;
-        if (glm::dot(forearmDir, forearmDir) > 0.0001f) {
+        if (target.enableJointConstraints && glm::dot(forearmDir, forearmDir) > 0.0001f) {
             const glm::vec3 twistAxis = glm::normalize(forearmDir);
             const glm::vec3 deltaVec(delta.x, delta.y, delta.z);
             const float projLen = glm::dot(deltaVec, twistAxis);

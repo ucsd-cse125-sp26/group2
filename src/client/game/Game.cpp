@@ -3167,6 +3167,12 @@ SDL_AppResult Game::iterate()
                             c.handIk.right.enabled = spine2JointIdx_ >= 0;
                             c.handIk.right.elbowEnabled = false;
                             c.handIk.right.orientationEnabled = spine2JointIdx_ >= 0;
+                            // Debug toggles from the 3P Weapon Tweaker — propagate to both arms
+                            // so anchor-tuning is fully unrestricted when the user turns them off.
+                            c.handIk.right.enableJointConstraints = tpEnableJointConstraints_;
+                            c.handIk.right.enableReachFade = tpEnableReachFade_;
+                            c.handIk.left.enableJointConstraints = tpEnableJointConstraints_;
+                            c.handIk.left.enableReachFade = tpEnableReachFade_;
                             c.chestAnchoredRight = spine2JointIdx_ >= 0;
                             // Per-stance lookup: pull the anchor matching the
                             // entity's current animator mode (Locomotion vs
@@ -4713,6 +4719,135 @@ SDL_AppResult Game::iterate()
             if (spine2JointIdx_ < 0)
                 ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
                                    "Spine2 not found in rig — anchor disabled, weapon will hang at side.");
+
+            // World-space view of the same anchor. Updating these sliders/buttons
+            // converts back through the entity world × Spine2 model frame and
+            // writes spine-local values, so both representations stay in sync.
+            ImGui::SeparatorText("World-Space Edit (live conversion to spine-local)");
+            ImGui::TextWrapped(
+                "World position/rotation sliders shadow the spine-local values above. "
+                "Dragging a world slider converts back to spine-local through the current "
+                "entity transform + Spine2 pose, so both stay in lockstep. Stand still while "
+                "editing to keep the world value steady — it tracks the live character pose.");
+            {
+                entt::entity local = entt::null;
+                glm::mat4 entityWorld(1.0f);
+                glm::mat4 spine2Model(1.0f);
+                bool haveFrame = false;
+                registry.view<LocalPlayer, AnimatedCharacter, Position, InputSnapshot>().each(
+                    [&](entt::entity en,
+                        const AnimatedCharacter& ac,
+                        const Position& pos,
+                        const InputSnapshot& inp) {
+                        local = en;
+                        if (!ac.animator || spine2JointIdx_ < 0)
+                            return;
+                        const auto& joints = ac.animator->jointModelMatrices();
+                        if (spine2JointIdx_ >= static_cast<int>(joints.size()))
+                            return;
+                        // Reproduce the entity world transform (same composition as
+                        // the candidate populator).
+                        glm::mat4 wt = glm::translate(glm::mat4(1.0f), pos.value);
+                        wt *= glm::mat4_cast(glm::angleAxis(inp.yaw, glm::vec3{0, 1, 0}));
+                        wt = glm::translate(wt, glm::vec3{0.0f, kRigVerticalOffset_, 0.0f});
+                        wt = glm::scale(wt, glm::vec3(kRigScale_));
+                        entityWorld = wt;
+                        spine2Model = joints[static_cast<size_t>(spine2JointIdx_)];
+                        haveFrame = true;
+                    });
+
+                if (!haveFrame) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
+                                       "(local player not yet bound — world editing inactive)");
+                } else {
+                    // anchorFrame = entityWorld × Spine2Model. World wish-point =
+                    // anchorFrame × vec4(anchor.offset, 1).
+                    const glm::mat4 anchorFrame = entityWorld * spine2Model;
+                    const glm::mat3 anchorFrameRot(glm::normalize(glm::vec3(anchorFrame[0])),
+                                                   glm::normalize(glm::vec3(anchorFrame[1])),
+                                                   glm::normalize(glm::vec3(anchorFrame[2])));
+                    const glm::quat anchorFrameQ = glm::normalize(glm::quat_cast(anchorFrameRot));
+                    const glm::quat anchorFrameQInv = glm::inverse(anchorFrameQ);
+
+                    glm::vec4 worldPos4 = anchorFrame * glm::vec4(anchor.offset, 1.0f);
+                    glm::vec3 worldPos(worldPos4.x, worldPos4.y, worldPos4.z);
+
+                    const glm::vec3 worldPosOrig = worldPos;
+                    if (ImGui::DragFloat("World X", &worldPos.x, 0.25f, -10000.0f, 10000.0f, "%.2f") ||
+                        ImGui::DragFloat("World Y", &worldPos.y, 0.25f, -10000.0f, 10000.0f, "%.2f") ||
+                        ImGui::DragFloat("World Z", &worldPos.z, 0.25f, -10000.0f, 10000.0f, "%.2f"))
+                    {
+                        if (worldPos != worldPosOrig) {
+                            // Solve: anchorFrame * vec4(newOffset, 1) = vec4(worldPos, 1).
+                            const glm::mat4 invFrame = glm::inverse(anchorFrame);
+                            const glm::vec4 newOffset4 = invFrame * glm::vec4(worldPos, 1.0f);
+                            anchor.offset =
+                                glm::vec3(newOffset4.x, newOffset4.y, newOffset4.z);
+                        }
+                    }
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(world)");
+
+                    // World rotation: composed = anchorFrameQ * anchor.rotation.
+                    // Apply world-space delta dqW: composed' = dqW * composed.
+                    // Solve for new anchor.rotation:
+                    //   anchorFrameQ * anchor.rotation' = dqW * anchorFrameQ * anchor.rotation
+                    //   anchor.rotation' = (anchorFrameQInv * dqW * anchorFrameQ) * anchor.rotation
+                    const glm::quat worldRotComposed = glm::normalize(anchorFrameQ * anchor.rotation);
+                    ImGui::Text("World rot (w,x,y,z): (%.3f, %.3f, %.3f, %.3f)",
+                                static_cast<double>(worldRotComposed.w),
+                                static_cast<double>(worldRotComposed.x),
+                                static_cast<double>(worldRotComposed.y),
+                                static_cast<double>(worldRotComposed.z));
+                    ImGui::DragFloat("World Rot Step (deg)",
+                                     &tpAnchorWorldRotStepDeg_,
+                                     0.5f,
+                                     0.1f,
+                                     90.0f,
+                                     "%.1f");
+                    ImGui::PushButtonRepeat(true);
+                    auto rotateWorldBy = [&](const glm::vec3& worldAxis, float deltaDeg) {
+                        const glm::quat dqW = glm::angleAxis(glm::radians(deltaDeg), worldAxis);
+                        const glm::quat dqLocal = glm::normalize(anchorFrameQInv * dqW * anchorFrameQ);
+                        anchor.rotation = glm::normalize(dqLocal * anchor.rotation);
+                    };
+                    if (ImGui::Button("World Rot X -"))
+                        rotateWorldBy(glm::vec3{1.0f, 0.0f, 0.0f}, -tpAnchorWorldRotStepDeg_);
+                    ImGui::SameLine();
+                    if (ImGui::Button("World Rot X +"))
+                        rotateWorldBy(glm::vec3{1.0f, 0.0f, 0.0f}, tpAnchorWorldRotStepDeg_);
+                    ImGui::SameLine();
+                    if (ImGui::Button("World Rot Y -"))
+                        rotateWorldBy(glm::vec3{0.0f, 1.0f, 0.0f}, -tpAnchorWorldRotStepDeg_);
+                    ImGui::SameLine();
+                    if (ImGui::Button("World Rot Y +"))
+                        rotateWorldBy(glm::vec3{0.0f, 1.0f, 0.0f}, tpAnchorWorldRotStepDeg_);
+                    ImGui::SameLine();
+                    if (ImGui::Button("World Rot Z -"))
+                        rotateWorldBy(glm::vec3{0.0f, 0.0f, 1.0f}, -tpAnchorWorldRotStepDeg_);
+                    ImGui::SameLine();
+                    if (ImGui::Button("World Rot Z +"))
+                        rotateWorldBy(glm::vec3{0.0f, 0.0f, 1.0f}, tpAnchorWorldRotStepDeg_);
+                    ImGui::PopButtonRepeat();
+                }
+                (void)local;
+            }
+
+            // Debug toggles — useful while authoring extreme anchor positions.
+            // When the joint-constraint clamps fight the wish-point, the hand
+            // appears to lag and not move linearly with the sliders; disabling
+            // constraints lets you see the pure IK solution. Reach fade similarly
+            // hides "the gun snapped back" issues when the wish-point is past the
+            // arm's max reach.
+            ImGui::SeparatorText("Debug Toggles (re-enable when done!)");
+            ImGui::Checkbox("Joint constraints (shoulder/elbow/wrist clamps)",
+                            &tpEnableJointConstraints_);
+            ImGui::Checkbox("Reach fade (IK falls back when target is past arm length)",
+                            &tpEnableReachFade_);
+            if (!tpEnableJointConstraints_ || !tpEnableReachFade_) {
+                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f),
+                                   "⚠  Constraints/reach-fade off — re-enable before shipping.");
+            }
 
             ImGui::SeparatorText("Procedural Layer Tuning");
             ImGui::DragFloat("Spine Bend Mul", &tp.spineBendMultiplier, 0.05f, 0.0f, 2.0f, "%.2f");
