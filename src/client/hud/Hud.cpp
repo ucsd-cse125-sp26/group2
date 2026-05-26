@@ -200,11 +200,11 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<Minimap>());
 
     // Bottom-row chrome.
-    widgets_.push_back(std::make_unique<HealthArmorBar>());   // Vitals (bottom-left)
-    widgets_.push_back(std::make_unique<EquipmentSlots>());   // bottom-center
+    widgets_.push_back(std::make_unique<HealthArmorBar>()); // Vitals (bottom-left)
+    widgets_.push_back(std::make_unique<EquipmentSlots>()); // bottom-center
     widgets_.push_back(std::make_unique<GrenadeSlotsWidget>());
-    widgets_.push_back(std::make_unique<AmmoCounter>());      // weapon panel (bottom-right)
-    widgets_.push_back(std::make_unique<ChatWidget>());       // chat should sit above gameplay chrome
+    widgets_.push_back(std::make_unique<AmmoCounter>());    // weapon panel (bottom-right)
+    widgets_.push_back(std::make_unique<ChatWidget>());     // chat should sit above gameplay chrome
 
     // Modal panels (only visible when toggled).
     // TeamStatusBar is intentionally omitted in the Voidfall design.

@@ -55,6 +55,19 @@ SDL_AppResult Home::iterate()
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    if (openPopupMessage) {
+        ImGui::OpenPopup("Server Notice");
+        openPopupMessage = false;
+    }
+    if (ImGui::BeginPopupModal("Server Notice", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(popupMessage.c_str());
+        ImGui::Spacing();
+        if (ImGui::Button("OK")) {
+            popupMessage.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
     std::vector<net::discovery::ServerInfo> servers;
     std::string globalError;
     {
@@ -71,6 +84,11 @@ SDL_AppResult Home::iterate()
     if (result.refreshClicked) {
         startGlobalRefresh(true);
     }
+    if (result.hostClicked) {
+        joinError.clear();
+        pendingHostRequest = true;
+    }
+
     if (result.connectClicked) {
         joinError.clear();
         SDL_Log("Join button clicked! IP: %s, Port: %d", joinMenuState.serverIp.c_str(), joinMenuState.serverPort);
@@ -110,9 +128,25 @@ std::optional<JoinRequest> Home::consumeJoinRequest()
     return result;
 }
 
+bool Home::consumeHostRequest()
+{
+    if (!pendingHostRequest) {
+        return false;
+    }
+
+    pendingHostRequest = false;
+    return true;
+}
+
 void Home::setJoinError(const std::string& error)
 {
     joinError = error;
+}
+
+void Home::setPopupMessage(const std::string& message)
+{
+    popupMessage = message;
+    openPopupMessage = !popupMessage.empty();
 }
 
 void Home::startGlobalRefresh(bool force)

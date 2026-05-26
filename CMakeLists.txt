@@ -105,7 +105,7 @@ block()
     FetchContent_Declare(
         SDL3_net
         GIT_REPOSITORY https://github.com/cedricdvd/SDL_net.git
-        GIT_TAG        main
+        GIT_TAG        datagram-local-port # TODO: switch back to main once branch merged into main
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(SDL3_net)
@@ -462,6 +462,15 @@ target_compile_options(imgui_lib PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-w>
     $<$<CXX_COMPILER_ID:MSVC>:/W0>
 )
+
+# argparse -- header-only command-line argument parser used by the server.
+FetchContent_Declare(
+    argparse
+    GIT_REPOSITORY https://github.com/p-ranav/argparse.git
+    GIT_TAG v3.2
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(argparse)
 
 # ---- Shaders: GLSL → SPIR-V (→ DXIL on Windows / MSL on macOS) ----
 # Step 1: GLSL → SPIR-V
@@ -1007,6 +1016,14 @@ add_executable(group2
         src/client/menus/pause/ConfirmModal.cpp
         src/client/menus/pause/PauseMenu.hpp
         src/client/menus/pause/PauseMenu.cpp
+        src/client/host/HostedServer.hpp
+        src/client/host/HostedServer.cpp
+        src/client/menus/host/HostConfig.hpp
+        src/client/menus/host/HostConfig.cpp
+        src/client/menus/host/ui/HostConfigUI.hpp
+        src/client/menus/host/ui/HostConfigUI.cpp
+        src/client/util/LocalAddress.hpp
+        src/client/util/LocalAddress.cpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1344,6 +1361,7 @@ target_link_libraries(server PRIVATE
     ozz_animation_offline
     ozz_animation
     ozz_base
+    argparse
 )
 if(TBB_FOUND)
     target_link_libraries(server PRIVATE TBB::tbb)

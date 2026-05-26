@@ -5,6 +5,7 @@
 
 #include "DeveloperConfig.hpp"
 #include "config/UserSettings.hpp"
+#include "host/HostedServer.hpp"
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
 #include "renderer-new/NewRenderer.hpp"
@@ -19,6 +20,8 @@ struct AppContext
     SDL_Window& window;                ///< Main application window.
     NewRenderer& renderer;             ///< Shared renderer owned by App.
     Client& client;                    ///< Shared network client owned by App.
+    HostedServer& hostedServer;        ///< Local hosted server process owned by App.
+    HostConfigState& hostConfigState;  ///< Persistent draft settings for the host config screen.
     NetworkConfig& networkConfig;      ///< Runtime network/discovery config.
     DeveloperConfig& developerConfig;  ///< Developer workflow config.
     UserSettings& userSettings;        ///< User-specific input and gameplay settings.

@@ -20,8 +20,8 @@ struct PickupPrompt : HudWidget
     float fontSize = 32.f;      ///< Size of the descriptive text (logical px).
     float keyFontSize = 32.f;   ///< Size of the key glyph (logical px).
     float keyBoxPadding = 12.f; ///< Padding inside the key glyph box.
-    float keyBoxRadius = 4.f;  ///< Corner radius of the key glyph box.
-    float spacing = 14.f;      ///< Gap between the key glyph box and the text.
+    float keyBoxRadius = 4.f;   ///< Corner radius of the key glyph box.
+    float spacing = 14.f;       ///< Gap between the key glyph box and the text.
 
     PickupPrompt();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

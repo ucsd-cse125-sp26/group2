@@ -26,6 +26,10 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
         if (ImGui::Button("Join")) {
             result.connectClicked = true;
         }
+        ImGui::SameLine();
+        if (ImGui::Button("Host")) {
+            result.hostClicked = true;
+        }
         if (!errorMessage.empty()) {
             ImGui::Spacing();
             ImGui::TextColored(

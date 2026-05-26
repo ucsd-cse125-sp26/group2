@@ -66,6 +66,13 @@ bool Server::init(const char* addr,
             SDL_Log("Server: failed to create UDP session listener on port %u", port);
             return false;
         }
+        listenPort_ = session_.localPort();
+        if (listenPort_ == 0) {
+            SDL_Log("Server: failed to query UDP session listener port: %s", SDL_GetError());
+            session_.close();
+            return false;
+        }
+
         session_.preferRelay(transportConfig_.forceRelay);
 
         if (discoveryConfig_.enabled && discoveryConfig_.advertiseServer) {
@@ -79,10 +86,15 @@ bool Server::init(const char* addr,
             }
         }
 
-        SDL_Log("Server: UDP session listening on port %d", static_cast<int>(port));
+        SDL_Log("Server: UDP session listening on port %d", static_cast<int>(listenPort_));
         shouldStop_.store(false, std::memory_order_relaxed);
         networkThread_ = std::thread(&Server::networkLoop, this);
         return true;
+    }
+
+    if (port == 0) {
+        SDL_Log("Server: --port=0 requires UDP session transport so the actual port can be queried");
+        return false;
     }
 
     NET_Address* netAddr = NET_ResolveHostname(addr);
@@ -1716,4 +1728,9 @@ void Server::broadcastLobbyUpdate(const LobbyUpdateEvent& event)
     std::memcpy(buf.data() + 1, &event, sizeof(LobbyUpdateEvent));
     enqueueBroadcast(0, buf.data(), static_cast<int>(buf.size()));
     SDL_Log("Server: broadcasted lobby update: player %d is %s", event.id.value, action);
+}
+
+uint16_t Server::listeningPort() const
+{
+    return listenPort_;
 }

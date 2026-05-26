@@ -187,6 +187,9 @@ public:
     /// @brief True after a successful @ref open.
     [[nodiscard]] bool isOpen() const noexcept { return socket_ != nullptr; }
 
+    /// @brief Get the local port this socket is bound to.
+    [[nodiscard]] uint16_t localPort() const noexcept;
+
 private:
     NET_DatagramSocket* socket_ = nullptr;
 };

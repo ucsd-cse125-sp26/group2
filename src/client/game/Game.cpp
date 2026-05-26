@@ -1573,7 +1573,12 @@ SDL_AppResult Game::iterate()
         accumulator = k_physicsDt; // run exactly one tick to apply latest state
         // Drain the network now so we snap to the current server state
         // without fast-forwarding through every intermediate update.
-        client->poll();
+        if (!client->poll()) {
+            SDL_Log("Game: lost connection to server; returning to main menu");
+            returnToMainMenuRequested_ = true;
+            serverShutdownNoticeRequested_ = true;
+            return SDL_APP_CONTINUE;
+        }
         refreshRemotePlayerRenderables();
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
@@ -2016,8 +2021,10 @@ SDL_AppResult Game::iterate()
 
         const std::optional<PredictedPlayerState> currentBeforeSnapshot = captureLocalPredictedState();
         if (!client->poll()) {
-            // TODO: Update so reset to menu or some other non-crash state
-            return SDL_APP_SUCCESS;
+            SDL_Log("Game: lost connection to server; returning to main menu");
+            returnToMainMenuRequested_ = true;
+            serverShutdownNoticeRequested_ = true;
+            return SDL_APP_CONTINUE;
         }
         phaseSnap(phaseStats.networkPollMs);
         phaseStats.snapshotApplyMs = perfSnapshotApplyMs_;
@@ -4729,6 +4736,15 @@ bool Game::consumeReturnToMainMenu()
         return false;
 
     returnToMainMenuRequested_ = false;
+    return true;
+}
+
+bool Game::consumeServerShutdownNotice()
+{
+    if (!serverShutdownNoticeRequested_)
+        return false;
+
+    serverShutdownNoticeRequested_ = false;
     return true;
 }
 

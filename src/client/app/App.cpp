@@ -5,7 +5,9 @@
 
 #include "SDL3/SDL_init.h"
 #include "game/Game.hpp"
+#include "host/HostedServer.hpp"
 #include "menus/home/Home.hpp"
+#include "menus/host/HostConfig.hpp"
 #include "menus/lobby/Lobby.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
@@ -98,6 +100,9 @@ bool App::init()
 
         networkConfig = loadNetworkConfig(cfgPath.c_str());
         developerConfig = loadDeveloperConfig(cfgPath.c_str());
+        hostConfigState.port = networkConfig.serverNetwork.port;
+        hostConfigState.useSpecificPort = false;
+        hostConfigState.useLegacyTcp = false;
     }
 
     // Pull user-specific settings once; App owns the live copy while screens borrow it.
@@ -228,6 +233,62 @@ SDL_AppResult App::iterate()
                 transitionTo(Screen::Lobby);
             }
         }
+
+        if (home->consumeHostRequest()) {
+            transitionTo(Screen::HostConfig);
+        }
+        break;
+    }
+    case Screen::HostConfig: {
+        auto* hostConfig = dynamic_cast<HostConfig*>(screen_.get());
+        if (!hostConfig)
+            break;
+
+        if (hostConfig->consumeLaunchRequest()) {
+            HostConfigState config = hostConfig->draftConfig();
+            hostConfigState = config;
+
+            if (config.useLegacyTcp && !config.useSpecificPort) {
+                hostConfig->setLaunchError("Legacy TCP requires a specific port");
+                break;
+            }
+
+            std::string error;
+            if (!hostedServer.start(config, error)) {
+                hostConfig->setLaunchError(error.empty() ? "Failed to start hosted server" : error);
+                break;
+            }
+
+            SDL_Log("Hosted server started on port %d, connecting client...", hostedServer.port());
+            TransportConfig hostedTransport = networkConfig.transport;
+            if (config.useLegacyTcp) {
+                hostedTransport.useUdpSessions = false;
+            }
+            const ConnectError connectError = client.init("127.0.0.1", hostedServer.port(), hostedTransport);
+            if (connectError != ConnectError::None) {
+                SDL_Log("Failed to connect to hosted server: %s", connectErrorLogName(connectError));
+                hostConfig->setLaunchError(joinErrorMessage(connectError));
+                hostedServer.shutdown();
+            } else {
+                SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
+            }
+        }
+
+        if (hostConfig->consumeShutdownRequest()) {
+            client.shutdown();
+            if (hostedServer.isRunning()) {
+                hostedServer.shutdown();
+            }
+        }
+
+        if (hostConfig->consumeGoToLobbyRequest() && hostedServer.isRunning()) {
+            transitionTo(Screen::Lobby);
+            break;
+        }
+
+        if (hostConfig->consumeBackToHomeRequest()) {
+            transitionTo(Screen::Home);
+        }
         break;
     }
     case Screen::Lobby: {
@@ -235,9 +296,22 @@ SDL_AppResult App::iterate()
         if (!lobby)
             break;
 
+        if (lobby->consumeReturnToHostConfig()) {
+            transitionTo(Screen::HostConfig);
+            break;
+        }
+
         if (lobby->consumeReturnToMenu()) {
+            const bool showServerShutdownNotice = lobby->consumeServerShutdownNotice();
             client.shutdown();
+            if (hostedServer.isRunning()) {
+                hostedServer.shutdown();
+            }
+
             transitionTo(Screen::Home);
+            if (showServerShutdownNotice) {
+                showHomePopupMessage("Server shutdown");
+            }
             break;
         }
 
@@ -253,8 +327,12 @@ SDL_AppResult App::iterate()
             break;
 
         if (game->consumeReturnToMainMenu()) {
+            const bool showServerShutdownNotice = game->consumeServerShutdownNotice();
             client.shutdown();
             transitionTo(Screen::Home);
+            if (showServerShutdownNotice) {
+                showHomePopupMessage("Server shutdown");
+            }
             break;
         }
 
@@ -309,6 +387,16 @@ void App::transitionTo(Screen next)
         }
         break;
     }
+    case Screen::HostConfig: {
+        auto hostConfig = std::make_unique<HostConfig>();
+        if (hostConfig->init(ctx)) {
+            screen_ = std::move(hostConfig);
+            current = next;
+        } else {
+            hostConfig->quit();
+        }
+        break;
+    }
     case Screen::Home: {
         auto homeScreen = std::make_unique<Home>();
         if (homeScreen->init(ctx)) {
@@ -331,6 +419,9 @@ void App::cleanup()
     }
     if (!userSettingsPath.empty()) {
         user_settings::save(userSettingsPath, userSettings);
+    }
+    if (hostedServer.isRunning()) {
+        hostedServer.shutdown();
     }
     client.shutdown();
     renderer.quit();
@@ -358,9 +449,19 @@ AppContext App::screenContext()
         .window = *window,
         .renderer = renderer,
         .client = client,
+        .hostedServer = hostedServer,
+        .hostConfigState = hostConfigState,
         .networkConfig = networkConfig,
         .developerConfig = developerConfig,
         .userSettings = userSettings,
         .userSettingsPath = userSettingsPath,
     };
+}
+
+void App::showHomePopupMessage(const std::string& message)
+{
+    auto* home = dynamic_cast<Home*>(screen_.get());
+    if (home) {
+        home->setPopupMessage(message);
+    }
 }
