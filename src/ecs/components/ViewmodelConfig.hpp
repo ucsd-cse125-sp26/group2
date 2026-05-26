@@ -218,11 +218,21 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
 
     static const std::array<ThirdPersonWeaponParams, 4> k_params{{
         // Rifle — middleweight, full spine bend, moderate recoil.
+        // Locomotion anchor hand-tuned via the 3P Weapon Tweaker; other
+        // stances stay on the generic defaults until they're tuned.
         {.scale = 10.0f,
          .spineBendMultiplier = 1.0f,
          .hipLeanMultiplier = 0.1f,
          .recoilKickRad = 0.05f,
-         .rightHandHolds = k_defaultHolds},
+         .rightHandHolds = {{
+             // Locomotion: hand-tuned.
+             {.offset = {-12.69f, -8.23f, 22.32f},
+              .rotation = glm::quat(0.4410f, 0.5464f, 0.4894f, 0.5171f)},
+             k_crouchAnchor,
+             k_airborneAnchor,
+             k_slideAnchor,
+             k_wallRunAnchor,
+         }}},
         // Rocket launcher — heavy, slower upper-body response, big kick.
         {.scale = 0.025f,
          .spineBendMultiplier = 0.65f,

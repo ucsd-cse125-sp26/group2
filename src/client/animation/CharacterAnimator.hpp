@@ -73,9 +73,10 @@ struct ArmIkTarget
     bool orientationEnabled = false;
     /// Debug toggle: when false, the analytical solver skips the shoulder
     /// swing/twist cone, the elbow hinge clamp, and the wrist twist clamp.
-    /// Useful while authoring anchor positions — lets the hand reach extreme
-    /// targets without joint clamps re-pulling it toward a sane pose.
-    bool enableJointConstraints = true;
+    /// Default OFF — current clamps don't contribute useful pose-quality
+    /// improvements and tend to fight anchor authoring. Will be revisited
+    /// once the constraint geometry is tuned to the rig.
+    bool enableJointConstraints = false;
     /// Debug toggle: when false, the IK rotation magnitudes are NOT slerped
     /// toward identity when the target is past `upperLen + foreLen`. The arm
     /// will reach as far as physically possible without fading out. Helpful
