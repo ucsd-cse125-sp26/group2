@@ -22,6 +22,13 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Kill Threshold to Win");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SliderInt("##KillsToWin", &draft.killsToWin, 1, 100);
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted("Persistent Server");
             ImGui::TableSetColumnIndex(1);
             ImGui::BeginDisabled(inputs.serverRunning);

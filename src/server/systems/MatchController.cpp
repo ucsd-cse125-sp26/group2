@@ -26,7 +26,7 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
         break;
     }
     case MatchPhase::IN_PROGRESS: {
-        if (systems::handleWinCondition(registry, k_killsToWin)) {
+        if (systems::handleWinCondition(registry, config.killsToWin)) {
             SDL_Log("MatchController: player has won, ending match");
             currentPhase = MatchPhase::FINISHED;
             countdownTimer = k_finishedDuration;
@@ -122,4 +122,13 @@ void MatchController::broadcastMatchState(Server& server)
     lastBroadcastWinnerId = winnerId;
     lastBroadcastCountdown = countdownTimer;
     ticksSinceBroadcast = 0;
+}
+
+bool MatchController::setKillsToWin(int killsToWin)
+{
+    if (killsToWin <= 0)
+        return false;
+
+    config.killsToWin = killsToWin;
+    return true;
 }

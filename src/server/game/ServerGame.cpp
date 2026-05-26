@@ -1222,3 +1222,8 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
     // updateHitboxes itself was parallelized in PR-3; see HitboxSystem.cpp.
     systems::updateHitboxes(registry, hitboxRig_, rigScale_, rigMeshMinY_);
 }
+
+bool ServerGame::setKillsToWin(int kills)
+{
+    return matchController.setKillsToWin(kills);
+}

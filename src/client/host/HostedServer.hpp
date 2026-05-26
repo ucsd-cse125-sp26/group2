@@ -19,6 +19,7 @@ struct HostConfigState
     bool useSpecificPort;        ///< True when the user explicitly selected a port.
     bool useLegacyTcp;           ///< True to force the hosted server to legacy TCP transport.
     bool persistAfterClientExit; ///< UI-only persistence request; not wired yet.
+    int killsToWin;              ///< Match config: kill threshold to win, sent to the server on launch and update.
 };
 
 /// @brief Reserved metadata for an active hosted session.

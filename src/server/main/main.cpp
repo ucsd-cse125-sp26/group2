@@ -170,6 +170,10 @@ int main(int argc, char* argv[])
     program.add_argument("--address").help("Address to listen on for game clients (default: 127.0.0.1)");
     program.add_argument("--port").scan<'u', uint16_t>().help("Port to listen on for game clients (default: 9999)");
     program.add_argument("--legacy-tcp").flag().help("Force legacy TCP transport for hosted-client launches");
+    program.add_argument("--killsToWin")
+        .scan<'i', int>()
+        .default_value(10)
+        .help("Kills required to win a match (default: 10)");
 
     try {
         program.parse_args(argc, argv);
@@ -240,6 +244,18 @@ int main(int argc, char* argv[])
     }
     ServerGame game;
     if (!game.init(server, /*tickRateHz*/ 128, cfg.serverRep.snapshotHz, developerCfg.skipLobby)) {
+        server.shutdown();
+        ::group2::perf::stopAggregator();
+        closeCsv();
+        NET_Quit();
+        SDL_Quit();
+        return 1;
+    }
+
+    int killsToWin = program.get<int>("--killsToWin");
+    if (!game.setKillsToWin(killsToWin)) {
+        SDL_Log("Invalid killsToWin value: %d", killsToWin);
+        game.shutdown();
         server.shutdown();
         ::group2::perf::stopAggregator();
         closeCsv();

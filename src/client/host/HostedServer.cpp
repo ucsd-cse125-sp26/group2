@@ -56,6 +56,8 @@ std::vector<std::string> buildServerArgs(const std::string& serverPath, const Ho
     if (config.useLegacyTcp) {
         args.emplace_back("--legacy-tcp");
     }
+
+    args.push_back("--killsToWin=" + std::to_string(config.killsToWin));
     return args;
 }
 

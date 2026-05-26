@@ -121,10 +121,12 @@ HostConfigState HostConfig::draftConfig() const
             .useSpecificPort = false,
             .useLegacyTcp = false,
             .persistAfterClientExit = false,
+            .killsToWin = 10,
         };
 
     HostConfigState result = *draft;
     result.port = std::clamp(result.port, 0, 65535);
+    result.killsToWin = std::clamp(result.killsToWin, 1, 100);
     return result;
 }
 
