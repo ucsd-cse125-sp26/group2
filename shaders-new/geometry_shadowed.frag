@@ -1,5 +1,5 @@
 #version 450
-#define SHADOW_BIAS 0.0001
+#define SHADOW_BIAS 0.001
 //#define MAX_SPOT_LIGHTS 0
 #define MAX_POINT_LIGHTS 4
 
@@ -21,7 +21,6 @@ struct LightUBO {
 layout(location = 0) in vec3 frag_normal;
 layout(location = 1) in vec2 frag_vt;
 layout(location = 2) in vec3 frag_worldPos;
-
 
 layout(set = 2, binding = 0) uniform sampler2D tex;
 

@@ -96,7 +96,7 @@ SDL_GPUColorTargetInfo makeColorTargetLoad(SDL_GPUTexture* texture);
 /// @brief Create a depth/stencil render-target info that clears to depth 1.0.
 /// @param texture The depth texture.
 /// @return Populated SDL_GPUDepthStencilTargetInfo.
-SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture);
+SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture,Uint8 layer);
 
 /// @brief Create a texture-sampler binding pair for fragment shader use.
 /// @param texture The GPU texture.
@@ -185,9 +185,10 @@ void uploadBuffers(SDL_GPUDevice* device, SDL_GPUCommandBuffer* cmd, const std::
 /// @param device The GPU device.
 /// @param width Texture width in pixels.
 /// @param height Texture height in pixels.
-/// @param data Pointer to RGBA8 pixel data.
+/// @param cube
+/// @param arraySize
 /// @return The created GPU texture, or nullptr on failure.
-SDL_GPUTexture* createEmptyTextureD32F(SDL_GPUDevice* device, Uint32 width, Uint32 height);
+SDL_GPUTexture* createEmptyTextureD32F(SDL_GPUDevice* device, Uint32 width, Uint32 height,bool cube, Uint32 arraySize);
 
 /// @brief Create a 2D RGBA8 texture and upload pixel data to it.
 /// @param device The GPU device.

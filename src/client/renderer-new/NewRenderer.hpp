@@ -26,6 +26,8 @@
 #include <string>
 #include <vector>
 
+#define MAX_POINT_LIGHTS 4
+
 class ParticleSystem; ///< Forward-declared — owned by Game, registered via setParticleSystem().
 
 /// @brief Vertex attribute layout for the static geometry pipeline.
@@ -40,6 +42,13 @@ struct Vertex
     glm::vec2 texUV;
 };
 
+struct LightUBO {
+    uint32_t numPointLights = 0;
+    uint32_t numSpotLights = 0;
+    float pointLightFarPlane = 1.0f;
+    float pointLightNearPlane = 15000.0f;
+    PointLight pointLights[MAX_POINT_LIGHTS];
+};
 /// @brief Graphics-team's work-in-progress SDL3 GPU renderer.
 ///
 /// Pass architecture (target — current implementation only covers a subset):
@@ -335,13 +344,17 @@ private:
     bool createGeometryPipeline();
     bool createDepthPipeline();
     bool createHudPipeline();
+
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
     void createMeshBuffers(MeshIdInt meshId) const;
-    void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height);
-    void drawGeometryDepthPass(SDL_GPUTexture* depthTexture, SDL_GPUCommandBuffer* cmd);
+    void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height, float fov);
+
+    void drawGeometryDepthPass(SDL_GPUTexture* depthTexture,Uint8 layer, SDL_GPUCommandBuffer* cmd);
+    void bindLightShadowInfo(SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer* cmd);
     void drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+
     void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd);
     void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
@@ -352,7 +365,6 @@ private:
     void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
     void drawHud(SDL_GPURenderPass* pass);
-    void setupSceneSSBOs();
 
     // ─── Member state ────────────────────────────────────────────────────────
 
@@ -379,6 +391,7 @@ private:
 
     SDL_GPUSampler* depthSampler_ = nullptr;
 
+    LightUBO sceneLightInfo_;
     std::vector<SDL_GPUTextureSamplerBinding> shadowMapBindings_;
 
     NewCamera camera_;
@@ -386,7 +399,6 @@ private:
     // Per-frame captured state ───────────────────────────────────────────────
     std::vector<EntityRenderCmd> entities_;
     WeaponViewmodel weapon_{};
-    std::vector<PointLight> pointLights_;
     ParticleSystem* particleSystem_ = nullptr;
 
     // Settings captured state ─────────────────────────────────────────────────

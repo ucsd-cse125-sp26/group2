@@ -8,6 +8,7 @@
 
 #include "NewRenderer.hpp"
 
+#include "../../../cmake-build-debug/_deps/assimp-src/code/PostProcessing/ProcessHelper.h"
 #include "Asset.hpp"
 #include "AssetLoader.hpp"
 #include "Boilerplate.hpp"
@@ -283,16 +284,54 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     }
 
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
-    uint32_t shadowSize = 1024;
-    SDL_GPUTexture* shadowMap = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize);
+    constexpr uint32_t shadowSize = 1024;
+    SDL_GPUTexture* shadowMap = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize,true,sceneLightInfo_.numPointLights);
 
-    setMainCamera(glm::vec3(0.0f), yaw, pitch, 0.0f, shadowSize, shadowSize);
-    drawGeometryDepthPass(shadowMap, cmd);
+    constexpr Uint8 numCubeFaces = 6;
+
+    glm::vec3 cubeFaceTargets[numCubeFaces];
+    glm::vec3 cubeFaceUps[numCubeFaces];
+
+    cubeFaceTargets[0] = glm::vec3(1,0,0);
+    cubeFaceTargets[1] = glm::vec3(-1,0,0);
+    cubeFaceTargets[2] = glm::vec3(0,1,0);
+    cubeFaceTargets[3] = glm::vec3(0,-1,0);
+    cubeFaceTargets[4] = glm::vec3(0,0,1);
+    cubeFaceTargets[5] = glm::vec3(0,0,-1);
+
+    cubeFaceUps[0] = glm::vec3(0,-1,0);
+    cubeFaceUps[1] = glm::vec3(0,-1,0);
+    cubeFaceUps[2] = glm::vec3(0,0,1);
+    cubeFaceUps[3] = glm::vec3(0,0,-1);
+    cubeFaceUps[4] = glm::vec3(0,-1,0);
+    cubeFaceUps[5] = glm::vec3(0,-1,0);
+
+    const glm::mat4 shadowProjection = glm::perspective(90.0f,1.0f,sceneLightInfo_.pointLightNearPlane,sceneLightInfo_.pointLightFarPlane);
+    for (Uint8 iLight = 0; iLight < sceneLightInfo_.numPointLights; iLight++) {
+        PointLight &light = sceneLightInfo_.pointLights[iLight];
+
+        for (int face = 0; face < numCubeFaces; face++) {
+            glm::vec3 &iCubeFaceTarget = cubeFaceTargets[face];
+            glm::vec3 &iCubeFaceUp = cubeFaceUps[face];
+
+            const glm::mat4 shadowView = glm::lookAt(light.position,light.position + iCubeFaceTarget,iCubeFaceUp);
+            const glm::mat4 shadowViewProjection = shadowProjection * shadowView;
+
+            SDL_PushGPUVertexUniformData(cmd, 0, &shadowViewProjection, sizeof(glm::mat4));
+
+            drawGeometryDepthPass(shadowMap,iLight * 6 + face, cmd);
+        }
+    }
+
+    drawGeometryDepthPass(shadowMap,0, cmd);
 
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
     shadowMapBindings_.push_back({shadowMap, depthSampler_});
 
-    setMainCamera(eye, yaw, pitch, roll, width, height);
+    float fov = 60.0f;
+    setMainCamera(eye, yaw, pitch, roll, width, height, fov);
+    SDL_PushGPUFragmentUniformData(cmd,3,&sceneLightInfo_,sizeof(LightUBO));
+
     drawGeometryPass(swapchain, cmd);
     drawWeaponPass(swapchain, cmd);
     drawUIPass(swapchain, cmd);
@@ -314,24 +353,25 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     // swapchain readback and write a PNG.  See `requestScreenshot` doc.
 }
 
-void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height)
+void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height,float fov)
 {
+    camera_.setFov(fov);
+    // camera_.setZNear(zNear);
+    // camera_.setZFar(zFar);
+
     camera_.setEye(eye);
     camera_.setTarget(pitch, yaw, roll);
     camera_.setAspect(static_cast<float>(width), static_cast<float>(height));
     camera_.computeViewProjectionMatrix();
 }
 
-void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture, SDL_GPUCommandBuffer* cmd)
+void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,Uint8 layer, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture);
+    SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture,layer);
 
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
     SDL_BindGPUGraphicsPipeline(geometryPass, depthPipeline_);
 
-    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
-
-    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
     drawWorldModelInstances(geometryPass, cmd);
     drawEntityModels(geometryPass, cmd);
 
@@ -341,6 +381,13 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture, SDL_GPUCom
 
     SDL_EndGPURenderPass(geometryPass);
 }
+
+void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer* cmd)
+{
+    SDL_BindGPUFragmentSamplers(renderPass, 2, shadowMapBindings_.data(), shadowMapBindings_.size());
+    SDL_PushGPUFragmentUniformData(cmd,2,&sceneLightInfo_,sizeof(LightUBO));
+
+}
 void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
     SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(swapchain);
@@ -349,7 +396,7 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
-    SDL_BindGPUFragmentSamplers(geometryPass, 2, shadowMapBindings_.data(), shadowMapBindings_.size());
+    bindLightShadowInfo(geometryPass,cmd);
 
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
 
@@ -497,7 +544,7 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
         depthTarget_.texture = nullptr;
     }
 
-    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height));
+    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height),0);
 
     if (!depthTarget_.texture)
         return false;
@@ -682,7 +729,10 @@ void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
     // TODO(graphics): consume `pointLights_` inside the geometry / skinned
     // passes by pushing a light-array UBO to the fragment shader.  Cap at the
     // shader's array size and silently drop the rest.
-    pointLights_ = std::move(pointLights);
+    //pointLights_ = std::move(pointLights);
+    sceneLightInfo_.numPointLights = std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_POINT_LIGHTS));
+
+    memcpy(sceneLightInfo_.pointLights,pointLights.data(),sceneLightInfo_.numPointLights);
 }
 
 void NewRenderer::setEntityRenderList(std::vector<EntityRenderCmd>&& entityList)

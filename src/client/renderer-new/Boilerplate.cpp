@@ -50,7 +50,7 @@ SDL_GPUColorTargetInfo makeColorTargetLoad(SDL_GPUTexture* texture)
     return target;
 }
 
-SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture)
+SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture,Uint8 layer)
 {
     SDL_GPUDepthStencilTargetInfo target{};
     target.texture = texture;
@@ -60,6 +60,7 @@ SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture)
     target.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
     target.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
     target.cycle = false;
+    target.layer = layer;
     target.clear_stencil = 0;
     return target;
 }
@@ -344,16 +345,31 @@ void uploadBuffers(SDL_GPUDevice* device, SDL_GPUCommandBuffer* cmd, const std::
     SDL_ReleaseGPUTransferBuffer(device, transferBuffer);
 }
 
-SDL_GPUTexture* createEmptyTextureD32F(SDL_GPUDevice* device, Uint32 width, Uint32 height)
-{
 
+SDL_GPUTexture* createEmptyTextureD32F(SDL_GPUDevice* device, Uint32 width, Uint32 height,bool cube, Uint32 arraySize)
+{
     SDL_GPUTextureCreateInfo textureInfo{};
-    textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    bool array = arraySize > 1;
+
+    if (cube) {
+        if (array) {
+            textureInfo.type = SDL_GPU_TEXTURETYPE_CUBE_ARRAY ;
+        } else {
+            textureInfo.type = SDL_GPU_TEXTURETYPE_CUBE ;
+        }
+    } else {
+        if (array) {
+            textureInfo.type = SDL_GPU_TEXTURETYPE_2D_ARRAY ;
+        } else {
+            textureInfo.type = SDL_GPU_TEXTURETYPE_2D ;
+        }
+    }
+
     textureInfo.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
     textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
     textureInfo.width = width;
     textureInfo.height = height;
-    textureInfo.layer_count_or_depth = 1;
+    textureInfo.layer_count_or_depth = (cube ? 6 : 1) * arraySize;
     textureInfo.num_levels = 1;
     textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
