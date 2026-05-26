@@ -112,7 +112,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .deps/${{ matrix.preset }}
-          key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}
+          key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('cmake/dependencies.json') }}
 
       # Cache the project build tree for incremental CMake reconfigure.
       # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja tracks
@@ -357,7 +357,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .deps/${{ matrix.preset }}
-          key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt') }}
+          key: deps-v4-${{ runner.os }}-${{ matrix.preset }}-${{ matrix.cc }}-${{ hashFiles('cmake/dependencies.json') }}
 
       # Cache the project build tree for incremental CMake reconfigure.
       # CMakeCache.txt + CMakeFiles hold cached probe results; Ninja tracks
