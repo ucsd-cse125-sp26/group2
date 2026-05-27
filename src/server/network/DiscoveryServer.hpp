@@ -3,7 +3,10 @@
 #include "SDL3_net/SDL_net.h"
 
 #include <atomic>
+#include <cstdint>
+#include <functional>
 #include <mutex>
+#include <string>
 #include <thread>
 class DiscoveryServer
 {
@@ -15,12 +18,16 @@ public:
         uint16_t gamePort;
         uint8_t currentPlayers;
         uint8_t maxPlayers;
+        uint32_t globalServerId = 0;
 
         // other interesting things can go here
     };
 
     /// starts a thread that makes a UDP socket and broadcasts
-    bool start(uint16_t port, const ServerInfo& serverInfo, std::function<uint8_t()> playerCountFn = nullptr);
+    bool start(uint16_t port,
+               const ServerInfo& serverInfo,
+               std::function<uint8_t()> playerCountFn = nullptr,
+               std::function<uint32_t()> globalServerIdFn = nullptr);
 
     void updateInfo(const ServerInfo& serverInfo);
 
@@ -38,4 +45,5 @@ private:
     std::mutex infoMutex;
 
     std::function<uint8_t()> currentPlayersFn;
+    std::function<uint32_t()> globalServerIdFn;
 };

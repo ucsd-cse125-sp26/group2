@@ -8,7 +8,7 @@
 
 /// @brief Manages match flow: lobby → countdown → in-progress → finished → lobby.
 ///
-/// Transitions between phases based on player count and kill thresholds.
+/// Transitions between phases based on host starts, timers, and kill thresholds.
 /// Broadcasts match state to all clients every tick.
 class MatchController
 {

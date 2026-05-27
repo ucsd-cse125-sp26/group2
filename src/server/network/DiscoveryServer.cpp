@@ -19,9 +19,13 @@
 //
 // /// starts a thread that makes a UDP socket and broadcasts
 
-bool DiscoveryServer::start(uint16_t port, const ServerInfo& serverInfo, std::function<uint8_t()> playerCountFn)
+bool DiscoveryServer::start(uint16_t port,
+                            const ServerInfo& serverInfo,
+                            std::function<uint8_t()> playerCountFn,
+                            std::function<uint32_t()> globalServerIdFnArg)
 {
     currentPlayersFn = std::move(playerCountFn);
+    globalServerIdFn = std::move(globalServerIdFnArg);
 
     {
         std::lock_guard<std::mutex> lock(infoMutex);
@@ -71,12 +75,15 @@ void DiscoveryServer::loop()
             if (currentPlayersFn) {
                 info.currentPlayers = currentPlayersFn();
             }
+            if (globalServerIdFn) {
+                info.globalServerId = globalServerIdFn();
+            }
 
             const uint8_t nameLen = static_cast<uint8_t>(std::min<size_t>(info.serverName.size(), 255));
 
             // packet is
-            // [packetType (1)][gamePort (2)][currentPlayers (1)][maxPlayers (1)][nameLen (1)][name (nameLen)]
-            data.resize(1 + 4 + 1 + nameLen);
+            // [packetType (1)][gamePort (2)][currentPlayers (1)][maxPlayers (1)][nameLen (1)][name][globalId (4)]
+            data.resize(1 + 4 + 1 + nameLen + sizeof(info.globalServerId));
 
             uint8_t* ptr = data.data();
             *ptr++ = static_cast<uint8_t>(PacketType::LOCAL_SERVER_DISCOVERY_RESPONSE);
@@ -89,6 +96,9 @@ void DiscoveryServer::loop()
 
             *ptr++ = nameLen;
             std::memcpy(ptr, info.serverName.data(), nameLen);
+            ptr += nameLen;
+
+            std::memcpy(ptr, &info.globalServerId, sizeof(info.globalServerId));
         }
 
         // drain datagrams

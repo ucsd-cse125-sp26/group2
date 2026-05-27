@@ -89,7 +89,9 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImGui::TableSetColumnIndex(0);
                 ImGui::TextUnformatted(server.name.c_str());
                 ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%s:%u", server.host.c_str(), server.gamePort);
+                ImGui::Text("%s:%u",
+                            server.udpHost.empty() ? server.host.c_str() : server.udpHost.c_str(),
+                            server.udpPort != 0 ? server.udpPort : server.gamePort);
                 ImGui::TableSetColumnIndex(2);
                 ImGui::Text("%u/%u", server.currentPlayers, server.maxPlayers);
                 ImGui::TableSetColumnIndex(3);

@@ -33,8 +33,8 @@ public:
 
     /// @brief Validate a host-initiated match start request.
     ///
-    /// Rejects if sender is not the host, any non-host player is unready,
-    /// or no non-host players are connected.
+    /// Rejects if sender is not the host or any connected non-host player is unready.
+    /// Host-only lobbies are valid.
     /// @return True if the match may proceed.
     bool hostStartMatch(ClientId sender);
 
