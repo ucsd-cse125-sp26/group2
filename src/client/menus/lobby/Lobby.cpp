@@ -186,17 +186,15 @@ std::optional<MatchStatePacket> Lobby::consumeStartMatchState()
 
 bool Lobby::canHostStartMatch() const
 {
-    bool sawNonHost = false;
     for (const auto& player : players) {
         if (player.isHost)
             continue;
 
-        sawNonHost = true;
         if (!player.ready)
             return false;
     }
 
-    return sawNonHost;
+    return true;
 }
 
 void Lobby::updateStartCountdown()

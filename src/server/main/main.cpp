@@ -255,8 +255,13 @@ int main(int argc, char* argv[])
         .gamePort = actualPort,
         .currentPlayers = 0,
         .maxPlayers = cfg.discovery.maxPlayers,
+        .globalServerId = 0,
     };
-    discoveryServer.start(9998, serverInfo, [&server]() { return server.getClientCount(); });
+    discoveryServer.start(
+        9998,
+        serverInfo,
+        [&server]() { return static_cast<uint8_t>(std::clamp(server.getClientCount(), 0, 255)); },
+        [&server]() { return server.globalDirectoryServerId(); });
 
     std::cout << "READY " << actualPort << '\n' << std::flush;
 

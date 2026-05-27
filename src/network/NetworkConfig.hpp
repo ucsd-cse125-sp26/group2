@@ -72,8 +72,15 @@ struct TransportConfig
     bool allowLegacyTcpFallback = true;
 
     /// @brief Prefer the relay route even when direct is available.
-    /// Useful for forced-relay testing.
+    /// Useful for forced-relay testing. Ignored when noRelay is true.
     bool forceRelay = false;
+
+    /// @brief Disable directory relay routing for gameplay sessions.
+    ///
+    /// When true, global joins still request punch assist, but the client
+    /// only connects to the server's public UDP endpoint. Set false to allow
+    /// relay fallback through the directory service.
+    bool noRelay = true;
 
     /// @brief Stage 3d-1: bind a UDP datagram socket alongside the TCP
     /// socket. Currently no traffic flows through it; later stages move

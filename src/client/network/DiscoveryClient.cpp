@@ -25,6 +25,13 @@ bool DiscoveryClient::start(uint16_t port)
         return false;
     }
 
+    loopbackAddr = NET_ResolveHostname("127.0.0.1");
+    if (NET_WaitUntilResolved(loopbackAddr, -1) == NET_FAILURE) {
+        SDL_Log("DiscoveryClient: failed to resolve loopback address: %s", SDL_GetError());
+        NET_UnrefAddress(loopbackAddr);
+        loopbackAddr = nullptr;
+    }
+
     return true;
 }
 
@@ -37,6 +44,10 @@ void DiscoveryClient::stop()
     if (broadcastAddr) {
         NET_UnrefAddress(broadcastAddr);
         broadcastAddr = nullptr;
+    }
+    if (loopbackAddr) {
+        NET_UnrefAddress(loopbackAddr);
+        loopbackAddr = nullptr;
     }
 }
 
@@ -51,6 +62,9 @@ void DiscoveryClient::poll()
     if (broadcastAddr && now - lastRequestMs > 1000) {
         uint8_t buf[1] = {static_cast<uint8_t>(PacketType::LOCAL_SERVER_DISCOVERY_REQUEST)};
         NET_SendDatagram(socket, broadcastAddr, discoveryPort, buf, sizeof(buf));
+        if (loopbackAddr) {
+            NET_SendDatagram(socket, loopbackAddr, discoveryPort, buf, sizeof(buf));
+        }
         lastRequestMs = now;
     }
 
@@ -81,6 +95,13 @@ void DiscoveryClient::poll()
                 server.currentPlayers = currentPlayers;
                 server.maxPlayers = maxPlayers;
                 server.serverName.assign(reinterpret_cast<const char*>(data), nameLength);
+                data += nameLength;
+                const int parsedBytes = static_cast<int>(data - datagram->buf);
+                if (datagram->buflen >= parsedBytes + static_cast<int>(sizeof(server.globalServerId))) {
+                    std::memcpy(&server.globalServerId, data, sizeof(server.globalServerId));
+                } else {
+                    server.globalServerId = 0;
+                }
                 server.lastSeenMs = SDL_GetTicks();
             }
         }

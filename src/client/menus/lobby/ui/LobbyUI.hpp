@@ -24,7 +24,7 @@ struct LobbyUIConfig
     const std::vector<LobbyPlayer>& players; ///< Current snapshot of all connected players.
     ClientId localId;                        ///< This client's own ID, used to label the local player.
     bool isHost;                             ///< True if the local client is the lobby host.
-    bool canStartMatch;                      ///< True when all non-host players are ready.
+    bool canStartMatch;                      ///< True when the host is allowed to start the match.
     bool startCountdownActive;               ///< True while the pre-match countdown is running.
     float startCountdownRemaining;           ///< Seconds remaining in the countdown.
     bool isHosting;                          ///< True if this client owns a local hosted server process.
