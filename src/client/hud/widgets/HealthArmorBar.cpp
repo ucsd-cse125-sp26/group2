@@ -226,35 +226,41 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
     const float innerH = h - inset * 2.f;
     const float innerChamfer = std::max(0.f, chamfer - inset);
     const float innerCornerCut = std::max(0.f, cornerCut - inset);
-    const float centerX = x + w * 0.5f;
+    const float centerX = x + w * 0.5f + visorOffsetX * s;
 
-    const float visorW = 1020.f * s;
+    const float visorW = visorWidth * s;
     const float visorLeft = centerX - visorW * 0.5f;
     const float visorRight = centerX + visorW * 0.5f;
-    const float visorY = std::max(1.f, 1.5f * s);
-    const float frameY = topY + h * 0.46f;
-    const float framePoints[] = {
+    const float visorY = std::max(0.f, visorTopY * s);
+    const float frameY = topY + h * visorFrameRatio + visorFrameOffsetY * s;
+    const float wingInset = visorWingInset * s;
+    const float innerGap = visorInnerGap * s;
+    const float leftFrame[] = {
         visorLeft,
         visorY,
-        visorLeft + 230.f * s,
+        visorLeft + wingInset,
         frameY,
-        x - 58.f * s,
+        x - innerGap,
         frameY,
-        x - 18.f * s,
-        topY - 10.f * s,
-        x + w + 18.f * s,
-        topY - 10.f * s,
-        x + w + 58.f * s,
+    };
+    const float rightFrame[] = {
+        x + w + innerGap,
         frameY,
-        visorRight - 230.f * s,
+        visorRight - wingInset,
         frameY,
         visorRight,
         visorY,
     };
-    ctx.polyline(framePoints, 8, std::max(1.f, 8.f * s), withAlpha(k_primary, 0.08f));
-    ctx.polyline(framePoints, 8, std::max(1.f, 4.f * s), withAlpha(k_primary, 0.20f));
-    ctx.polyline(framePoints, 8, std::max(1.f, 2.5f * s), withAlpha(k_tertiary, 0.72f));
-    ctx.polyline(framePoints, 8, std::max(1.f, 1.f * s), k_primary);
+    const float mainT = std::max(0.1f, visorThickness * s);
+    const float coreT = std::max(0.1f, visorCoreThickness * s);
+    auto drawVisorWing = [&](const float* points) {
+        ctx.polyline(points, 3, std::max(1.f, mainT * 3.2f), withAlpha(k_primary, 0.08f));
+        ctx.polyline(points, 3, std::max(1.f, mainT * 1.6f), withAlpha(k_primary, 0.20f));
+        ctx.polyline(points, 3, mainT, withAlpha(k_tertiary, 0.72f));
+        ctx.polyline(points, 3, coreT, k_primary);
+    };
+    drawVisorWing(leftFrame);
+    drawVisorWing(rightFrame);
 
     const float tabW = 52.f * s;
     const float tabGap = 10.f * s;

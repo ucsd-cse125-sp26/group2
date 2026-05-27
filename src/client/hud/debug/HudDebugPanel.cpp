@@ -277,6 +277,15 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "chamferSize", health->chamferSize);
         writeFloatParam(out, first, "cornerCutSize", health->cornerCutSize);
         writeFloatParam(out, first, "outlineThickness", health->outlineThickness);
+        writeFloatParam(out, first, "visorWidth", health->visorWidth);
+        writeFloatParam(out, first, "visorOffsetX", health->visorOffsetX);
+        writeFloatParam(out, first, "visorTopY", health->visorTopY);
+        writeFloatParam(out, first, "visorFrameRatio", health->visorFrameRatio);
+        writeFloatParam(out, first, "visorFrameOffsetY", health->visorFrameOffsetY);
+        writeFloatParam(out, first, "visorWingInset", health->visorWingInset);
+        writeFloatParam(out, first, "visorInnerGap", health->visorInnerGap);
+        writeFloatParam(out, first, "visorThickness", health->visorThickness);
+        writeFloatParam(out, first, "visorCoreThickness", health->visorCoreThickness);
     } else if (const auto* hit = dynamic_cast<const HitMarkerWidget*>(&widget)) {
         writeFloatParam(out, first, "armLength", hit->armLength);
         writeFloatParam(out, first, "armThickness", hit->armThickness);
@@ -497,6 +506,16 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Chamfer Size", health->chamferSize, 0.5f, 0.0f, 120.0f);
         editFloat("Corner Cut Size", health->cornerCutSize, 0.25f, 0.0f, 80.0f);
         editFloat("Outline Thickness", health->outlineThickness, 0.25f, 0.0f, 40.0f);
+        ImGui::SeparatorText("Visor Decal");
+        editFloat("Visor Width", health->visorWidth, 1.0f, 80.0f, 2400.0f);
+        editFloat("Visor Offset X", health->visorOffsetX, 1.0f, -1200.0f, 1200.0f);
+        editFloat("Visor Top Y", health->visorTopY, 0.5f, -200.0f, 400.0f);
+        editFloat("Visor Frame Ratio", health->visorFrameRatio, 0.01f, -2.0f, 3.0f);
+        editFloat("Visor Frame Offset Y", health->visorFrameOffsetY, 0.5f, -400.0f, 400.0f);
+        editFloat("Visor Wing Inset", health->visorWingInset, 1.0f, 0.0f, 1200.0f);
+        editFloat("Visor Inner Gap", health->visorInnerGap, 1.0f, -400.0f, 800.0f);
+        editFloat("Visor Thickness", health->visorThickness, 0.25f, 0.0f, 40.0f);
+        editFloat("Visor Core Thickness", health->visorCoreThickness, 0.25f, 0.0f, 20.0f);
     } else if (auto* hit = dynamic_cast<HitMarkerWidget*>(&widget)) {
         editFloat("Arm Length", hit->armLength, 0.25f, 0.0f, 120.0f);
         editFloat("Arm Thickness", hit->armThickness, 0.1f, 0.0f, 40.0f);

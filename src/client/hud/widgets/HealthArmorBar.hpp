@@ -12,6 +12,15 @@ struct HealthArmorBar : HudWidget
     float chamferSize = 38.f;     ///< Left and right slant depth.
     float cornerCutSize = 10.f;   ///< Small lower-corner cuts that soften the side points.
     float outlineThickness = 3.f; ///< Hairline thickness around the full silhouette.
+    float visorWidth = 1020.f;    ///< Total decorative visor wing span.
+    float visorOffsetX = 0.f;     ///< Horizontal offset from the health bar center.
+    float visorTopY = 1.5f;       ///< Top visor endpoint Y in prototype-space pixels.
+    float visorFrameRatio = 0.46f; ///< Vertical attachment point as a fraction of bar height.
+    float visorFrameOffsetY = 0.f; ///< Extra vertical offset for the visor attachment point.
+    float visorWingInset = 230.f; ///< Distance from the outer endpoint to the bend.
+    float visorInnerGap = 58.f;   ///< Gap between the bar edge and inner wing endpoint.
+    float visorThickness = 2.5f;  ///< Main visor decal stroke thickness.
+    float visorCoreThickness = 1.f; ///< Bright inner visor stroke thickness.
 
     HealthArmorBar();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
