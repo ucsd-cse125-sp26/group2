@@ -29,13 +29,13 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            ImGui::TextUnformatted("Persistent Server");
+            ImGui::TextUnformatted("Keep Server Running");
             ImGui::TableSetColumnIndex(1);
             ImGui::BeginDisabled(inputs.serverRunning);
             ImGui::Checkbox("##PersistentServer", &draft.persistAfterClientExit);
             ImGui::EndDisabled();
             ImGui::SameLine();
-            ImGui::TextDisabled("not yet wired");
+            ImGui::TextDisabled("stays online after you close the game");
 
             ImGui::EndTable();
         }
@@ -86,7 +86,15 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
         ImGui::SeparatorText("Server");
         if (inputs.serverRunning) {
-            ImGui::Text("Running on port %u", static_cast<unsigned>(inputs.boundPort));
+            if (inputs.boundPort != 0) {
+                ImGui::Text("Connected on port %u", static_cast<unsigned>(inputs.boundPort));
+            } else {
+                ImGui::TextUnformatted("Connected to server");
+            }
+            if (inputs.ownsLocalProcess) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("local process");
+            }
             if (inputs.hasUnsavedMatchChanges) {
                 ImGui::SameLine();
                 ImGui::TextDisabled("Unsaved changes");
@@ -112,7 +120,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
         if (inputs.serverRunning) {
             ImGui::SameLine();
-            ImGui::BeginDisabled(!inputs.hasUnsavedMatchChanges);
+            ImGui::BeginDisabled(!inputs.canManageServer || !inputs.hasUnsavedMatchChanges);
             if (ImGui::Button("Update Settings")) {
                 result.updateClicked = true;
             }
@@ -122,9 +130,11 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
                 result.goToLobbyClicked = true;
             }
             ImGui::SameLine();
+            ImGui::BeginDisabled(!inputs.canManageServer);
             if (ImGui::Button("Shutdown")) {
                 result.shutdownClicked = true;
             }
+            ImGui::EndDisabled();
         }
 
         ImGui::Separator();

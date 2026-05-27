@@ -1338,6 +1338,13 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         eventQueue.enqueue(event);
         break;
     }
+    case PacketType::REQUEST_SERVER_SHUTDOWN: {
+        Event event{};
+        event.type = EventType::ServerShutdownRequested;
+        event.clientId = conn.clientId;
+        eventQueue.enqueue(event);
+        break;
+    }
     default:
         SDL_Log("Server: received unknown packet type %d", static_cast<int>(type));
         break;

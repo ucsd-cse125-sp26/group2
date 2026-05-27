@@ -36,17 +36,23 @@ public:
     /// @return True once the child server reports its bound port.
     bool start(const HostConfigState& config, std::string& outError);
 
-    /// @brief Stop the hosted server unless it has been detached for persistence.
+    /// @brief Stop the locally owned hosted server process.
     void shutdown();
 
-    /// @brief True if the child server process is still running.
+    /// @brief True if the app still owns a child server process.
     bool isRunning();
 
     /// @brief Actual server port reported by the child process, or 0 when not running.
     uint16_t port();
 
+    /// @brief True when this client has launched a hosted session and still knows its port.
+    bool hasSession() const;
+
+    /// @brief Forget hosted-session metadata after a confirmed local or remote shutdown.
+    void clearSession();
+
 private:
-    /// @brief Detach the child process so it can continue after the client exits.
+    /// @brief Drop local ownership of a persistent server after successful launch.
     void detachForPersistence();
 #if defined(_WIN32)
     void* childProcess = nullptr; ///< Native Windows process handle for the hosted server.

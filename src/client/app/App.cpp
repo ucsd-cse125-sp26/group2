@@ -275,18 +275,25 @@ SDL_AppResult App::iterate()
         }
 
         if (hostConfig->consumeShutdownRequest()) {
-            client.shutdown();
-            if (hostedServer.isRunning()) {
+            if (client.isConnected()) {
+                if (!client.sendServerShutdown()) {
+                    hostConfig->setLaunchError("Failed to request server shutdown");
+                } else {
+                    hostedServer.clearSession();
+                }
+            } else if (hostedServer.isRunning()) {
                 hostedServer.shutdown();
+                hostedServer.clearSession();
             }
         }
 
-        if (hostConfig->consumeGoToLobbyRequest() && hostedServer.isRunning()) {
+        if (hostConfig->consumeGoToLobbyRequest() && (hostedServer.isRunning() || client.isConnected())) {
             transitionTo(Screen::Lobby);
             break;
         }
 
         if (hostConfig->consumeBackToHomeRequest()) {
+            client.shutdown();
             transitionTo(Screen::Home);
         }
         break;

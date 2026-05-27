@@ -182,6 +182,12 @@ void Client::shutdown()
     outbound_.clear();
 }
 
+bool Client::isConnected()
+{
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    return (msgStream.socket != nullptr || usingUdpSession_) && !socketDead_.load(std::memory_order_relaxed);
+}
+
 // ── Stage 3c: framing helper (mirrors Server.cpp's frameMessage) ─────────
 namespace
 {
@@ -475,6 +481,12 @@ bool Client::sendMatchConfig(const MatchConfig& config)
     buf[0] = static_cast<std::uint8_t>(PacketType::UPDATE_MATCH_CONFIG);
     std::memcpy(buf + 1, &config, sizeof(MatchConfig));
     return send(buf, static_cast<std::uint32_t>(sizeof(buf)));
+}
+
+bool Client::sendServerShutdown()
+{
+    const auto type = static_cast<std::uint8_t>(PacketType::REQUEST_SERVER_SHUTDOWN);
+    return send(&type, sizeof(type));
 }
 
 std::optional<std::pair<std::vector<LobbyPlayer>, ClientId>> Client::getLatestLobbyState() const

@@ -457,6 +457,17 @@ void ServerGame::eventHandler(const Event& event)
         }
         break;
     }
+    case EventType::ServerShutdownRequested: {
+        GROUP2_PROF_SCOPE("eventServerShutdownRequested");
+        if (!isHost(event.clientId)) {
+            SDL_Log("ServerGame: rejecting shutdown request from non-host clientId %u", event.clientId.value);
+            break;
+        }
+
+        SDL_Log("ServerGame: host clientId %u requested server shutdown", event.clientId.value);
+        shutdown();
+        break;
+    }
     default:
         break;
     }

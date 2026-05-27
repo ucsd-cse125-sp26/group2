@@ -20,9 +20,10 @@ enum class EventType
     /// historical snapshot at the rewound tick.
     ShotIntent,
 
-    TextChat,             ///< Client submitted a bounded all-chat message.
-    VoiceFrame,           ///< Client submitted one Opus voice frame for proximity routing.
-    PhysicsDiagRecording, ///< Client toggled authoritative physics CSV recording.
+    TextChat,                ///< Client submitted a bounded all-chat message.
+    VoiceFrame,              ///< Client submitted one Opus voice frame for proximity routing.
+    PhysicsDiagRecording,    ///< Client toggled authoritative physics CSV recording.
 
-    MatchConfigUpdated,   ///< Client proposed a new match config (e.g. kill threshold).
+    MatchConfigUpdated,      ///< Client proposed a new match config (e.g. kill threshold).
+    ServerShutdownRequested, ///< Client requested server shutdown.
 };

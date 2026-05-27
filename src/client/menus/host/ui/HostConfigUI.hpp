@@ -12,7 +12,9 @@
 struct HostConfigUIInputs
 {
     HostConfigState& draft;              ///< Mutable draft settings bound to the widgets.
-    bool serverRunning = false;          ///< True if the hosted server process is alive.
+    bool serverRunning = false;          ///< True if the client is connected to a server session.
+    bool canManageServer = false;        ///< True if the local client is authorized to manage server settings.
+    bool ownsLocalProcess = false;       ///< True if this app still owns the hosted child process.
     bool hasUnsavedMatchChanges = false; ///< True if draft match settings differ from server state.
     uint16_t boundPort = 0;              ///< Actual bound server port when running.
     std::string_view errorMessage;       ///< Last launch error, empty when none.

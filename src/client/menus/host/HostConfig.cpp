@@ -55,15 +55,19 @@ SDL_AppResult HostConfig::iterate()
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 
-    const bool serverRunning = hostedServer->isRunning();
+    const bool ownsLocalProcess = hostedServer->isRunning();
+    const bool serverRunning = ownsLocalProcess || (client && client->isConnected());
     if (serverRunning && client && !client->poll()) {
         lastError = "Lost connection to hosted server";
     }
+    const bool canManageServer = canManageCurrentServer() || ownsLocalProcess;
     const bool hasUnsavedChanges = serverRunning && hasUnsavedMatchChanges();
 
     HostConfigUIInputs inputs{
         .draft = *draft,
         .serverRunning = serverRunning,
+        .canManageServer = canManageServer,
+        .ownsLocalProcess = ownsLocalProcess,
         .hasUnsavedMatchChanges = hasUnsavedChanges,
         .boundPort = hostedServer->port(),
         .errorMessage = lastError,
@@ -78,8 +82,7 @@ SDL_AppResult HostConfig::iterate()
         updateMatchConfig();
     }
     if (result.shutdownClicked) {
-        lastError.clear();
-        pendingShutdown = true;
+        requestShutdownConfirm();
     }
     if (result.goToLobbyClicked) {
         if (hasUnsavedChanges) {
@@ -94,10 +97,18 @@ SDL_AppResult HostConfig::iterate()
 
     const ConfirmResult confirmResult = confirm_.drawAndPoll();
     if (confirmResult == ConfirmResult::Confirmed) {
-        if (lastSyncedMatchConfig) {
-            draft->killsToWin = lastSyncedMatchConfig->killsToWin;
+        if (pendingConfirmAction == PendingConfirmAction::DiscardMatchChanges) {
+            if (lastSyncedMatchConfig) {
+                draft->killsToWin = lastSyncedMatchConfig->killsToWin;
+            }
+            pendingGoToLobby = true;
+        } else if (pendingConfirmAction == PendingConfirmAction::ShutdownServer) {
+            lastError.clear();
+            pendingShutdown = true;
         }
-        pendingGoToLobby = true;
+        pendingConfirmAction = PendingConfirmAction::None;
+    } else if (confirmResult == ConfirmResult::Cancelled) {
+        pendingConfirmAction = PendingConfirmAction::None;
     }
 
     ImGui::Render();
@@ -163,6 +174,21 @@ void HostConfig::setLaunchError(const std::string& error)
     lastError = error;
 }
 
+bool HostConfig::canManageCurrentServer() const
+{
+    if (!client)
+        return false;
+
+    const auto latestLobbyState = client->getLatestLobbyState();
+    if (!latestLobbyState)
+        return false;
+
+    const auto& [players, localId] = *latestLobbyState;
+    return std::any_of(players.begin(), players.end(), [localId](const LobbyPlayer& player) {
+        return player.id == localId && player.isHost;
+    });
+}
+
 bool HostConfig::hasUnsavedMatchChanges() const
 {
     if (!draft || !lastSyncedMatchConfig)
@@ -190,9 +216,20 @@ bool HostConfig::updateMatchConfig()
 
 void HostConfig::requestDiscardMatchChangesConfirm()
 {
+    pendingConfirmAction = PendingConfirmAction::DiscardMatchChanges;
     confirm_.open({.title = "Discard Match Settings?",
                    .message = "You have unsaved match setting changes. Discard them?",
                    .confirmText = "Discard",
+                   .cancelText = "Cancel",
+                   .confirmIsDanger = true});
+}
+
+void HostConfig::requestShutdownConfirm()
+{
+    pendingConfirmAction = PendingConfirmAction::ShutdownServer;
+    confirm_.open({.title = "Shutdown Server?",
+                   .message = "Stop this server for all connected players?",
+                   .confirmText = "Shutdown",
                    .cancelText = "Cancel",
                    .confirmIsDanger = true});
 }

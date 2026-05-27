@@ -18,7 +18,7 @@ bool Lobby::init(AppContext& ctx)
     renderer = &ctx.renderer;
     window = &ctx.window;
     client = &ctx.client;
-    isHosting = ctx.hostedServer.isRunning();
+    isHosting = ctx.hostedServer.hasSession();
     hostPort = ctx.hostedServer.port();
     hostLanIp = isHosting ? local_address::firstLanIPv4() : std::string{};
 

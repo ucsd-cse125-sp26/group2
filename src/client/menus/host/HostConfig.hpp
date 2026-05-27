@@ -46,6 +46,16 @@ public:
     void setLaunchError(const std::string& error);
 
 private:
+    enum class PendingConfirmAction
+    {
+        None,
+        DiscardMatchChanges,
+        ShutdownServer,
+    };
+
+    /// @brief True if the client is connected and is the current lobby host.
+    bool canManageCurrentServer() const;
+
     /// @brief True if the current draft differs from the last config sent to or received from the server.
     bool hasUnsavedMatchChanges() const;
 
@@ -55,6 +65,9 @@ private:
     /// @brief Ask the host whether to discard unsaved match setting changes before leaving this screen.
     void requestDiscardMatchChangesConfirm();
 
+    /// @brief Ask the host to confirm server shutdown.
+    void requestShutdownConfirm();
+
     NewRenderer* renderer = nullptr;                  ///< Renderer; not owned.
     SDL_Window* window = nullptr;                     ///< Application window; not owned.
     Client* client = nullptr;                         ///< Network client owned by App; not owned.
@@ -63,8 +76,9 @@ private:
     std::string lastError;                            ///< Error message shown on the host form; empty when no error.
     std::optional<MatchConfig> lastSyncedMatchConfig; ///< Last match config acknowledged locally as server state.
     ConfirmModal confirm_;                            ///< Reusable confirmation modal for discarding unsaved changes.
-    bool pendingLaunch = false;                       ///< Set when the user clicks "Launch", cleared by App.
-    bool pendingShutdown = false;                     ///< Set when the user clicks "Shutdown", cleared by App.
-    bool pendingGoToLobby = false;                    ///< Set when the user clicks "Go to Lobby", cleared by App.
-    bool pendingBackToHome = false;                   ///< Set when the user clicks "Back to Main Menu", cleared by App.
+    PendingConfirmAction pendingConfirmAction = PendingConfirmAction::None; ///< Action to run after modal confirm.
+    bool pendingLaunch = false;     ///< Set when the user clicks "Launch", cleared by App.
+    bool pendingShutdown = false;   ///< Set when the user clicks "Shutdown", cleared by App.
+    bool pendingGoToLobby = false;  ///< Set when the user clicks "Go to Lobby", cleared by App.
+    bool pendingBackToHome = false; ///< Set when the user clicks "Back to Main Menu", cleared by App.
 };

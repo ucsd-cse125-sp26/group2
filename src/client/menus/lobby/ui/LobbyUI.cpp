@@ -78,7 +78,7 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         ImGui::EndDisabled();
 
         ImGui::Separator();
-        if (config.isHosting) {
+        if (config.isHost) {
             if (ImGui::Button("Back to Host Config")) {
                 result.returnToHostConfigClicked = true;
             }

@@ -108,6 +108,9 @@ public:
     /// @brief Close the socket and release the resolved address.
     void shutdown();
 
+    /// @brief True while a server connection is currently owned by this client.
+    bool isConnected();
+
     /// @brief Send a raw message to the server.
     /// @param data  Pointer to the payload bytes.
     /// @param size  Payload length in bytes.
@@ -152,6 +155,9 @@ public:
 
     /// @brief Send an updated match configuration to the server (host-only).
     bool sendMatchConfig(const MatchConfig& config);
+
+    /// @brief Request server shutdown. The server accepts this only from the current host.
+    bool sendServerShutdown();
 
     /// @brief Send a PING packet to the server for RTT measurement.
     void sendPing();
