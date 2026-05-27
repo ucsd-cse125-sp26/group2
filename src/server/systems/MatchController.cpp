@@ -124,11 +124,38 @@ void MatchController::broadcastMatchState(Server& server)
     ticksSinceBroadcast = 0;
 }
 
-bool MatchController::setKillsToWin(int killsToWin)
+bool MatchController::validateKillsToWin(int killsToWin)
 {
     if (killsToWin <= 0)
         return false;
 
+    return true;
+}
+
+void MatchController::broadcastMatchConfig(Server& server)
+{
+    server.broadcastMatchConfig(config);
+}
+
+bool MatchController::setMatchConfig(const MatchConfig& cfg)
+{
+    if (!validateKillsToWin(cfg.killsToWin))
+        return false;
+
+    this->config = cfg;
+    return true;
+}
+
+bool MatchController::setKillsToWin(int killsToWin)
+{
+    if (!validateKillsToWin(killsToWin))
+        return false;
+
     config.killsToWin = killsToWin;
     return true;
+}
+
+[[nodiscard]] MatchConfig MatchController::getMatchConfig() const
+{
+    return config;
 }

@@ -93,9 +93,18 @@ bool Lobby::init(AppContext& ctx)
             startMatchState = packet;
     });
 
+    client->onMatchConfig([this](const MatchConfig& config) {
+        SDL_Log("Lobby: match settings updated: killsToWin=%d", config.killsToWin);
+        matchConfig = config;
+    });
+
     if (const auto latestLobbyState = client->getLatestLobbyState()) {
         players = latestLobbyState->first;
         localClientId = latestLobbyState->second;
+    }
+
+    if (const auto latestMatchConfig = client->getLatestMatchConfig()) {
+        matchConfig = latestMatchConfig;
     }
 
     return true;
@@ -132,6 +141,7 @@ SDL_AppResult Lobby::iterate()
         .canStartMatch = canHostStartMatch() && !startCountdownActive,
         .startCountdownActive = startCountdownActive,
         .startCountdownRemaining = startCountdownRemaining,
+        .matchConfig = matchConfig,
         .isHosting = isHosting,
         .hostLanIp = hostLanIp,
         .hostPort = hostPort,
@@ -166,6 +176,7 @@ void Lobby::quit()
         client->onLobbyState({});
         client->onLobbyUpdate({});
         client->onMatchStateUpdate({});
+        client->onMatchConfig({});
     }
 }
 

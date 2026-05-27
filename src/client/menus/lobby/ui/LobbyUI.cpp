@@ -50,6 +50,14 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         }
 
         ImGui::Separator();
+        ImGui::SeparatorText("Match Settings");
+        if (config.matchConfig) {
+            ImGui::Text("Kills to win: %d", config.matchConfig->killsToWin);
+        } else {
+            ImGui::TextDisabled("Waiting for match settings");
+        }
+
+        ImGui::Separator();
         if (config.startCountdownActive) {
             ImGui::Text("Entering match countdown in %.1fs", static_cast<double>(config.startCountdownRemaining));
         }

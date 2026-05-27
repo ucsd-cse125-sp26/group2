@@ -7,6 +7,7 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/ChatProtocol.hpp"
+#include "network/MatchConfig.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
 #include "network/NetKillEvent.hpp"
@@ -88,6 +89,7 @@ public:
     using LobbyUpdateCallback = std::function<void(const LobbyUpdateEvent& update)>;
     /// @brief Fired once on join with the full lobby snapshot and this client's assigned ID.
     using LobbyStateCallback = std::function<void(const std::vector<LobbyPlayer>& players, ClientId localId)>;
+    using MatchConfigCallback = std::function<void(const MatchConfig& config)>;
 
     /// @brief Create the TCP socket and connect to the server.
     /// @param addr      Hostname or IP address of the server.
@@ -178,6 +180,10 @@ public:
     {
         lobbyStateFn_ = std::move(fn);
     } ///< Register the full lobby-snapshot callback, fired once on join.
+    void onMatchConfig(MatchConfigCallback fn)
+    {
+        matchConfigFn_ = std::move(fn);
+    } ///< Register the match-config update callback.
 
     /// @brief Receive and process one pending message.
     /// @return True if a message was received, false if the queue is empty.
@@ -188,6 +194,9 @@ public:
 
     /// @brief Return the latest match state packet received from the server, if any.
     std::optional<MatchStatePacket> getLatestMatchState() const { return latestMatchState_; }
+
+    /// @brief Return the latest match configuration received from the server, if any.
+    std::optional<MatchConfig> getLatestMatchConfig() const { return latestMatchConfig_; }
 
     /// @brief Return the latest lobby roster received from the server, if any.
     std::optional<std::pair<std::vector<LobbyPlayer>, ClientId>> getLatestLobbyState() const;
@@ -378,9 +387,11 @@ private:
     ShotDebugCallback shotDebugFn_;                ///< PR-20: called for each SHOT_DEBUG_REPORT from server.
     LobbyUpdateCallback lobbyUpdateFn_;            ///< Called for each lobby update received from server.
     LobbyStateCallback lobbyStateFn_;              ///< Called once on join with the full lobby snapshot.
+    MatchConfigCallback matchConfigFn_;            ///< Called whenever a MATCH_CONFIG packet is received.
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
     std::optional<MatchStatePacket>
         latestMatchState_;                         ///< Most-recent MATCH_STATE packet; populated by dispatchMessage.
+    std::optional<MatchConfig> latestMatchConfig_; ///< Most-recent MATCH_CONFIG packet; populated by dispatchMessage.
     std::optional<std::vector<LobbyPlayer>> latestLobbyPlayers_; ///< Most-recent lobby roster received from the server.
     std::optional<ClientId> latestLobbyLocalId_; ///< This client's ID as reported in the LOBBY_STATE packet.
 

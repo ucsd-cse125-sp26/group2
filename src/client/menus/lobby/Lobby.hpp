@@ -5,6 +5,7 @@
 #include "IScreen.hpp"
 #include "app/AppContext.hpp"
 #include "network/Client.hpp"
+#include "network/MatchConfig.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 #include "renderer-new/NewRenderer.hpp"
 
@@ -57,6 +58,7 @@ private:
     Client* client = nullptr;                        ///< Network client; not owned.
     std::vector<LobbyPlayer> players;                ///< Latest snapshot of connected players.
     ClientId localClientId{-1};                      ///< This client's own ID, set by the server on join.
+    std::optional<MatchConfig> matchConfig;          ///< Latest match settings received from the server.
     std::optional<MatchStatePacket> startMatchState; ///< Set when the server signals a match start.
     bool startCountdownActive = false;               ///< True while the pre-match countdown is ticking.
     float startCountdownRemaining = 0.0f;            ///< Seconds remaining in the countdown.

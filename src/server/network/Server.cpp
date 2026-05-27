@@ -6,6 +6,7 @@
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "network/MatchConfig.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
@@ -1323,6 +1324,20 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         // backlog would be worse than dropped syllables.
         break;
 
+    case PacketType::UPDATE_MATCH_CONFIG: {
+        // Client can propose new match config
+        if (payloadLen != sizeof(MatchConfig))
+            return;
+        MatchConfig config;
+        std::memcpy(&config, payload, sizeof(MatchConfig));
+
+        Event event{};
+        event.type = EventType::MatchConfigUpdated;
+        event.clientId = conn.clientId;
+        event.matchConfig = config;
+        eventQueue.enqueue(event);
+        break;
+    }
     default:
         SDL_Log("Server: received unknown packet type %d", static_cast<int>(type));
         break;
@@ -1733,4 +1748,20 @@ void Server::broadcastLobbyUpdate(const LobbyUpdateEvent& event)
 uint16_t Server::listeningPort() const
 {
     return listenPort_;
+}
+
+void Server::broadcastMatchConfig(const MatchConfig& config)
+{
+    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(MatchConfig));
+    buf[0] = static_cast<uint8_t>(PacketType::MATCH_CONFIG);
+    std::memcpy(buf.data() + 1, &config, sizeof(MatchConfig));
+    enqueueReliableEvent(buf.data(), static_cast<int>(buf.size()));
+}
+
+bool Server::sendMatchConfigToClient(ClientId clientId, const MatchConfig& config)
+{
+    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(MatchConfig));
+    buf[0] = static_cast<uint8_t>(PacketType::MATCH_CONFIG);
+    std::memcpy(buf.data() + 1, &config, sizeof(MatchConfig));
+    return sendToClient(clientId, buf.data(), static_cast<int>(buf.size()));
 }

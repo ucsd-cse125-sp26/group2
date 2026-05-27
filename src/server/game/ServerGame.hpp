@@ -60,7 +60,8 @@ public:
     /// @brief Signal the loop to stop and release all resources.
     void shutdown();
 
-    bool setKillsToWin(int killsToWin);
+    [[nodiscard]] bool isHost(ClientId clientId) const;
+    bool setKillsToWin(int kills);
 
 private:
     /// @brief Apply a single event to the ECS registry.

@@ -32,7 +32,9 @@ public:
     /// @brief Return the winner's client ID, or -1 if no winner yet.
     int getWinnerId();
 
+    bool setMatchConfig(const MatchConfig& cfg);
     bool setKillsToWin(int killsToWin);
+    [[nodiscard]] MatchConfig getMatchConfig() const;
 
 private:
     MatchPhase currentPhase = MatchPhase::LOBBY;       ///< Current phase of the match.
@@ -66,4 +68,7 @@ private:
     /// observable has changed since the last send.
     /// @param server  Network server for broadcasting.
     void broadcastMatchState(Server& server);
+
+    bool validateKillsToWin(int killsToWin);
+    void broadcastMatchConfig(Server& server);
 };

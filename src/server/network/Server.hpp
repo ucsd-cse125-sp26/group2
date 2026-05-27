@@ -159,6 +159,8 @@ public:
     /// @return False if the client isn't currently connected.
     bool sendLobbyStateToClient(ClientId clientId, const std::vector<LobbyPlayer>& players);
 
+    bool sendMatchConfigToClient(ClientId clientId, const MatchConfig& config);
+
     /// @brief Drain every connection's outbound queue to its socket.
     ///
     /// Call once per server tick, after all per-tick broadcasts. Disconnects
@@ -181,6 +183,8 @@ public:
     /// @brief Get the actual port the server is listening on. Useful when the caller requested port 0 (auto-assign) and
     /// needs to know which port was assigned.
     uint16_t listeningPort() const;
+
+    void broadcastMatchConfig(const MatchConfig& config);
 
 private:
     ClientConnectedCallback clientConnectedFn_;       ///< Fired by acceptClients() when a new client is accepted.

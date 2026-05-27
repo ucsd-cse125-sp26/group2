@@ -10,6 +10,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "network/MatchConfig.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/NetKillEvent.hpp"
 #include "network/PacketType.hpp"
@@ -1309,6 +1310,19 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         const auto frame = net::voice::decodeServerFrame(std::span<const std::uint8_t>(data, size));
         if (frame && voiceFrameFn_)
             voiceFrameFn_(*frame);
+        break;
+    }
+    case PacketType::MATCH_CONFIG: {
+        if (payloadSize < sizeof(MatchConfig))
+            break;
+
+        MatchConfig config{};
+        std::memcpy(&config, payload, sizeof(MatchConfig));
+        SDL_Log("Client: received match config: kills=%d", config.killsToWin);
+
+        latestMatchConfig_ = config;
+        if (matchConfigFn_)
+            matchConfigFn_(config);
         break;
     }
     default:

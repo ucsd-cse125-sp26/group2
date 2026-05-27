@@ -345,6 +345,7 @@ void ServerGame::eventHandler(const Event& event)
             break;
         }
         lobbyManager.addPlayer(event.clientId);
+        server->sendMatchConfigToClient(event.clientId, matchController.getMatchConfig());
         break;
     }
     case EventType::Disconnected: {
@@ -446,6 +447,14 @@ void ServerGame::eventHandler(const Event& event)
         }
         server->sendVoiceFrameToClients(
             recipients, event.clientId, event.voiceFrame.sequence, event.voiceFrame.frameMs, event.voiceFrame.opus);
+        break;
+    }
+    case EventType::MatchConfigUpdated: {
+        GROUP2_PROF_SCOPE("eventMatchConfigUpdated");
+        // Client can propose new match config (e.g. kill threshold) which is then broadcast to all clients.
+        if (isHost(event.clientId) && matchController.setMatchConfig(event.matchConfig)) {
+            server->broadcastMatchConfig(matchController.getMatchConfig());
+        }
         break;
     }
     default:
@@ -1221,6 +1230,11 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
     // Step 2: Transform bone poses into world-space hitbox capsules.
     // updateHitboxes itself was parallelized in PR-3; see HitboxSystem.cpp.
     systems::updateHitboxes(registry, hitboxRig_, rigScale_, rigMeshMinY_);
+}
+
+bool ServerGame::isHost(ClientId clientId) const
+{
+    return lobbyManager.isHost(clientId);
 }
 
 bool ServerGame::setKillsToWin(int kills)
