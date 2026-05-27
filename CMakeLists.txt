@@ -633,6 +633,7 @@ set(SHADER_NEW_SOURCES
         geometry_depth.vert emtpy.frag
         skinned_geometry.vert debug.frag
         geometry.vert geometry.frag
+        geometry_shadowed.frag
         hud.vert hud.frag
 )
 

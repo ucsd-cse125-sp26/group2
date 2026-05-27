@@ -10,7 +10,9 @@
 #include <cstddef>
 #include <vector>
 
-#define MAX_SHADOW_COUNT 16
+
+#define MAX_POINT_LIGHTS 4
+#define MAX_SHADOW_COUNT MAX_POINT_LIGHTS
 
 namespace Boilerplate
 {
@@ -96,7 +98,7 @@ SDL_GPUColorTargetInfo makeColorTargetLoad(SDL_GPUTexture* texture);
 /// @brief Create a depth/stencil render-target info that clears to depth 1.0.
 /// @param texture The depth texture.
 /// @return Populated SDL_GPUDepthStencilTargetInfo.
-SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture,Uint8 layer);
+SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture,Uint8 layer,bool store);
 
 /// @brief Create a texture-sampler binding pair for fragment shader use.
 /// @param texture The GPU texture.

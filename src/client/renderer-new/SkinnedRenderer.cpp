@@ -279,7 +279,7 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
     if (!rigInstalled_ || !pipeline_ || frameInstances_.empty() || !palettesSsboInfo_.ssbo_ ||
         !instancesSsboInfo_.ssbo_)
     {
-        std::cout << "frameInstances_.empty()" << std::endl;
+        //std::cout << "frameInstances_.empty()" << std::endl;
         return;
     }
 

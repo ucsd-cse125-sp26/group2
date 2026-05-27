@@ -77,9 +77,9 @@ struct EntityRenderCmd
 struct PointLight
 {
     glm::vec3 position{0.0f}; ///< World-space position.
-    glm::vec3 color{1.0f};    ///< Light colour (linear RGB).
     float intensity = 1.0f;   ///< Brightness multiplier.
-    float range = 500.0f;     ///< Attenuation range (world units); falloff = 1 - (d²/r²).
+    glm::vec3 color{1.0f};    ///< Light colour (linear RGB).
+    float range = 5000.0f;     ///< Attenuation range (world units); falloff = 1 - (d²/r²).
 };
 
 /// @brief First-person weapon viewmodel descriptor sent per frame.

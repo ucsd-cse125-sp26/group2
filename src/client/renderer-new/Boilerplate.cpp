@@ -50,13 +50,13 @@ SDL_GPUColorTargetInfo makeColorTargetLoad(SDL_GPUTexture* texture)
     return target;
 }
 
-SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture,Uint8 layer)
+SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture,Uint8 layer,bool store)
 {
     SDL_GPUDepthStencilTargetInfo target{};
     target.texture = texture;
     target.clear_depth = 1.0f;
     target.load_op = SDL_GPU_LOADOP_CLEAR;
-    target.store_op = SDL_GPU_STOREOP_DONT_CARE;
+    target.store_op = store ? SDL_GPU_STOREOP_STORE:SDL_GPU_STOREOP_DONT_CARE;
     target.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
     target.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
     target.cycle = false;
@@ -507,6 +507,7 @@ SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device)
     samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 
     samplerInfo.enable_compare = true;
+    //samplerInfo.compare_op = SDL_GPU_COMPAREOP_GREATER_OR_EQUAL;
     samplerInfo.compare_op = SDL_GPU_COMPAREOP_LESS;
 
     return SDL_CreateGPUSampler(device, &samplerInfo);
