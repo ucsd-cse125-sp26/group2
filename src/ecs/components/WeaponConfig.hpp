@@ -19,13 +19,19 @@ struct WeaponConfig
     bool hitscan = true;
     float initialProjectileSpeed = 0.0f;
     bool explosive = false;
-    bool isBeam = false;        ///< True for continuous beam weapons (no per-shot cooldown).
-    bool isCharge = false;      ///< True for charge weapons (hold to charge, release to fire).
-    float dps = 0.0f;           ///< Damage per second (beam weapons only; discrete weapons use `damage`).
-    float ammoPerSecond = 0.0f; ///< Ammo drain rate (beam weapons only).
-    float chargeDamage = 0.0f;  ///< Damage dealt on release (charge weapons only).
-    float maxChargeTime = 0.0f; ///< in seconds
-    float reloadTime = 0.0f;    ///< Time to complete a reload, in seconds.
+    bool isBeam = false;             ///< True for continuous beam weapons (no per-shot cooldown).
+    bool isCharge = false;           ///< True for charge weapons (hold to charge, release to fire).
+    float dps = 0.0f;                ///< Damage per second (beam weapons only; discrete weapons use `damage`).
+    float ammoPerSecond = 0.0f;      ///< Ammo drain rate (beam weapons only).
+    float chargeDamage = 0.0f;       ///< Damage dealt on release (charge weapons only).
+    float maxChargeTime = 0.0f;      ///< in seconds
+    float reloadTime = 0.0f;         ///< Time to complete a reload, in seconds.
+
+    int recoilFreeShots = 0;         ///< Shots before recoil kicks in.
+    float recoilPitchPerShot = 0.0f; ///< Upward kick per shot.
+    float recoilYawPerShot = 0.0f;   ///< Horizontal swing strength.
+    float recoilRampShots = 1.0f;    ///< Curve shape / stem length.
+    float recoilRecovery = 0.0f;     ///< Heat decay per second.
 };
 
 struct ProjectileConfig
@@ -65,6 +71,11 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .reloadTime = 1.25f,
+            .recoilFreeShots = 3,
+            .recoilPitchPerShot = 0.007f,
+            .recoilYawPerShot = 0.04f,
+            .recoilRampShots = 12.0f,
+            .recoilRecovery = 40.0f,
         }, // Rifle
         WeaponConfig{
             .fireCooldown = 1.0f,

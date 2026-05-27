@@ -2532,7 +2532,21 @@ SDL_AppResult Game::iterate()
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
                 const GunInstance& gun = getEquippedGun(ws);
                 hasAmmo = gun.currentMagAmmo > 0 && !gun.isReloading;
+                if (gun.recoilHeat == 0.0f) {
+                    localRecoilHeat_ = 0.0f;
+                    recoilIdleTime_ = 0.0f;
+                }
             });
+            if (!shooting) {
+                recoilIdleTime_ += frameTime;
+                if (recoilIdleTime_ > 0.2f) {
+                    localRecoilHeat_ -= wpnCfg.recoilRecovery * frameTime;
+                    if (localRecoilHeat_ <= float(wpnCfg.recoilFreeShots))
+                        localRecoilHeat_ = 0.0f;
+                }
+            } else {
+                recoilIdleTime_ = 0.0f;
+            }
 
             // Phase F third-person recoil hook. Called from both fire paths
             // (charge + hitscan) to push an additive pitch impulse onto the
@@ -2617,6 +2631,32 @@ SDL_AppResult Game::iterate()
                 recoilPitch_ += rp.pitchKick;
                 recoilPushBack_ += rp.pushBack;
                 recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
+
+                // Camera recoil pattern
+                if (wpnCfg.recoilPitchPerShot > 0.0f && localShooter != entt::null) {
+                    float heat = std::max(0.0f, localRecoilHeat_ - float(wpnCfg.recoilFreeShots));
+                    if (heat > 0.0f) {
+                        float dk = 1.5f / wpnCfg.recoilRampShots;
+                        float ok = 2.0f / wpnCfg.recoilRampShots;
+                        float stem = wpnCfg.recoilRampShots * 0.5f;
+
+                        float pHeat = std::max(0.0f, heat - stem);
+                        float pitchKick = wpnCfg.recoilPitchPerShot * std::exp(-dk * pHeat);
+
+                        float hNow = std::max(0.0f, heat - stem);
+                        float hPrev = std::max(0.0f, heat - 1.0f - stem);
+                        float oNow = 1.0f - std::exp(-ok * hNow);
+                        float oPrev = 1.0f - std::exp(-ok * hPrev);
+                        float yawKick =
+                            wpnCfg.recoilYawPerShot * (oNow * std::sin(hNow * 0.35f) - oPrev * std::sin(hPrev * 0.35f));
+
+                        auto& snap = registry.get<InputSnapshot>(localShooter);
+                        snap.pitch -= pitchKick;
+                        snap.yaw += yawKick;
+                        snap.pitch = std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
+                    }
+                    localRecoilHeat_ += 1.0f;
+                }
             }
         }
     }
