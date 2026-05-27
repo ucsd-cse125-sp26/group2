@@ -332,9 +332,9 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tomlplusplus)
 
-# Assimp — 3D model loading (GLTF/GLB, OBJ, FBX, …; client only).
+# Assimp — 3D model loading (GLTF/GLB, USDZ, OBJ, FBX, …; client only).
 # Keep the build lean: static lib, no install targets, no tools, no tests,
-# and only the GLTF/GLB importer enabled.
+# and only the importers we actively load at runtime enabled.
 set(ASSIMP_BUILD_TESTS                   OFF CACHE BOOL "" FORCE)
 set(ASSIMP_INSTALL                       OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ASSIMP_TOOLS            OFF CACHE BOOL "" FORCE)
@@ -342,6 +342,7 @@ set(ASSIMP_NO_EXPORT                     ON  CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_GLTF_IMPORTER           ON  CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_USD_IMPORTER            ON  CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_FBX_IMPORTER            ON  CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_OBJ_IMPORTER            ON  CACHE BOOL "" FORCE)
 # Use Assimp's own bundled minizip — avoids needing system unzip.h in a
@@ -361,6 +362,12 @@ block()
     )
     FetchContent_MakeAvailable(assimp)
 endblock()
+if(TARGET assimp)
+    target_compile_options(assimp PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-include>
+        $<$<COMPILE_LANGUAGE:CXX>:cstdint>
+    )
+endif()
 
 # stb — single-header image decoding (used by ModelLoader to decompress the
 # PNG/JPEG textures embedded in GLB files).  stb ships no CMakeLists.txt, so
@@ -1732,6 +1739,35 @@ add_custom_target(copy_clientbot_config DEPENDS "${CMAKE_BINARY_DIR}/config_clie
 add_dependencies(clientbot copy_clientbot_config)
 
 enable_testing()
+
+add_executable(asset_catalog_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/asset_catalog_tests.cpp"
+)
+target_include_directories(asset_catalog_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(asset_catalog_tests PRIVATE
+    glm::glm
+)
+add_test(NAME asset_catalog_tests COMMAND asset_catalog_tests)
+
+add_executable(asset_import_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/asset_import_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/AssetLoader.cpp"
+)
+target_compile_definitions(asset_import_tests PRIVATE
+    GROUP2_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_include_directories(asset_import_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(asset_import_tests PRIVATE
+    assimp::assimp
+    glm::glm
+    SDL3::SDL3
+    stb_image
+)
+add_test(NAME asset_import_tests COMMAND asset_import_tests)
 
 add_executable(physics_trimesh_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/physics_trimesh_tests.cpp"

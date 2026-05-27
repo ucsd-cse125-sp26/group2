@@ -157,6 +157,8 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
         const char* const base = SDL_GetBasePath();
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
         for (const AssetDefinition& def : kPropAssets) {
+            if (!def.loadCollision)
+                continue;
             const bool decompose = def.decomposeCollision && gamemap::k_useVhacd;
             physics::loadPropCollision(
                 assetsDir + def.filename, mapCollision_, def.loadTranslation, def.loadScale, decompose);

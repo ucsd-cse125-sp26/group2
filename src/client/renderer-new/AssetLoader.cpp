@@ -5,9 +5,12 @@
 
 #include "Asset.hpp"
 
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <glm/gtc/quaternion.hpp>
 #include <iostream>
+#include <iterator>
 #include <stack>
 #include <stb_image.h>
 #include <vector>
@@ -80,6 +83,127 @@ bool readAiColor(aiMaterial& material, const char* key, unsigned int type, unsig
     out = {color.r, color.g, color.b};
     return true;
 }
+
+namespace
+{
+
+bool hasBytes(const std::vector<unsigned char>& bytes, std::size_t offset, std::size_t count)
+{
+    return offset <= bytes.size() && count <= bytes.size() - offset;
+}
+
+std::uint16_t readLe16(const std::vector<unsigned char>& bytes, std::size_t offset)
+{
+    return static_cast<std::uint16_t>(bytes[offset]) |
+           static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes[offset + 1]) << 8U);
+}
+
+std::uint32_t readLe32(const std::vector<unsigned char>& bytes, std::size_t offset)
+{
+    return static_cast<std::uint32_t>(bytes[offset]) | (static_cast<std::uint32_t>(bytes[offset + 1]) << 8U) |
+           (static_cast<std::uint32_t>(bytes[offset + 2]) << 16U) |
+           (static_cast<std::uint32_t>(bytes[offset + 3]) << 24U);
+}
+
+std::string normalizeZipEntryName(std::string name)
+{
+    for (char& c : name) {
+        if (c == '\\')
+            c = '/';
+    }
+    while (name.rfind("./", 0) == 0)
+        name.erase(0, 2);
+    while (!name.empty() && name.front() == '/')
+        name.erase(0, 1);
+    return name;
+}
+
+bool readStoredZipEntry(const std::filesystem::path& zipPath, std::string entryName, std::vector<unsigned char>& out)
+{
+    entryName = normalizeZipEntryName(std::move(entryName));
+
+    std::ifstream file(zipPath, std::ios::binary);
+    if (!file)
+        return false;
+
+    std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (bytes.size() < 22)
+        return false;
+
+    constexpr std::uint32_t k_eocdSig = 0x06054b50U;
+    constexpr std::uint32_t k_centralSig = 0x02014b50U;
+    constexpr std::uint32_t k_localSig = 0x04034b50U;
+    constexpr std::uint16_t k_storeMethod = 0;
+
+    std::size_t eocd = bytes.size() - 22;
+    const std::size_t minEocd = bytes.size() > 22 + 0xffff ? bytes.size() - 22 - 0xffff : 0;
+    while (eocd > minEocd && (!hasBytes(bytes, eocd, 4) || readLe32(bytes, eocd) != k_eocdSig))
+        --eocd;
+    if (!hasBytes(bytes, eocd, 22) || readLe32(bytes, eocd) != k_eocdSig)
+        return false;
+
+    const std::uint16_t entryCount = readLe16(bytes, eocd + 10);
+    const std::uint32_t centralSize = readLe32(bytes, eocd + 12);
+    const std::uint32_t centralOffset = readLe32(bytes, eocd + 16);
+    if (!hasBytes(bytes, centralOffset, centralSize))
+        return false;
+
+    std::size_t offset = centralOffset;
+    for (std::uint16_t i = 0; i < entryCount && hasBytes(bytes, offset, 46); ++i) {
+        if (readLe32(bytes, offset) != k_centralSig)
+            return false;
+
+        const std::uint16_t compressionMethod = readLe16(bytes, offset + 10);
+        const std::uint32_t compressedSize = readLe32(bytes, offset + 20);
+        const std::uint32_t uncompressedSize = readLe32(bytes, offset + 24);
+        const std::uint16_t nameLen = readLe16(bytes, offset + 28);
+        const std::uint16_t extraLen = readLe16(bytes, offset + 30);
+        const std::uint16_t commentLen = readLe16(bytes, offset + 32);
+        const std::uint32_t localHeaderOffset = readLe32(bytes, offset + 42);
+
+        if (!hasBytes(bytes, offset + 46, nameLen))
+            return false;
+
+        const std::string name(reinterpret_cast<const char*>(bytes.data() + offset + 46), nameLen);
+        if (normalizeZipEntryName(name) == entryName) {
+            if (compressionMethod != k_storeMethod || compressedSize != uncompressedSize)
+                return false;
+            if (!hasBytes(bytes, localHeaderOffset, 30) || readLe32(bytes, localHeaderOffset) != k_localSig)
+                return false;
+
+            const std::uint16_t localNameLen = readLe16(bytes, localHeaderOffset + 26);
+            const std::uint16_t localExtraLen = readLe16(bytes, localHeaderOffset + 28);
+            const std::size_t dataOffset = localHeaderOffset + 30 + localNameLen + localExtraLen;
+            if (!hasBytes(bytes, dataOffset, compressedSize))
+                return false;
+
+            out.assign(bytes.begin() + static_cast<std::ptrdiff_t>(dataOffset),
+                       bytes.begin() + static_cast<std::ptrdiff_t>(dataOffset + compressedSize));
+            return true;
+        }
+
+        offset += 46 + nameLen + extraLen + commentLen;
+    }
+
+    return false;
+}
+
+stbi_uc* loadTextureFromUsdZip(
+    const std::string& modelFileName, const aiString& texturePath, int& width, int& height, int& channels)
+{
+    const std::filesystem::path modelPath(modelFileName);
+    if (modelPath.extension() != ".usdz")
+        return nullptr;
+
+    std::vector<unsigned char> textureBytes;
+    if (!readStoredZipEntry(modelPath, texturePath.C_Str(), textureBytes))
+        return nullptr;
+
+    return stbi_load_from_memory(
+        textureBytes.data(), static_cast<int>(textureBytes.size()), &width, &height, &channels, 4);
+}
+
+} // namespace
 
 static bool hasMetadataKey(const aiNode& node, const std::string& keyToFind)
 {
@@ -273,22 +397,19 @@ bool AssetLoader::loadModel(const ModelIdInt id,
                 continue; // already decoded this texture
             }
 
+            stbi_uc* pixels = nullptr;
             const aiTexture* embeddedTexture = asimpSceneStructurePtr->GetEmbeddedTexture(texPath.C_Str());
-            if (!embeddedTexture || embeddedTexture->mHeight != 0) {
-                SDL_Log("AssetLoader: skipping unsupported material texture '%s' "
-                        "(expected compressed embedded texture, embedded=%s, height=%u)",
-                        texPath.C_Str(),
-                        embeddedTexture ? "true" : "false",
-                        embeddedTexture ? embeddedTexture->mHeight : 0);
-                continue;
+            if (embeddedTexture && embeddedTexture->mHeight == 0) {
+                pixels = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(embeddedTexture->pcData),
+                                               static_cast<int>(embeddedTexture->mWidth),
+                                               &tex_.width,
+                                               &tex_.height,
+                                               &tex_.channels,
+                                               4);
             }
 
-            stbi_uc* pixels = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(embeddedTexture->pcData),
-                                                    static_cast<int>(embeddedTexture->mWidth),
-                                                    &tex_.width,
-                                                    &tex_.height,
-                                                    &tex_.channels,
-                                                    4);
+            if (pixels == nullptr)
+                pixels = loadTextureFromUsdZip(modelFileName, texPath, tex_.width, tex_.height, tex_.channels);
 
             if (!pixels) {
                 std::cout << "stbi failed for " << texPath.C_Str() << ": " << stbi_failure_reason() << std::endl;

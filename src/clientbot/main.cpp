@@ -278,6 +278,8 @@ int main(int argc, char* argv[])
         // V-HACD only runs when MapConfig and CMake both opt in.
         const std::string assetsDir = std::string(base ? base : "") + "assets/";
         for (const AssetDefinition& def : kPropAssets) {
+            if (!def.loadCollision)
+                continue;
             const bool decompose = def.decomposeCollision && gamemap::k_useVhacd;
             physics::loadPropCollision(
                 assetsDir + def.filename, mapCollision, def.loadTranslation, def.loadScale, decompose);

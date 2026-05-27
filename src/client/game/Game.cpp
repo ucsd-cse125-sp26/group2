@@ -922,6 +922,9 @@ bool Game::init(AppContext& ctx)
                 renderer->setModelScenePass(modelIdx, true);
             }
 
+            if (!def.loadCollision)
+                return;
+
             // Load collision at the same position/scale.
             const std::string fullPath = basePath + "assets/" + def.filename;
             const bool decompose = def.decomposeCollision && gamemap::k_useVhacd;

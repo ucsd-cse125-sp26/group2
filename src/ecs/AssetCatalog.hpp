@@ -18,6 +18,7 @@ struct AssetDefinition
     float loadScale = 1.0f;                ///< Scale used when loading/uploading the model.
     bool flipUVs = false;                  ///< True for assets whose source UV orientation needs flipping.
     bool decomposeCollision = false;       ///< True to run V-HACD on non-convex collision sub-meshes.
+    bool loadCollision = true;             ///< False for visual-only comparison/debug props.
     glm::vec3 renderScale{1.0f};           ///< Default Renderable scale.
     glm::vec3 renderTranslation{0.0f};     ///< Default Renderable local translation.
     glm::vec3 renderRotationDegrees{0.0f}; ///< Default Renderable local rotation in degrees.
@@ -30,7 +31,20 @@ inline const AssetDefinition kMapAsset{
     .loadScale = 39.3701f,
 };
 
-inline const std::array<AssetDefinition, 0> kPropAssets{};
+inline const std::array<AssetDefinition, 2> kPropAssets{{
+    {.name = "suzanne_substance_usdz",
+     .filename = "suzanne_substance.usdz",
+     .role = AssetRole::Prop,
+     .loadTranslation = {140.0f, 55.0f, 472.0f},
+     .loadScale = 30.0f,
+     .loadCollision = false},
+    {.name = "suzanne_substance_glb",
+     .filename = "suzanne_substance_v2.glb",
+     .role = AssetRole::Prop,
+     .loadTranslation = {255.0f, 55.0f, 472.0f},
+     .loadScale = 30.0f,
+     .loadCollision = false},
+}};
 
 inline const AssetDefinition kRocketProjectile{
     .name = "rocket_projectile",
