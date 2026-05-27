@@ -58,6 +58,7 @@ std::vector<std::string> buildServerArgs(const std::string& serverPath, const Ho
     }
 
     args.push_back("--killsToWin=" + std::to_string(config.killsToWin));
+    args.emplace_back("--idle-shutdown-minutes=5");
     return args;
 }
 

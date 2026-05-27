@@ -174,6 +174,9 @@ int main(int argc, char* argv[])
         .scan<'i', int>()
         .default_value(10)
         .help("Kills required to win a match (default: 10)");
+    program.add_argument("--idle-shutdown-minutes")
+        .scan<'i', int>()
+        .help("Minutes of idle time before automatic shutdown. Omit to run indefinitely (default)");
 
     try {
         program.parse_args(argc, argv);
@@ -250,6 +253,20 @@ int main(int argc, char* argv[])
         NET_Quit();
         SDL_Quit();
         return 1;
+    }
+
+    if (program.is_used("--idle-shutdown-minutes")) {
+        int minutes = program.get<int>("--idle-shutdown-minutes");
+        if (!game.setIdleShutdownMinutes(minutes)) {
+            SDL_Log("Invalid idle shutdown minutes: %d", minutes);
+            ::group2::perf::stopAggregator();
+            game.shutdown();
+            server.shutdown();
+            closeCsv();
+            NET_Quit();
+            SDL_Quit();
+            return 1;
+        }
     }
 
     int killsToWin = program.get<int>("--killsToWin");

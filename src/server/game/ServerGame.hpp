@@ -62,6 +62,7 @@ public:
 
     [[nodiscard]] bool isHost(ClientId clientId) const;
     bool setKillsToWin(int kills);
+    bool setIdleShutdownMinutes(int minutes);
 
 private:
     /// @brief Apply a single event to the ECS registry.
@@ -266,4 +267,8 @@ private:
     };
     static constexpr std::size_t k_pendingShotIntentsMax = 256;
     std::unordered_map<ShotIntentKey, ShotIntentPayload, ShotIntentKeyHash> pendingShotIntents_;
+
+    bool idleShutdownEnabled_ = false; ///< True if idle shutdown is enabled via env var.
+    uint64_t idleShutdownMs_ = 0;      ///< Idle shutdown timeout in ms, from env var. 0 = no timeout.
+    uint64_t lastNonEmptyMs_ = 0;      ///< Timestamp of the last player activity, for idle shutdown.
 };

@@ -547,6 +547,18 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         }
     }
 
+    // Check if idle server should shutdown
+    GROUP2_PROF_SCOPE("idleCheck");
+    if (idleShutdownEnabled_) {
+        if (server->getClientCount() > 0) {
+            lastNonEmptyMs_ = SDL_GetTicks();
+        } else if (idleShutdownMs_ > 0 && (SDL_GetTicks() - lastNonEmptyMs_) >= idleShutdownMs_) {
+            SDL_Log("[server] Idle shutdown triggered after %d minutes with no clients",
+                    static_cast<int>(idleShutdownMs_ / 60000));
+            running = false;
+        }
+    }
+
     {
         GROUP2_PROF_SCOPE("animation");
         // Update server-side animation and hitbox capsules before weapon raycasts.
@@ -1240,4 +1252,17 @@ bool ServerGame::isHost(ClientId clientId) const
 bool ServerGame::setKillsToWin(int kills)
 {
     return matchController.setKillsToWin(kills);
+}
+
+bool ServerGame::setIdleShutdownMinutes(int minutes)
+{
+    if (minutes <= 0 || minutes > 1440) { // 1440 minutes = 24 hours
+        return false;
+    }
+
+    idleShutdownEnabled_ = true;
+    idleShutdownMs_ = static_cast<uint64_t>(minutes) * 60 * 1000;
+    lastNonEmptyMs_ = SDL_GetTicks();
+
+    return true;
 }
