@@ -100,7 +100,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .isBeam = true,
             .dps = 80.0f,
             .ammoPerSecond = 20.0f,
-            .reloadTime = 0.0f,
+            .reloadTime = 2.0f,
         }, // EnergyGun
         WeaponConfig{
             .fireCooldown = 0.4f,

@@ -4234,7 +4234,7 @@ SDL_AppResult Game::iterate()
                     const WeaponConfig& cfg = getWeaponConfig(gun.type);
                     if (gun.isReloading && cfg.reloadTime > 0.0f) {
                         float t = 1.0f - (gun.reloadTime / cfg.reloadTime);
-                        constexpr float kReloadMaxDrop = 70.0f;
+                        constexpr float kReloadMaxDrop = 80.0f;
                         constexpr float kReloadMovePercent = 0.15f;
                         if (t < kReloadMovePercent) {
                             reloadOffset = kReloadMaxDrop * smooth(0.0f, kReloadMovePercent, t);
