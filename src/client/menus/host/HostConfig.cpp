@@ -21,6 +21,12 @@ bool HostConfig::init(AppContext& ctx)
     if (!hostedServer->isRunning() && !draft->useSpecificPort) {
         draft->port = ctx.networkConfig.serverNetwork.port;
     }
+    if (const auto latestMatchConfig = client->getLatestMatchConfig()) {
+        lastSyncedMatchConfig = latestMatchConfig;
+    } else {
+        lastSyncedMatchConfig = MatchConfig{.killsToWin = draftConfig().killsToWin};
+    }
+    client->onMatchConfig([this](const MatchConfig& config) { lastSyncedMatchConfig = config; });
     return true;
 }
 
@@ -33,7 +39,12 @@ SDL_AppResult HostConfig::event(SDL_Event* event)
     return SDL_APP_CONTINUE;
 }
 
-void HostConfig::quit() {}
+void HostConfig::quit()
+{
+    if (client) {
+        client->onMatchConfig({});
+    }
+}
 
 SDL_AppResult HostConfig::iterate()
 {
@@ -48,10 +59,12 @@ SDL_AppResult HostConfig::iterate()
     if (serverRunning && client && !client->poll()) {
         lastError = "Lost connection to hosted server";
     }
+    const bool hasUnsavedChanges = serverRunning && hasUnsavedMatchChanges();
 
     HostConfigUIInputs inputs{
         .draft = *draft,
         .serverRunning = serverRunning,
+        .hasUnsavedMatchChanges = hasUnsavedChanges,
         .boundPort = hostedServer->port(),
         .errorMessage = lastError,
     };
@@ -61,15 +74,30 @@ SDL_AppResult HostConfig::iterate()
         lastError.clear();
         pendingLaunch = true;
     }
+    if (result.updateClicked) {
+        updateMatchConfig();
+    }
     if (result.shutdownClicked) {
         lastError.clear();
         pendingShutdown = true;
     }
     if (result.goToLobbyClicked) {
-        pendingGoToLobby = true;
+        if (hasUnsavedChanges) {
+            requestDiscardMatchChangesConfirm();
+        } else {
+            pendingGoToLobby = true;
+        }
     }
     if (result.backToHomeClicked) {
         pendingBackToHome = true;
+    }
+
+    const ConfirmResult confirmResult = confirm_.drawAndPoll();
+    if (confirmResult == ConfirmResult::Confirmed) {
+        if (lastSyncedMatchConfig) {
+            draft->killsToWin = lastSyncedMatchConfig->killsToWin;
+        }
+        pendingGoToLobby = true;
     }
 
     ImGui::Render();
@@ -133,4 +161,38 @@ HostConfigState HostConfig::draftConfig() const
 void HostConfig::setLaunchError(const std::string& error)
 {
     lastError = error;
+}
+
+bool HostConfig::hasUnsavedMatchChanges() const
+{
+    if (!draft || !lastSyncedMatchConfig)
+        return false;
+
+    return std::clamp(draft->killsToWin, 1, 100) != lastSyncedMatchConfig->killsToWin;
+}
+
+bool HostConfig::updateMatchConfig()
+{
+    if (!client || !draft)
+        return false;
+
+    const MatchConfig config{.killsToWin = std::clamp(draft->killsToWin, 1, 100)};
+    draft->killsToWin = config.killsToWin;
+    if (!client->sendMatchConfig(config)) {
+        lastError = "Failed to send match settings update";
+        return false;
+    }
+
+    lastError.clear();
+    lastSyncedMatchConfig = config;
+    return true;
+}
+
+void HostConfig::requestDiscardMatchChangesConfirm()
+{
+    confirm_.open({.title = "Discard Match Settings?",
+                   .message = "You have unsaved match setting changes. Discard them?",
+                   .confirmText = "Discard",
+                   .cancelText = "Cancel",
+                   .confirmIsDanger = true});
 }

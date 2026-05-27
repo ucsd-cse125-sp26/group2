@@ -87,6 +87,10 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
         ImGui::SeparatorText("Server");
         if (inputs.serverRunning) {
             ImGui::Text("Running on port %u", static_cast<unsigned>(inputs.boundPort));
+            if (inputs.hasUnsavedMatchChanges) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("Unsaved changes");
+            }
         } else {
             ImGui::TextUnformatted("Not running");
         }
@@ -107,6 +111,12 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
         ImGui::EndDisabled();
 
         if (inputs.serverRunning) {
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!inputs.hasUnsavedMatchChanges);
+            if (ImGui::Button("Update Settings")) {
+                result.updateClicked = true;
+            }
+            ImGui::EndDisabled();
             ImGui::SameLine();
             if (ImGui::Button("Go to Lobby")) {
                 result.goToLobbyClicked = true;

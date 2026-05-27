@@ -469,6 +469,14 @@ bool Client::sendStartMatch()
     return send(&type, sizeof(type));
 }
 
+bool Client::sendMatchConfig(const MatchConfig& config)
+{
+    std::uint8_t buf[sizeof(PacketType) + sizeof(MatchConfig)];
+    buf[0] = static_cast<std::uint8_t>(PacketType::UPDATE_MATCH_CONFIG);
+    std::memcpy(buf + 1, &config, sizeof(MatchConfig));
+    return send(buf, static_cast<std::uint32_t>(sizeof(buf)));
+}
+
 std::optional<std::pair<std::vector<LobbyPlayer>, ClientId>> Client::getLatestLobbyState() const
 {
     if (!latestLobbyPlayers_ || !latestLobbyLocalId_)

@@ -150,6 +150,9 @@ public:
     /// @brief Send a START_MATCH packet to the server (host-only).
     bool sendStartMatch();
 
+    /// @brief Send an updated match configuration to the server (host-only).
+    bool sendMatchConfig(const MatchConfig& config);
+
     /// @brief Send a PING packet to the server for RTT measurement.
     void sendPing();
 
