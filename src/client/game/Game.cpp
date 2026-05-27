@@ -4750,6 +4750,10 @@ bool Game::consumeServerShutdownNotice()
 
 void Game::quit()
 {
+    if (window) {
+        mouseCaptured = false;
+        SDL_SetWindowRelativeMouseMode(window, false);
+    }
     if (userSettings) {
         userSettings->mouseSensitivity = mouseSensitivity;
         userSettings->horizontalFovDegrees = horizontalFovDegrees;
