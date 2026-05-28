@@ -403,6 +403,16 @@ private:
     float accumResetTimer_ = 0.f;           ///< Timer to reset accumulator after inactivity.
     uint8_t accumLastHitType_ = 0;          ///< 0=health(white), 1=shield(blue), 2=headshot(gold).
 
+    // Shotgun pellet accumulator — groups the 9 NetParticleEvents emitted per
+    // shotgun shot (by the server's WeaponSystem) into a single completed blast
+    // for the HUD ShotgunPelletWidget. The widget is fed via
+    // `HudGameState.latestShotgunBlast`, which is just a copy of
+    // `lastShotgunBlast_` updated each frame with elapsed time.
+    HudShotgunBlast shotgunPelletAccum_{};      ///< In-flight accumulator (resets when 9 pellets received).
+    int shotgunPelletAccumCount_ = 0;           ///< Pellets received for the current in-flight blast.
+    float shotgunPelletLastTimeSec_ = 0.f;      ///< Game-time of the last pellet (for stale-reset).
+    HudShotgunBlast lastShotgunBlast_{};        ///< Most recently completed blast (staged for HUD).
+
     // Vignette state: track previous frame health/armor for delta detection.
     float prevHealth_ = 100.f;
     float prevArmor_ = 100.f;

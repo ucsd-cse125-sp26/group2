@@ -86,6 +86,8 @@ const char* weaponTypeName(WeaponType type)
         return "RailGun";
     case WeaponType::EnergyGun:
         return "EnergyGun";
+    case WeaponType::Shotgun:
+        return "Shotgun";
     case WeaponType::HEGrenade:
         return "HEGrenade";
     case WeaponType::Molotov:
@@ -95,6 +97,16 @@ const char* weaponTypeName(WeaponType type)
     }
     return "Unknown";
 }
+
+/// @brief Slot-eligible weapon types for the Weapon HUD slot selectors.
+/// Grenade types (HE/Molotov/Impulse) are excluded — they live in their own slot system.
+constexpr std::array<WeaponType, 5> k_kSlotWeaponChoices{{
+    WeaponType::Rifle,
+    WeaponType::Rocket,
+    WeaponType::RailGun,
+    WeaponType::EnergyGun,
+    WeaponType::Shotgun,
+}};
 
 } // namespace
 
@@ -1159,6 +1171,34 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     ImGui::SeparatorText("Weapon");
     ImGui::Text("Current: %s", currentGunName);
     ImGui::Text("Ammo:    %d / %d", gun.currentMagAmmo, gun.totalAmmo);
+
+    // Slot selectors — pulse the pending-set flag, consumed by Game::iterate()
+    // which writes onto InputSnapshot.debugSetXxxWeapon for the server to act on.
+    auto slotCombo = [&](const char* label, WeaponSlot slot, std::int8_t& pendingOut) {
+        const GunInstance& slotGun = getSlot(weapon, slot);
+        int currentIdx = 0;
+        for (std::size_t i = 0; i < k_kSlotWeaponChoices.size(); ++i) {
+            if (k_kSlotWeaponChoices[i] == slotGun.type) {
+                currentIdx = static_cast<int>(i);
+                break;
+            }
+        }
+        const char* preview = weaponTypeName(k_kSlotWeaponChoices[static_cast<std::size_t>(currentIdx)]);
+        if (ImGui::BeginCombo(label, preview)) {
+            for (std::size_t i = 0; i < k_kSlotWeaponChoices.size(); ++i) {
+                const WeaponType opt = k_kSlotWeaponChoices[i];
+                const bool selected = (static_cast<int>(i) == currentIdx);
+                if (ImGui::Selectable(weaponTypeName(opt), selected)) {
+                    pendingOut = static_cast<std::int8_t>(opt);
+                }
+                if (selected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+    };
+    slotCombo("Primary",   WeaponSlot::PRIMARY,   pendingSetPrimaryWeapon_);
+    slotCombo("Secondary", WeaponSlot::SECONDARY, pendingSetSecondaryWeapon_);
 
     // Flag checked by Game::iterate() to refill ammo (registry is const here).
     if (ImGui::Button("Refill All Ammo"))

@@ -473,11 +473,23 @@ std::unordered_map<ClientId, ClientRagdollPose> collectClientRagdollPoses(Regist
 void applyRagdollPoseToSkinPalette(std::vector<glm::mat4>& skinMatrices,
                                    const CharacterRig& rig,
                                    const ClientRagdollPose& pose,
-                                   const glm::mat4& instanceWorld)
+                                   const glm::mat4& instanceWorld,
+                                   float rigScale)
 {
     const auto& jointMap = rig.jointMap();
     const auto& inverseBind = rig.inverseBindMatrices();
     const glm::mat4 inverseInstanceWorld = glm::inverse(instanceWorld);
+
+    // The mesh bind pose lives in MESH space (typically Mixamo ~160 units
+    // tall), while the ragdoll physics bones are in WORLD space (player
+    // capsule is 72 units tall). The skin matrix must scale vertex offsets
+    // FROM mesh-space units TO world-space units before placing them at the
+    // ragdoll bone, otherwise the rendered mesh appears at mesh scale and
+    // looks ~2× larger than the live player capsule. Multiplying `boneWorld`
+    // by `scale(rigScale)` does exactly that: inverseBind produces a
+    // bind-local mesh-unit offset, scale() converts it to world units, then
+    // the rotation + translation places it at the ragdoll bone.
+    const glm::mat4 ragdollBoneScale = glm::scale(glm::mat4(1.0f), glm::vec3(rigScale));
 
     for (const RagdollJointBinding& binding : kRagdollJointBindings) {
         const size_t boneIndex = static_cast<size_t>(binding.bone);
@@ -496,8 +508,8 @@ void applyRagdollPoseToSkinPalette(std::vector<glm::mat4>& skinMatrices,
         }
 
         const ClientRagdollBonePose& bone = pose[boneIndex];
-        const glm::mat4 boneWorld =
-            glm::translate(glm::mat4(1.0f), bone.position) * glm::mat4_cast(glm::normalize(bone.orientation));
+        const glm::mat4 boneWorld = glm::translate(glm::mat4(1.0f), bone.position) *
+                                    glm::mat4_cast(glm::normalize(bone.orientation)) * ragdollBoneScale;
         const glm::mat4 modelSpaceBone = inverseInstanceWorld * boneWorld;
         skinMatrices[static_cast<size_t>(jointIndex)] = modelSpaceBone * inverseBind[static_cast<size_t>(jointIndex)];
     }
@@ -574,6 +586,8 @@ std::string_view fireAudioEventForWeapon(WeaponType type) noexcept
         return "weapon.railgun.fire";
     case WeaponType::EnergyGun:
         return "weapon.energy.fire";
+    case WeaponType::Shotgun:
+        return "weapon.shotgun.fire"; // falls back gracefully if SFX bank lacks this event.
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
     case WeaponType::Impulse:
@@ -1046,6 +1060,41 @@ bool Game::init(AppContext& ctx)
                 accumResetTimer_ = 2.0f; // reset after 2s of no hits
                 // Track latest hit type for accumulator color.
                 accumLastHitType_ = isHeadshot ? uint8_t{2} : (isShielded ? uint8_t{1} : uint8_t{0});
+            }
+        }
+
+        // Shotgun pellet readout: aggregate the 9 per-pellet impact events emitted
+        // by the server into one HUD blast. Pellets arrive in server-emit order
+        // within a single server tick → one client frame, so a simple index counter
+        // matches the server's k_offsets star pattern. If a stale partial blast
+        // exists (e.g., packet loss dropped a pellet), the time-gap reset starts
+        // a fresh accumulator on the next shot.
+        if (evt.source == localPlayer && evt.weaponType == WeaponType::Shotgun &&
+            evt.effectType == ParticleEffectType::Impact)
+        {
+            const float nowSec = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+            const bool stale = (shotgunPelletAccumCount_ > 0) &&
+                               (nowSec - shotgunPelletLastTimeSec_) > 0.25f;
+            if (shotgunPelletAccumCount_ == 0 || stale) {
+                shotgunPelletAccum_ = HudShotgunBlast{};
+                shotgunPelletAccumCount_ = 0;
+            }
+            if (shotgunPelletAccumCount_ < static_cast<int>(shotgunPelletAccum_.pellets.size())) {
+                const bool isHit = (evt.surfaceType == SurfaceType::Flesh);
+                const bool isHead = (evt.headshot != 0);
+                shotgunPelletAccum_.pellets[shotgunPelletAccumCount_].result =
+                    isHead   ? HudShotgunPellet::Result::Head
+                    : isHit  ? HudShotgunPellet::Result::Body
+                             : HudShotgunPellet::Result::Miss;
+                ++shotgunPelletAccumCount_;
+                shotgunPelletLastTimeSec_ = nowSec;
+                if (shotgunPelletAccumCount_ ==
+                    static_cast<int>(shotgunPelletAccum_.pellets.size())) {
+                    shotgunPelletAccum_.valid = true;
+                    shotgunPelletAccum_.secondsSinceFire = 0.0f;
+                    lastShotgunBlast_ = shotgunPelletAccum_;
+                    shotgunPelletAccumCount_ = 0;
+                }
             }
         }
 
@@ -3750,7 +3799,7 @@ SDL_AppResult Game::iterate()
                 world *= glm::mat4_cast(orient);
                 world = glm::scale(world, scale);
 
-                applyRagdollPoseToSkinPalette(ragdollSkinMatrices, charRig_, poseIt->second, world);
+                applyRagdollPoseToSkinPalette(ragdollSkinMatrices, charRig_, poseIt->second, world, kRigScale_);
 
                 SkinnedInstance instance;
                 instance.worldTransform = world;
@@ -4754,6 +4803,22 @@ SDL_AppResult Game::iterate()
             registry.view<LocalPlayer, InputSnapshot>().each(
                 [wantRefill](InputSnapshot& snap) { snap.refillAmmo = wantRefill; });
         }
+
+        // Process weapon-slot swap requests from the Weapon HUD debug menu.
+        // ALWAYS overwrite the snap field — when there's no pending change the
+        // value is -1, which clears any prior frame's request. Without this,
+        // the snap held the last requested value forever, the server applied
+        // it every tick, and the slot's ammo never decreased ("auto-refill" bug).
+        {
+            const std::int8_t wantPrimary = debugUI.pendingSetPrimaryWeapon_;
+            const std::int8_t wantSecondary = debugUI.pendingSetSecondaryWeapon_;
+            debugUI.pendingSetPrimaryWeapon_ = -1;
+            debugUI.pendingSetSecondaryWeapon_ = -1;
+            registry.view<LocalPlayer, InputSnapshot>().each([&](InputSnapshot& snap) {
+                snap.debugSetPrimaryWeapon = wantPrimary;
+                snap.debugSetSecondaryWeapon = wantSecondary;
+            });
+        }
         debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
         buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 
@@ -5621,6 +5686,14 @@ SDL_AppResult Game::iterate()
             hudHitConfirms.push_back({hitmarkerIsHeadshot_, false, hitmarkerShieldBreak_});
         }
         hudState.hitConfirms = hudHitConfirms;
+
+        // ── Shotgun blast: age the most recent completed blast and stage it
+        //    for the ShotgunPelletWidget. The widget detects "fresh" by
+        //    comparing secondsSinceFire to its own cached age.
+        if (lastShotgunBlast_.valid) {
+            lastShotgunBlast_.secondsSinceFire += frameTime;
+        }
+        hudState.latestShotgunBlast = lastShotgunBlast_;
 
         // ── Vignette: detect health/armor deltas for damage & shield break ──
         {

@@ -35,6 +35,10 @@ struct InputSnapshot
     bool switchToPrimary{false};                                 ///< Switch to gun in primary slot.
     bool switchToSecondary{false};                               ///< Switch to gun in secondary slot.
     bool refillAmmo{false};                                      ///< Debug: refill all weapons to full ammo.
+    /// @brief Debug: replace the weapon in the primary/secondary slot with the given
+    /// `WeaponType` ordinal. -1 = no change. Consumed (reset to -1) by WeaponSystem.
+    std::int8_t debugSetPrimaryWeapon{-1};
+    std::int8_t debugSetSecondaryWeapon{-1};
     bool killSelf{false};                                        ///< Debug: kill self (rising-edge only).
     bool skipRespawn{false};                                     ///< Skip respawn timer (space while dead).
     bool throwGrenade{false};                                    ///< Quick G press: throw the selected grenade.
