@@ -4489,6 +4489,37 @@ SDL_AppResult Game::iterate()
                 reloadDownwardOffset_ = reloadOffset;
             }
 
+            // --- Grenade throw animation ---
+            // Same dip as the reload, but on a fixed 0.3s window. The throw cooldown is
+            // longer than the animation, so drive progress off elapsed time since the
+            // throw rather than the remaining cooldown.
+            {
+                auto smooth = [](float e0, float e1, float x) {
+                    float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+                    return t * t * (3.0f - 2.0f * t);
+                };
+
+                float throwOffset = 0.0f;
+                registry.view<LocalPlayer, GrenadeState>().each([&](const GrenadeState& grenades) {
+                    const float throwCooldown = getGrenadeConfig(grenades.selected).throwCooldown;
+                    const float elapsed = throwCooldown - grenades.cooldown;
+                    if (grenades.cooldown > 0.0f && elapsed >= 0.0f && elapsed < kGrenadeThrowAnimTime) {
+                        float t = elapsed / kGrenadeThrowAnimTime;
+                        constexpr float kThrowMaxDrop = 80.0f;
+                        constexpr float kThrowMovePercent = 0.15f;
+                        if (t < kThrowMovePercent) {
+                            throwOffset = kThrowMaxDrop * smooth(0.0f, kThrowMovePercent, t);
+                        } else if (t < 1.0f - kThrowMovePercent) {
+                            throwOffset = kThrowMaxDrop;
+                        } else {
+                            throwOffset = kThrowMaxDrop * (1.0f - smooth(1.0f - kThrowMovePercent, 1.0f, t));
+                        }
+                    }
+                });
+
+                grenadeThrowDownwardOffset_ = throwOffset;
+            }
+
             // --- Velocity-direction-dependent bobbing ---
             float bobPhase = 0.0f;
             float bobAmpFwd = 0.0f;
@@ -4534,6 +4565,8 @@ SDL_AppResult Game::iterate()
             weaponPos -= forward * recoilPushBack_;
             // Apply reload downward offset
             weaponPos -= up * reloadDownwardOffset_;
+            // Apply grenade throw downward offset
+            weaponPos -= up * grenadeThrowDownwardOffset_;
 
             // Build world transform: translate -> local-rotate -> camera-orient -> scale.
             //

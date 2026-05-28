@@ -560,6 +560,7 @@ inline void handleFire(Registry& registry,
                        const CollisionShape& shape,
                        WeaponState& weapon,
                        bool gravityFlipped,
+                       bool grenadeThrowActive,
                        float dt,
                        std::vector<NetParticleEvent>& outParticles,
                        std::vector<NetKillEvent>& killEvents,
@@ -568,11 +569,12 @@ inline void handleFire(Registry& registry,
     GunInstance& gun = getEquippedGun(weapon);
     const WeaponConfig& config = getWeaponConfig(gun.type);
 
-    if (gun.isReloading) {
+    // Reloading and the grenade-throw wind-up both lock out firing.
+    if (gun.isReloading || grenadeThrowActive) {
         gun.recoilHeat = 0.0f;
         gun.recoilIdleTime = 0.0f;
         if (auto* beam = registry.try_get<BeamState>(shooter)) {
-            beam->active = false; // turn off beam visuals during reload
+            beam->active = false; // turn off beam visuals during reload / throw
         }
         return;
     }
@@ -923,6 +925,12 @@ void runWeapon(Registry& registry,
 
         handleScope(registry, shooter, input, weapon, dt);
 
+        // Firing is locked out during the throw wind-up (first kGrenadeThrowAnimTime
+        // seconds of the throw cooldown), mirroring the client viewmodel dip.
+        const float throwElapsed = getGrenadeConfig(grenades.selected).throwCooldown - grenades.cooldown;
+        const bool grenadeThrowActive =
+            grenades.cooldown > 0.0f && throwElapsed >= 0.0f && throwElapsed < kGrenadeThrowAnimTime;
+
         handleFire(registry,
                    shooter,
                    input,
@@ -930,6 +938,7 @@ void runWeapon(Registry& registry,
                    shape,
                    weapon,
                    vis.gravityFlipped,
+                   grenadeThrowActive,
                    dt,
                    outParticles,
                    killEvents,

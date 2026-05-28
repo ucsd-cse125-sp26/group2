@@ -518,6 +518,7 @@ private:
 
     // Visual reload state
     float reloadDownwardOffset_ = 0.0f; ///< Downward offset for the reload animation
+    float grenadeThrowDownwardOffset_ = 0.0f; ///< Downward offset for the grenade-throw animation
 
     // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
     float localFireCooldown_ = 0.0f; ///< Countdown timer; fire VFX only when <= 0.

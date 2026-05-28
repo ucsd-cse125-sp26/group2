@@ -57,6 +57,10 @@ struct GrenadeConfig
     glm::vec3 tint = {1.0f, 1.0f, 1.0f}; ///< RGB multiplier for projectile rendering.
 };
 
+/// @brief Duration of the throw "wind-up": the gun dips (client viewmodel) and
+/// firing is locked out for this long after a throw. Shorter than throwCooldown.
+inline constexpr float kGrenadeThrowAnimTime = 0.5f;
+
 inline constexpr std::array<WeaponType, 3> kGrenadeTypes = {
     WeaponType::HEGrenade,
     WeaponType::Molotov,
