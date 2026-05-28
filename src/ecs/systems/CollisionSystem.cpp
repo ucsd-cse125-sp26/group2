@@ -475,20 +475,28 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 return;
             }
 
-            // Stuck to a player: ride the host's position each tick (no gravity, no
-            // collision) and let the fuse run. If the host vanished (disconnect /
-            // cleanup) detach and fall normally. The fuse tick below detonates at the
-            // updated position, and detonateGrenade passes stuckTo as directKillTarget.
-            bool stuckToPlayer = false;
-            if (projectile.stuckTo != entt::null) {
-                const Position* hostPos =
-                    registry.valid(projectile.stuckTo) ? registry.try_get<Position>(projectile.stuckTo) : nullptr;
-                if (hostPos != nullptr) {
-                    pos.value = hostPos->value + projectile.stuckOffset;
+            // Stuck grenades are frozen until their fuse detonates — no gravity, no
+            // collision. A grenade stuck to a player rides that player's position;
+            // if the player vanished (disconnect / cleanup) it detaches and falls.
+            // A world-stuck grenade just holds its contact position. The fuse tick
+            // below detonates at that position, and detonateGrenade passes stuckTo
+            // as directKillTarget (null for world sticks → normal AoE only).
+            bool frozen = false;
+            if (projectile.stuck) {
+                frozen = true;
+                if (projectile.stuckTo != entt::null) {
+                    const Position* hostPos =
+                        registry.valid(projectile.stuckTo) ? registry.try_get<Position>(projectile.stuckTo) : nullptr;
+                    if (hostPos != nullptr) {
+                        pos.value = hostPos->value + projectile.stuckOffset;
+                    } else {
+                        projectile.stuckTo = entt::null;
+                        projectile.stuck = false;
+                        frozen = false;
+                    }
+                }
+                if (frozen) {
                     vel.value = glm::vec3{0.0f};
-                    stuckToPlayer = true;
-                } else {
-                    projectile.stuckTo = entt::null;
                 }
             }
 
@@ -509,8 +517,8 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
 
             projectile.currentLifeTime += dt;
 
-            // Stuck grenades don't move under physics — they're glued to the host.
-            if (stuckToPlayer) {
+            // Stuck grenades don't move under physics — they're glued in place.
+            if (frozen) {
                 return;
             }
 
@@ -550,11 +558,14 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 pos.value += vel.value * k_hit.tFirst * remainingTime;
                 remainingTime *= (1.0f - k_hit.tFirst);
 
-                // Sticky grenades: glue to the surface (or player) and arm the fuse if it wasn't
-                // already running. Consume `sticky` so subsequent hits don't keep snapping to zero.
+                // Sticky grenades: glue to the surface (or player) on first contact and arm
+                // the fuse. `stuck` freezes it in place for the rest of its life (see the
+                // frozen block above) so it never bounces, falls, or impact-detonates.
+                // Consume `sticky` so this only happens once.
                 if (projectile.sticky) {
                     vel.value = glm::vec3{0.0f};
                     projectile.sticky = false;
+                    projectile.stuck = true;
                     if (playerFirst) {
                         // Ride this player and guarantee a kill on detonation.
                         projectile.stuckTo = hitPlayer;
