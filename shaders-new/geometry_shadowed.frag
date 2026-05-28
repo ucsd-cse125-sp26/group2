@@ -51,8 +51,9 @@ layout(location = 0) out vec4 color;
 // Just a single directional light for now...
 //const vec3 light_direction = normalize(-vec3(1.0f,1.0f,1.0f));
 //const vec4 light_color = vec4(1.0f,1.0f,1.0f,1.0f);
+const vec3 ambient_color = 0.5f * vec3(0.08f, 0.08f,0.12f); // dark-blue
 //const vec3 ambient_color = normalize(vec3(0.08f, 0.08f,0.12f)); // dark-blue
-const vec3 ambient_color = vec3(0.0f, 0.0f,0.0f); // dark-black
+//const vec3 ambient_color = vec3(0.0f, 0.0f,0.0f); // dark-black
 
 void main()
 {
@@ -60,10 +61,6 @@ void main()
 
     vec4 albedo = materialFlags.useTexture != 0 ? texture(tex, frag_vt) : material.diffuse;
     albedo.rgb = pow(albedo.rgb,vec3(2.2f));
-
-    //vec3 frag_worldPosFinal = vec3(frag_worldPos.x,-frag_worldPos.y,frag_worldPos.z);
-    vec3 frag_worldPosFinal = frag_worldPos;
-    //vec3 frag_worldPosFinal = frag_worldPos;
 
     float depthA = lightInfo.pointLightFarPlane / (lightInfo.pointLightFarPlane - lightInfo.pointLightNearPlane );
     float depthB = depthA * lightInfo.pointLightNearPlane;
@@ -75,37 +72,22 @@ void main()
 
     for (int i = 0; i < lightInfo.numPointLights; i++ ){
         PointLight pLight_i = lightInfo.pointLights[i];
-        //vec3 lightPosFinal = vec3(pLight_i.pos.x,-pLight_i.pos.y,pLight_i.pos.z);
-        vec3 lightPosFinal = pLight_i.pos;
-
-        //vec3 normalFinal = vec3(normal.x,-normal.y,normal.z);
-        vec3 normalFinal = normal;
 
         vec3 lightToWorldPos = frag_worldPos - pLight_i.pos;
-        //vec3 biasedLightToWorldPos = (frag_worldPosFinal + normalFinal * SHADOW_BIAS) - lightPosFinal;
-        vec3 biasedLightToWorldPos = lightToWorldPos;
-
         float r = length(lightToWorldPos);
 
-        float depth = depthA - depthB / r ;
+        vec3 absDir = abs(lightToWorldPos);
+        float dominantAxis = max(absDir.x, max(absDir.y, absDir.z));
+        float depth = depthA - depthB / dominantAxis;
 
 
-        float biasFactor = 0.005; // tune this, much smaller than world-space bias
-        float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
-        float biasedDepth = depth - biasFactor * (1.0 - cosT_i); // more bias on grazing angles
-
-        float shadow_i = texture(pointLightShadowMaps,vec4(biasedLightToWorldPos,float(i)),biasedDepth);
-        //float shadow_i = texture(pointLightShadowMaps,vec4(biasedLightToWorldPos,float(i)),depth);
-        //float shadow_i = 1.0f;
+        float shadow_i = texture(pointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
 
         float attenutaion = 1.0f / (r * r);
 
+        float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
         irradiance += shadow_i * pLight_i.color * pLight_i.intensity * attenutaion * cosT_i;
 
-//        vec4 sampledValue = texture(pointLightShadowMaps, vec4(lightToWorldPos, float(i)));
-//        float storedDepth = sampledValue.r;
-//        color = vec4(storedDepth, storedDepth, storedDepth, 1.0);
-//        return;
     }
 
     //albedo.rgb *= (normal * 0.5f) + 0.5f;

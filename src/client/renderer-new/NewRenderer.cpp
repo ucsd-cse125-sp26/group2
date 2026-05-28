@@ -92,7 +92,6 @@ bool NewRenderer::init(SDL_Window* window)
         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
         return false;
     }
-
     sampler_ = Boilerplate::createLinearRepeatSampler(device_);
     if (!sampler_) {
         SDL_Log("NewRenderer: failed to create sampler: %s", SDL_GetError());
@@ -225,7 +224,8 @@ bool NewRenderer::createDepthPipeline()
     depthPipelineDesc.depthTest = true;
     depthPipelineDesc.depthWrite = true;
     //depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_BACK;
-    depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_FRONT;
+    //depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_FRONT;
+    depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_NONE;
 
     depthPipeline_ = Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
 
@@ -249,6 +249,7 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 }
 
 // ─── Per-frame entry point ──────────────────────────────────────────────────
+
 
 void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
@@ -297,8 +298,8 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
     //constexpr uint32_t shadowSize = 2048;
-    //constexpr uint32_t shadowSize = 1024;
-    constexpr uint32_t shadowSize = 512;
+    // constexpr uint32_t shadowSize = 1024;
+     constexpr uint32_t shadowSize = 512;
     constexpr Uint8 numCubeFaces = 6;
 
     static glm::vec3 cubeFaceTargets[numCubeFaces];
@@ -339,11 +340,10 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         //std::cout << "NewRenderer::drawFrame: sceneLightInfo_.numPointLights = " << sceneLightInfo_.numPointLights << std::endl;
         shadowMap = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize,true,MAX_POINT_LIGHTS);
 
-        //const glm::mat4 shadowProjection = glm::perspective(glm::radians(90.0f),1.0f,sceneLightInfo_.pointLightNearPlane,sceneLightInfo_.pointLightFarPlane);
+        glm::mat4 shadowProjection = glm::perspective(glm::radians(90.0f),1.0f,sceneLightInfo_.pointLightNearPlane,sceneLightInfo_.pointLightFarPlane);
+        shadowProjection[1][1] *= -1;
         for (Uint8 iLight = 0; iLight < sceneLightInfo_.numPointLights; iLight++) {
             PointLight &light = sceneLightInfo_.pointLights[iLight];
-            glm::mat4 shadowProjection = glm::perspective(glm::radians(90.0f),1.0f,sceneLightInfo_.pointLightNearPlane,sceneLightInfo_.pointLightFarPlane);
-            shadowProjection[1][1] *= -1;
             glm::vec3 yNegatedLightPosition = light.position;
             // yNegatedLightPosition.y *= -1.0f;
 
@@ -361,8 +361,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         }
 
     }
-
-
 
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
     // shadowMapBindings_.push({shadowMap, depthSampler_});
@@ -411,7 +409,11 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,Uint8 layer
 {
     SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture,layer,true);
 
+    SDL_Log("layer=%d texture=%p", (int)layer, (void*)depthTexture);
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
+    SDL_Log("pass=%p error=%s", (void*)geometryPass, SDL_GetError());
+
+    // SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
     SDL_BindGPUGraphicsPipeline(geometryPass, depthPipeline_);
 
     SDL_PushGPUVertexUniformData(cmd, 0, &shadowViewProjection, sizeof(glm::mat4));

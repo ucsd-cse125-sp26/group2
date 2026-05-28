@@ -46,8 +46,8 @@ struct Vertex
 struct LightUBO {
     uint32_t numPointLights = 0;
     uint32_t numSpotLights = 0;
-    float pointLightFarPlane = 1500000.0f;
-    float pointLightNearPlane = 10.0f;
+    float pointLightFarPlane = 7500.0f;
+    float pointLightNearPlane = 100.0f;
     PointLight pointLights[MAX_POINT_LIGHTS];
 };
 /// @brief Graphics-team's work-in-progress SDL3 GPU renderer.
@@ -344,6 +344,7 @@ private:
 
     bool createGeometryPipeline();
     bool createDepthPipeline();
+    bool createDebugDepthPipeline();
     bool createHudPipeline();
 
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
