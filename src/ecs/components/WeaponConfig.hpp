@@ -17,6 +17,12 @@ struct WeaponConfig
     int defaultAmmoCapacity = 0;
     float damage = 0.0f;
     bool hitscan = true;
+    /// @brief Hit-detection cylinder radius (world units) for hitscan weapons.
+    /// The shot is swept as a sphere of this radius along the aim ray ("cylinder
+    /// hitreg") instead of an infinitely thin ray, so near-misses still land.
+    /// 0 = exact ray (legacy behaviour). Only affects player hitboxes, not world
+    /// geometry (bullets still need crosshair line-of-sight past walls).
+    float hitscanRadius = 0.0f;
     float initialProjectileSpeed = 0.0f;
     bool explosive = false;
     bool isBeam = false;             ///< True for continuous beam weapons (no per-shot cooldown).
@@ -127,6 +133,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 500,
             .damage = 15.0f,
             .hitscan = true,
+            .hitscanRadius = 8.0f, // ~forgiving rifle; player capsules are ~2.5–6.5u radius in world space.
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .reloadTime = 1.25f,
@@ -159,6 +166,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 32,
             .damage = 50.0f,
             .hitscan = true,
+            .hitscanRadius = 6.0f,
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isCharge = true,
@@ -172,6 +180,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 200,
             .damage = 5.0f,
             .hitscan = true,
+            .hitscanRadius = 6.0f,
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isBeam = true,
@@ -189,6 +198,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 36,
             .damage = 10.0f, // per-pellet; 11 pellets → 110 body max, ~165 head.
             .hitscan = true,
+            .hitscanRadius = 3.0f, // smaller than rifle — 11 pellets, don't over-buff close range.
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .reloadTime = 2.5f,

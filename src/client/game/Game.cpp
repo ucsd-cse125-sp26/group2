@@ -3926,8 +3926,16 @@ SDL_AppResult Game::iterate()
                     // path uses it directly so blue tracers always
                     // terminate on whatever the client believed was
                     // in the way (a wall, a capsule, or 5000 u of air).
-                    const physics::HitboxHit localHit =
-                        physics::resolveHitscanHitbox(registry, localEntity, cap.origin, cap.direction);
+                    // Match the server's "cylinder hitreg": sweep the local
+                    // resolve with the equipped weapon's hitscanRadius so the
+                    // blue debug tracer terminates on the same fattened capsule
+                    // the server will test against.
+                    float localHitscanRadius = 0.0f;
+                    if (const auto* ws = registry.try_get<WeaponState>(localEntity)) {
+                        localHitscanRadius = getWeaponConfig(getEquippedGun(*ws).type).hitscanRadius;
+                    }
+                    const physics::HitboxHit localHit = physics::resolveHitscanHitbox(
+                        registry, localEntity, cap.origin, cap.direction, localHitscanRadius);
                     cap.hitPoint = localHit.point;
                     cap.hitTargetClientId = net::shotdebug::k_missClientId;
                     cap.hitRegion = 0;

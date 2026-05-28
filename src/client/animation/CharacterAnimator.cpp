@@ -362,6 +362,29 @@ struct CharacterAnimator::Impl
     // capsules for spine joints stay consistent with the visible pose.
     SpineBendChain spineBend;
 
+    // Lower-body strafe mask. true for joints in the leg subtrees (LeftUpLeg /
+    // RightUpLeg and their descendants). Used to restrict the strafe clip's
+    // influence to the legs so the upper body keeps facing forward — the weapon
+    // is aimed by the spine-bend overlay (model-space pitch) and would point
+    // off-axis if the strafe pose were allowed to twist/lean the torso. Hips is
+    // intentionally excluded: it is the rig root, so blending it would carry the
+    // strafe rotation into the whole upper body and defeat the masking.
+    std::vector<bool> lowerBodyMask;
+
+    // Per-joint blend weights (SoA, num_soa_joints entries) rebuilt each frame
+    // when the strafe slot is active. locoJointWeights drive slots 0/1 (loco),
+    // strafeJointWeights drive slot 2 (strafe). On the upper body the strafe
+    // weight is 0 and the loco weight is 1; on the legs they crossfade by
+    // strafeBlend. ozz normalizes per joint, so the legs reproduce the original
+    // forward/strafe crossfade while the torso stays pure forward-loco.
+    std::vector<ozz::math::SimdFloat4> locoJointWeights;
+    std::vector<ozz::math::SimdFloat4> strafeJointWeights;
+
+    // Lateral-vs-total speed ratio in [0,1] used to weight the strafe mask on
+    // the legs. Set by update() (smoothed) for the local player + server, and
+    // recomputed from inputs by renderFromServer() for remote players.
+    float strafeBlend = 0.0f;
+
     // Phase F polish state.
     int hipsJointIdx = -1;             ///< "mixamorig:Hips" index, drives the hip-lean coupling.
     std::vector<bool> hipsDescendants; ///< Descendant mask for the hip-lean delta.
@@ -434,6 +457,32 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
         if (const auto hipsIt = jm.find("mixamorig:Hips"); hipsIt != jm.end()) {
             impl_->hipsJointIdx = hipsIt->second;
             impl_->hipsDescendants = buildDescendantMask(rig.skeleton(), impl_->hipsJointIdx);
+        }
+
+        // Lower-body strafe mask: the union of the two leg subtrees. Restricts
+        // the strafe clip to the legs so the torso/arms keep their forward
+        // locomotion orientation and the weapon stays on-aim.
+        {
+            impl_->lowerBodyMask.assign(static_cast<size_t>(numJoints), false);
+            int legRoots = 0;
+            for (const char* legRootName : {"mixamorig:LeftUpLeg", "mixamorig:RightUpLeg"}) {
+                const auto it = jm.find(legRootName);
+                if (it == jm.end())
+                    continue;
+                const std::vector<bool> sub = buildDescendantMask(rig.skeleton(), it->second);
+                const size_t n = std::min(sub.size(), impl_->lowerBodyMask.size());
+                for (size_t j = 0; j < n; ++j)
+                    impl_->lowerBodyMask[j] = impl_->lowerBodyMask[j] || sub[j];
+                ++legRoots;
+            }
+            if (legRoots > 0) {
+                const int numSoa = rig.skeleton() ? rig.skeleton()->num_soa_joints() : 0;
+                impl_->locoJointWeights.resize(static_cast<size_t>(numSoa));
+                impl_->strafeJointWeights.resize(static_cast<size_t>(numSoa));
+                SDL_Log("CharacterAnimator: strafe lower-body mask bound (%d/2 leg roots)", legRoots);
+            } else {
+                impl_->lowerBodyMask.clear(); // No legs found — disables masking gracefully.
+            }
         }
 
         if (foundBones > 0) {
@@ -1116,23 +1165,36 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
     auto& sOvr = impl_->samplers[k_slotOverride];
     auto& sReserved = impl_->samplers[4];
 
+    // Strafe is applied as a per-joint blend on the legs only (see
+    // runSamplingAndSkinning). The forward/backward locomotion clips therefore
+    // keep their FULL group weight here — they must stay sampled at non-zero
+    // weight even during pure lateral movement so the upper body has a
+    // forward-facing pose to fall back on. The strafe slot also carries the
+    // full group weight; its actual influence is scaled per joint by the
+    // lower-body mask × strafeBlend at blend time. (Previously these scalar
+    // weights folded in (1 - strafeRatio) / strafeRatio, which faded the
+    // forward clips to zero during pure strafe and let the strafe pose twist
+    // the whole torso off-aim.)
+    impl_->strafeBlend = strafeRatio;
+
     s0.id = locoA;
     s0.timeRatio = impl_->locomotionPhase;
-    s0.weight = (1.0f - locoBlend) * groupLoco * (1.0f - strafeRatio);
+    s0.weight = (1.0f - locoBlend) * groupLoco;
     s0.playbackSpeed = speedScale;
     s0.active = (s0.weight > 1e-4f) && impl_->library->has(locoA);
 
     s1.id = locoB;
     s1.timeRatio = impl_->locomotionPhase;
-    s1.weight = locoBlend * groupLoco * (1.0f - strafeRatio);
+    s1.weight = locoBlend * groupLoco;
     s1.playbackSpeed = speedScale;
     s1.active = (s1.weight > 1e-4f) && impl_->library->has(locoB) && (locoB != locoA);
 
     sStrafe.id = strafeClip;
     sStrafe.timeRatio = impl_->locomotionPhase;
-    sStrafe.weight = strafeRatio * groupLoco;
+    sStrafe.weight = groupLoco;
     sStrafe.playbackSpeed = speedScale;
-    sStrafe.active = (sStrafe.weight > 1e-4f) && (strafeClip != ClipId::_Count) && impl_->library->has(strafeClip);
+    sStrafe.active = (strafeRatio > 1e-4f) && (groupLoco > 1e-4f) && (strafeClip != ClipId::_Count) &&
+                     impl_->library->has(strafeClip);
 
     // --- 5. Override slot (Slide / WallRun / Jump / Debug). ---
     ClipId overrideClip = ClipId::_Count;
@@ -1256,6 +1318,25 @@ void CharacterAnimator::renderFromServer(const AnimSnapshot& serverState, const 
     // right clip set in its samplers.
     impl_->wallRunMirror = (inputs.wallRunSide == WallSideLeft);
 
+    // Recompute the lower-body strafe blend from the (interp-delayed) inputs.
+    // The snapshot carries each slot's full group weight but not strafeRatio,
+    // so the leg mask is reconstructed here. Upper-body correctness does not
+    // depend on the exact value — the mask zeroes the strafe layer on the torso
+    // unconditionally — so an instantaneous (unsmoothed) estimate is fine.
+    {
+        const glm::vec3 vhoriz{inputs.velocityWorld.x, 0.0f, inputs.velocityWorld.z};
+        const float speed = glm::length(vhoriz);
+        if (speed > k_idleCutoff) {
+            const float cosYaw = std::cos(inputs.yawRad);
+            const float sinYaw = std::sin(inputs.yawRad);
+            const glm::vec3 right{cosYaw, 0.0f, -sinYaw};
+            const float rightSpeed = glm::dot(vhoriz, right);
+            impl_->strafeBlend = std::clamp(std::abs(rightSpeed) / std::max(speed, 1.0f), 0.0f, 1.0f);
+        } else {
+            impl_->strafeBlend = 0.0f;
+        }
+    }
+
     // Run the shared ozz sampling + blending + skinning pipeline.
     runSamplingAndSkinning(inputs);
 }
@@ -1292,14 +1373,50 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
         const auto rest = impl_->rig->skeleton()->joint_rest_poses();
         std::copy(rest.begin(), rest.end(), impl_->blendedLocals.begin());
     } else {
+        // Partial-blend mask: when the strafe slot is active, restrict it to the
+        // leg subtrees and keep the locomotion slots at full weight on the upper
+        // body. This must be coupled with the strafe slot's "full group weight"
+        // scheme in update()/renderFromServer() — the strafe layer's real
+        // influence lives entirely in these per-joint weights, so it must never
+        // blend without them. On the upper body: strafe weight 0, loco weight 1
+        // (pure forward-facing torso → weapon stays on-aim). On the legs: strafe
+        // weight strafeBlend, loco weight (1 - strafeBlend) → original crossfade.
+        const bool maskStrafe = impl_->samplers[k_slotStrafe].active && !impl_->lowerBodyMask.empty() &&
+                                !impl_->locoJointWeights.empty();
+        if (maskStrafe) {
+            const float sb = std::clamp(impl_->strafeBlend, 0.0f, 1.0f);
+            const size_t numSoa = impl_->locoJointWeights.size();
+            const size_t numJoints = impl_->lowerBodyMask.size();
+            for (size_t g = 0; g < numSoa; ++g) {
+                float lLoco[4];
+                float lStrafe[4];
+                for (int lane = 0; lane < 4; ++lane) {
+                    const size_t j = g * 4 + static_cast<size_t>(lane);
+                    const bool lower = (j < numJoints) && impl_->lowerBodyMask[j];
+                    lLoco[lane] = lower ? (1.0f - sb) : 1.0f;
+                    lStrafe[lane] = lower ? sb : 0.0f;
+                }
+                impl_->locoJointWeights[g] = ozz::math::simd_float4::Load(lLoco[0], lLoco[1], lLoco[2], lLoco[3]);
+                impl_->strafeJointWeights[g] =
+                    ozz::math::simd_float4::Load(lStrafe[0], lStrafe[1], lStrafe[2], lStrafe[3]);
+            }
+        }
+
         std::array<ozz::animation::BlendingJob::Layer, kNumSamplerSlots> layers;
         int layerCount = 0;
         for (size_t i = 0; i < impl_->samplers.size(); ++i) {
             const auto& samp = impl_->samplers[i];
             if (!samp.active)
                 continue;
-            layers[static_cast<size_t>(layerCount)].weight = samp.weight;
-            layers[static_cast<size_t>(layerCount)].transform = ozz::make_span(impl_->perSamplerLocals[i]);
+            auto& layer = layers[static_cast<size_t>(layerCount)];
+            layer.weight = samp.weight;
+            layer.transform = ozz::make_span(impl_->perSamplerLocals[i]);
+            if (maskStrafe) {
+                if (i == k_slotLocoA || i == k_slotLocoB)
+                    layer.joint_weights = ozz::make_span(impl_->locoJointWeights);
+                else if (i == k_slotStrafe)
+                    layer.joint_weights = ozz::make_span(impl_->strafeJointWeights);
+            }
             ++layerCount;
         }
 

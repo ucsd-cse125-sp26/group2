@@ -613,8 +613,9 @@ inline void handleFire(Registry& registry,
         // PR-5 (server-perf): pass the ray to skip rewind work for
         // players whose AABB doesn't intersect the shot. Cuts O(N)
         // per shot to O(candidates).
-        const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
-        const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
+        const auto rewindGuard = systems::rewindHitboxes(
+            registry, shooter, &eye, &direction, physics::k_hitscanRange, config.hitscanRadius);
+        const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction, config.hitscanRadius);
 
         // PR-18b: log to server-side shot-resolution CSV (no-op when
         // env unset).  Beam path: every active-fire tick records.
@@ -678,8 +679,9 @@ inline void handleFire(Registry& registry,
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
         // Phase 6 lag-compensated hitscan (see beam path for details).
         // PR-5: ray-filtered rewind, see beam path.
-        const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
-        const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
+        const auto rewindGuard = systems::rewindHitboxes(
+            registry, shooter, &eye, &direction, physics::k_hitscanRange, config.hitscanRadius);
+        const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction, config.hitscanRadius);
 
         // PR-18b: log to server-side shot-resolution CSV.  Charge
         // path: one log row per release-fire.
@@ -757,13 +759,14 @@ inline void handleFire(Registry& registry,
         // Phase 6 lag-compensated hitscan (see beam path for details).
         // PR-5: ray-filtered rewind. Rewind uses the central aim direction; all
         // pellets in a shotgun blast share the same rewound state.
-        const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
+        const auto rewindGuard = systems::rewindHitboxes(
+            registry, shooter, &eye, &direction, physics::k_hitscanRange, config.hitscanRadius);
 
         // Per-pellet resolver: runs the raycast, applies damage, emits the
         // tracer + impact events. Used once for normal hitscan and N times for
         // shotgun in a star spread.
         const auto resolvePellet = [&](const glm::vec3& pelletDir, bool logCenter) {
-            const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, pelletDir);
+            const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, pelletDir, config.hitscanRadius);
 
             if (logCenter) {
                 logShot(registry, shooter, input.tick, eye, pelletDir, hit);
