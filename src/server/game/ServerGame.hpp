@@ -63,6 +63,10 @@ public:
 
     [[nodiscard]] bool isHost(ClientId clientId) const;
     void onMatchConfigUpdated(std::function<void(const MatchConfig&)> fn) { matchConfigUpdatedFn_ = std::move(fn); }
+    void onDiscoverySettingsUpdated(std::function<void(const DiscoverySettings&)> fn)
+    {
+        discoverySettingsUpdatedFn_ = std::move(fn);
+    }
     bool setMatchConfig(const MatchConfig& config);
     bool setKillsToWin(int kills);
     bool setMaxPlayers(int maxPlayers);
@@ -158,6 +162,7 @@ private:
     LobbyManager lobbyManager;                      ///< Owns lobby roster and validates host-initiated match starts.
     MatchController matchController;                ///< Manages match flow and state.
     std::function<void(const MatchConfig&)> matchConfigUpdatedFn_;
+    std::function<void(const DiscoverySettings&)> discoverySettingsUpdatedFn_;
     bool lobbyStartCountdownActive = false; ///< True while lobby is counting down before entering match countdown.
     float lobbyStartCountdownTimer = 0.0f;  ///< Seconds remaining in the lobby staging countdown.
     ClientId lobbyStartRequester{-1};       ///< Host that requested the active lobby staging countdown.

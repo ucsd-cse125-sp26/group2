@@ -565,6 +565,16 @@ bool Client::sendMatchConfig(const MatchConfig& config)
     return send(buf, static_cast<std::uint32_t>(sizeof(buf)));
 }
 
+bool Client::sendDiscoverySettings(const DiscoverySettings& settings)
+{
+    const std::uint8_t buf[3] = {
+        static_cast<std::uint8_t>(PacketType::UPDATE_DISCOVERY_SETTINGS),
+        static_cast<std::uint8_t>(settings.advertiseGlobal ? 1 : 0),
+        static_cast<std::uint8_t>(settings.advertiseLan ? 1 : 0),
+    };
+    return send(buf, static_cast<std::uint32_t>(sizeof(buf)));
+}
+
 bool Client::sendServerShutdown()
 {
     const auto type = static_cast<std::uint8_t>(PacketType::REQUEST_SERVER_SHUTDOWN);

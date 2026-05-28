@@ -7,6 +7,7 @@
 #include "app/AppContext.hpp"
 #include "host/HostedServer.hpp"
 #include "menus/pause/ConfirmModal.hpp"
+#include "network/DiscoverySettings.hpp"
 #include "network/MatchConfig.hpp"
 #include "renderer-new/NewRenderer.hpp"
 
@@ -56,11 +57,11 @@ private:
     /// @brief True if the client is connected and is the current lobby host.
     bool canManageCurrentServer() const;
 
-    /// @brief True if the current draft differs from the last config sent to or received from the server.
-    bool hasUnsavedMatchChanges() const;
+    /// @brief True if the current draft differs from the last settings sent to or received from the server.
+    bool hasUnsavedServerChanges() const;
 
-    /// @brief Send the current match settings to the hosted server.
-    bool updateMatchConfig();
+    /// @brief Send the current host-managed settings to the hosted server.
+    bool updateServerSettings();
 
     /// @brief Ask the host whether to discard unsaved match setting changes before leaving this screen.
     void requestDiscardMatchChangesConfirm();
@@ -75,7 +76,8 @@ private:
     HostConfigState* draft = nullptr;                 ///< Persistent draft state owned by App; not owned.
     std::string lastError;                            ///< Error message shown on the host form; empty when no error.
     std::optional<MatchConfig> lastSyncedMatchConfig; ///< Last match config acknowledged locally as server state.
-    ConfirmModal confirm_;                            ///< Reusable confirmation modal for discarding unsaved changes.
+    std::optional<DiscoverySettings> lastSyncedDiscoverySettings; ///< Last discovery settings acknowledged locally.
+    ConfirmModal confirm_; ///< Reusable confirmation modal for discarding unsaved changes.
     PendingConfirmAction pendingConfirmAction = PendingConfirmAction::None; ///< Action to run after modal confirm.
     bool pendingLaunch = false;     ///< Set when the user clicks "Launch", cleared by App.
     bool pendingShutdown = false;   ///< Set when the user clicks "Shutdown", cleared by App.

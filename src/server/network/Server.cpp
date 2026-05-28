@@ -63,6 +63,7 @@ bool Server::init(const char* addr,
 {
     transportConfig_ = transport;
     discoveryConfig_ = discovery;
+    advertiseServer_.store(discoveryConfig_.advertiseServer, std::memory_order_relaxed);
     usingUdpSession_ = transportConfig_.useUdpSessions;
     listenPort_ = port;
 
@@ -89,7 +90,7 @@ bool Server::init(const char* addr,
 
         session_.preferRelay(transportConfig_.forceRelay);
 
-        if (discoveryConfig_.enabled && discoveryConfig_.advertiseServer) {
+        if (discoveryConfig_.enabled) {
             NET_Address* dir = NET_ResolveHostname(discoveryConfig_.directoryHost.c_str());
             if (dir && NET_WaitUntilResolved(dir, 1000) == NET_SUCCESS) {
                 directoryAddr_.release();
@@ -706,7 +707,8 @@ void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload, cons
 
 void Server::sendDirectoryHeartbeat(Uint64 nowMs)
 {
-    if (!usingUdpSession_ || !discoveryConfig_.enabled || !discoveryConfig_.advertiseServer || !directoryAddr_.addr)
+    if (!usingUdpSession_ || !discoveryConfig_.enabled || !advertiseServer_.load(std::memory_order_relaxed) ||
+        !directoryAddr_.addr)
         return;
     if (lastDirectoryHeartbeatMs_ != 0 && nowMs - lastDirectoryHeartbeatMs_ < 2000)
         return;
@@ -730,6 +732,11 @@ void Server::setMaxPlayers(int maxPlayers)
 {
     const int clamped = std::clamp(maxPlayers, 2, static_cast<int>(k_maxAcceptedClients));
     maxPlayers_.store(clamped, std::memory_order_relaxed);
+}
+
+void Server::setAdvertiseServer(bool enabled)
+{
+    advertiseServer_.store(enabled, std::memory_order_relaxed);
 }
 
 void Server::networkLoop()
@@ -1382,6 +1389,18 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         event.type = EventType::MatchConfigUpdated;
         event.clientId = conn.clientId;
         event.matchConfig = config;
+        eventQueue.enqueue(event);
+        break;
+    }
+    case PacketType::UPDATE_DISCOVERY_SETTINGS: {
+        if (payloadLen != 2)
+            return;
+
+        Event event{};
+        event.type = EventType::DiscoverySettingsUpdated;
+        event.clientId = conn.clientId;
+        event.discoverySettings.advertiseGlobal = payload[0] != 0;
+        event.discoverySettings.advertiseLan = payload[1] != 0;
         eventQueue.enqueue(event);
         break;
     }

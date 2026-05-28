@@ -165,6 +165,9 @@ public:
     /// @brief Update the authoritative client admission cap.
     void setMaxPlayers(int maxPlayers);
 
+    /// @brief Enable or disable global directory heartbeats at runtime.
+    void setAdvertiseServer(bool enabled);
+
     /// @brief Drain every connection's outbound queue to its socket.
     ///
     /// Call once per server tick, after all per-tick broadcasts. Disconnects
@@ -411,6 +414,7 @@ private:
     Uint64 lastDirectoryHeartbeatMs_ = 0;
     std::uint32_t nextChatServerSeq_ = 0;
     std::atomic<int> maxPlayers_{128};
+    std::atomic<bool> advertiseServer_{true};
     bool usingUdpSession_ = false;
     Uint16 listenPort_ = 0;
     std::unordered_map<std::uint64_t, ClientId> connIdToClient_; ///< UDP connection-id → ClientId lookup.

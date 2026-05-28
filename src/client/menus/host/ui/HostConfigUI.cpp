@@ -95,6 +95,22 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Advertise on LAN");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::BeginDisabled(inputs.serverRunning && !inputs.canManageServer);
+            ImGui::Checkbox("##AdvertiseLan", &draft.advertiseLan);
+            ImGui::EndDisabled();
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Advertise on Internet");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::BeginDisabled(inputs.serverRunning && !inputs.canManageServer);
+            ImGui::Checkbox("##AdvertiseGlobal", &draft.advertiseGlobal);
+            ImGui::EndDisabled();
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted("Auto Port");
             ImGui::TableSetColumnIndex(1);
             ImGui::TextUnformatted(draft.useSpecificPort ? "Off" : "On");
@@ -115,7 +131,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
                 ImGui::SameLine();
                 ImGui::TextDisabled("local process");
             }
-            if (inputs.hasUnsavedMatchChanges) {
+            if (inputs.hasUnsavedServerChanges) {
                 ImGui::SameLine();
                 ImGui::TextDisabled("Unsaved changes");
             }
@@ -140,7 +156,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
         if (inputs.serverRunning) {
             ImGui::SameLine();
-            ImGui::BeginDisabled(!inputs.canManageServer || !inputs.hasUnsavedMatchChanges);
+            ImGui::BeginDisabled(!inputs.canManageServer || !inputs.hasUnsavedServerChanges);
             if (ImGui::Button("Update Settings")) {
                 result.updateClicked = true;
             }

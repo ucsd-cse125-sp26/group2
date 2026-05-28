@@ -36,6 +36,7 @@ snapshot-hz = 128
 # screen, and relay fallback uses the same UDP service.
 enabled = true
 advertise-server = true
+lan-broadcast-enabled = true
 directory-host = "cse125.ucsd.edu"
 directory-udp-port = 10081
 server-name = "Group 2 Server"

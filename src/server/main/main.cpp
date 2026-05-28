@@ -171,6 +171,8 @@ int main(int argc, char* argv[])
     program.add_argument("--address").help("Address to listen on for game clients (default: 127.0.0.1)");
     program.add_argument("--port").scan<'u', uint16_t>().help("Port to listen on for game clients (default: 9999)");
     program.add_argument("--server-name").help("Name advertised in LAN/global server browsers");
+    program.add_argument("--no-global-broadcast").flag().help("Do not publish this server to the global directory");
+    program.add_argument("--no-lan-broadcast").flag().help("Do not respond to LAN discovery requests");
     program.add_argument("--legacy-tcp").flag().help("Force legacy TCP transport for hosted-client launches");
     program.add_argument("--killsToWin")
         .scan<'i', int>()
@@ -235,6 +237,13 @@ int main(int argc, char* argv[])
         cfg.discovery.serverName = server_name::sanitize(program.get<std::string>("--server-name"));
     } else {
         cfg.discovery.serverName = server_name::sanitize(cfg.discovery.serverName);
+    }
+
+    if (program.get<bool>("--no-global-broadcast")) {
+        cfg.discovery.advertiseServer = false;
+    }
+    if (program.get<bool>("--no-lan-broadcast")) {
+        cfg.discovery.lanBroadcastEnabled = false;
     }
 
     if (program.is_used("--max-players")) {
@@ -308,11 +317,30 @@ int main(int argc, char* argv[])
         .currentPlayers = 0,
         .maxPlayers = cfg.discovery.maxPlayers,
     };
+    bool lanDiscoveryRunning = false;
     game.onMatchConfigUpdated([&discoveryServer, &serverInfo](const MatchConfig& config) {
         serverInfo.maxPlayers = static_cast<std::uint8_t>(std::clamp(config.maxPlayers, 2, 128));
         discoveryServer.updateInfo(serverInfo);
     });
-    discoveryServer.start(9998, serverInfo, [&server]() { return server.getClientCount(); });
+    game.onDiscoverySettingsUpdated(
+        [&discoveryServer, &server, &serverInfo, &lanDiscoveryRunning, &cfg](const DiscoverySettings& settings) {
+            cfg.discovery.advertiseServer = settings.advertiseGlobal;
+            cfg.discovery.lanBroadcastEnabled = settings.advertiseLan;
+
+            if (!cfg.discovery.enabled) {
+                return;
+            }
+            if (settings.advertiseLan && !lanDiscoveryRunning) {
+                lanDiscoveryRunning =
+                    discoveryServer.start(9998, serverInfo, [&server]() { return server.getClientCount(); });
+            } else if (!settings.advertiseLan && lanDiscoveryRunning) {
+                discoveryServer.stop();
+                lanDiscoveryRunning = false;
+            }
+        });
+    if (cfg.discovery.enabled && cfg.discovery.lanBroadcastEnabled) {
+        lanDiscoveryRunning = discoveryServer.start(9998, serverInfo, [&server]() { return server.getClientCount(); });
+    }
 
     std::cout << "READY " << actualPort << '\n' << std::flush;
 

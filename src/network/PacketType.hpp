@@ -76,8 +76,9 @@ enum class PacketType : uint8_t
     LOCAL_SERVER_DISCOVERY_REQUEST, ///< client broadcasts to server, which responds with response below
     LOCAL_SERVER_DISCOVERY_RESPONSE,
 
-    UPDATE_MATCH_CONFIG,     ///< Client -> Server: update match config (e.g. kill threshold to win).
-    MATCH_CONFIG,            ///< Server -> All clients: broadcast match config on change and on join.
+    UPDATE_MATCH_CONFIG,       ///< Client -> Server: update match config (e.g. kill threshold to win).
+    MATCH_CONFIG,              ///< Server -> All clients: broadcast match config on change and on join.
+    UPDATE_DISCOVERY_SETTINGS, ///< Client -> Server: host updates global/LAN advertisement toggles.
 
-    REQUEST_SERVER_SHUTDOWN, ///< Client -> Server: current host requests authoritative server shutdown.
+    REQUEST_SERVER_SHUTDOWN,   ///< Client -> Server: current host requests authoritative server shutdown.
 };

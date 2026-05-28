@@ -29,6 +29,9 @@ bool HostConfig::init(AppContext& ctx)
         lastSyncedMatchConfig =
             MatchConfig{.killsToWin = initialDraft.killsToWin, .maxPlayers = initialDraft.maxPlayers};
     }
+    const HostConfigState initialDraft = draftConfig();
+    lastSyncedDiscoverySettings =
+        DiscoverySettings{.advertiseGlobal = initialDraft.advertiseGlobal, .advertiseLan = initialDraft.advertiseLan};
     client->onMatchConfig([this](const MatchConfig& config) { lastSyncedMatchConfig = config; });
     return true;
 }
@@ -64,14 +67,14 @@ SDL_AppResult HostConfig::iterate()
         lastError = "Lost connection to hosted server";
     }
     const bool canManageServer = canManageCurrentServer() || ownsLocalProcess;
-    const bool hasUnsavedChanges = serverRunning && hasUnsavedMatchChanges();
+    const bool hasUnsavedChanges = serverRunning && hasUnsavedServerChanges();
 
     HostConfigUIInputs inputs{
         .draft = *draft,
         .serverRunning = serverRunning,
         .canManageServer = canManageServer,
         .ownsLocalProcess = ownsLocalProcess,
-        .hasUnsavedMatchChanges = hasUnsavedChanges,
+        .hasUnsavedServerChanges = hasUnsavedChanges,
         .boundPort = hostedServer->port(),
         .errorMessage = lastError,
     };
@@ -82,7 +85,7 @@ SDL_AppResult HostConfig::iterate()
         pendingLaunch = true;
     }
     if (result.updateClicked) {
-        updateMatchConfig();
+        updateServerSettings();
     }
     if (result.shutdownClicked) {
         requestShutdownConfirm();
@@ -104,6 +107,10 @@ SDL_AppResult HostConfig::iterate()
             if (lastSyncedMatchConfig) {
                 draft->killsToWin = lastSyncedMatchConfig->killsToWin;
                 draft->maxPlayers = lastSyncedMatchConfig->maxPlayers;
+            }
+            if (lastSyncedDiscoverySettings) {
+                draft->advertiseGlobal = lastSyncedDiscoverySettings->advertiseGlobal;
+                draft->advertiseLan = lastSyncedDiscoverySettings->advertiseLan;
             }
             pendingGoToLobby = true;
         } else if (pendingConfirmAction == PendingConfirmAction::ShutdownServer) {
@@ -164,6 +171,8 @@ HostConfigState HostConfig::draftConfig() const
             .useSpecificPort = false,
             .useLegacyTcp = false,
             .persistAfterClientExit = false,
+            .advertiseGlobal = true,
+            .advertiseLan = true,
             .serverName = std::string(server_name::k_default),
             .killsToWin = 10,
             .maxPlayers = 8,
@@ -197,39 +206,48 @@ bool HostConfig::canManageCurrentServer() const
     });
 }
 
-bool HostConfig::hasUnsavedMatchChanges() const
+bool HostConfig::hasUnsavedServerChanges() const
 {
-    if (!draft || !lastSyncedMatchConfig)
+    if (!draft || !lastSyncedMatchConfig || !lastSyncedDiscoverySettings)
         return false;
 
     return std::clamp(draft->killsToWin, 1, 100) != lastSyncedMatchConfig->killsToWin ||
-           std::clamp(draft->maxPlayers, 2, 128) != lastSyncedMatchConfig->maxPlayers;
+           std::clamp(draft->maxPlayers, 2, 128) != lastSyncedMatchConfig->maxPlayers ||
+           draft->advertiseGlobal != lastSyncedDiscoverySettings->advertiseGlobal ||
+           draft->advertiseLan != lastSyncedDiscoverySettings->advertiseLan;
 }
 
-bool HostConfig::updateMatchConfig()
+bool HostConfig::updateServerSettings()
 {
     if (!client || !draft)
         return false;
 
     const MatchConfig config{.killsToWin = std::clamp(draft->killsToWin, 1, 100),
                              .maxPlayers = std::clamp(draft->maxPlayers, 2, 128)};
+    const DiscoverySettings discoverySettings{.advertiseGlobal = draft->advertiseGlobal,
+                                              .advertiseLan = draft->advertiseLan};
     draft->killsToWin = config.killsToWin;
     draft->maxPlayers = config.maxPlayers;
     if (!client->sendMatchConfig(config)) {
         lastError = "Failed to send match settings update";
         return false;
     }
+    if (!client->sendDiscoverySettings(discoverySettings)) {
+        lastError = "Failed to send discovery settings update";
+        return false;
+    }
 
     lastError.clear();
     lastSyncedMatchConfig = config;
+    lastSyncedDiscoverySettings = discoverySettings;
     return true;
 }
 
 void HostConfig::requestDiscardMatchChangesConfirm()
 {
     pendingConfirmAction = PendingConfirmAction::DiscardMatchChanges;
-    confirm_.open({.title = "Discard Match Settings?",
-                   .message = "You have unsaved match setting changes. Discard them?",
+    confirm_.open({.title = "Discard Server Settings?",
+                   .message = "You have unsaved server setting changes. Discard them?",
                    .confirmText = "Discard",
                    .cancelText = "Cancel",
                    .confirmIsDanger = true});

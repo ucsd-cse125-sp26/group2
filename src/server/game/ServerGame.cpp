@@ -461,6 +461,20 @@ void ServerGame::eventHandler(const Event& event)
         }
         break;
     }
+    case EventType::DiscoverySettingsUpdated: {
+        GROUP2_PROF_SCOPE("eventDiscoverySettingsUpdated");
+        if (!isHost(event.clientId)) {
+            SDL_Log("ServerGame: rejecting discovery settings update from non-host clientId %u", event.clientId.value);
+            break;
+        }
+        if (server) {
+            server->setAdvertiseServer(event.discoverySettings.advertiseGlobal);
+        }
+        if (discoverySettingsUpdatedFn_) {
+            discoverySettingsUpdatedFn_(event.discoverySettings);
+        }
+        break;
+    }
     case EventType::ServerShutdownRequested: {
         GROUP2_PROF_SCOPE("eventServerShutdownRequested");
         if (!isHost(event.clientId)) {

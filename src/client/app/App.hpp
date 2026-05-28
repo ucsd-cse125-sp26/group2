@@ -67,6 +67,8 @@ private:
         .useSpecificPort = false,
         .useLegacyTcp = false,
         .persistAfterClientExit = false,
+        .advertiseGlobal = true,
+        .advertiseLan = true,
         .serverName = "Group 2 Server",
         .killsToWin = 10,
         .maxPlayers = 8,

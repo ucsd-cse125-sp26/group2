@@ -7,6 +7,7 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/ChatProtocol.hpp"
+#include "network/DiscoverySettings.hpp"
 #include "network/MatchConfig.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
@@ -156,6 +157,9 @@ public:
 
     /// @brief Send an updated match configuration to the server (host-only).
     bool sendMatchConfig(const MatchConfig& config);
+
+    /// @brief Send updated discovery advertisement settings to the server (host-only).
+    bool sendDiscoverySettings(const DiscoverySettings& settings);
 
     /// @brief Request server shutdown. The server accepts this only from the current host.
     bool sendServerShutdown();

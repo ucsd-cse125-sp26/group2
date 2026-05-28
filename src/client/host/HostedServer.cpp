@@ -56,6 +56,12 @@ std::vector<std::string> buildServerArgs(const std::string& serverPath, const Ho
     const int requestedPort = config.useSpecificPort ? config.port : 0;
     args.push_back("--port=" + std::to_string(requestedPort));
     args.push_back("--server-name=" + server_name::sanitize(config.serverName));
+    if (!config.advertiseGlobal) {
+        args.emplace_back("--no-global-broadcast");
+    }
+    if (!config.advertiseLan) {
+        args.emplace_back("--no-lan-broadcast");
+    }
     if (config.useLegacyTcp) {
         args.emplace_back("--legacy-tcp");
     }

@@ -107,6 +107,8 @@ bool App::init()
         hostConfigState.port = networkConfig.serverNetwork.port;
         hostConfigState.useSpecificPort = false;
         hostConfigState.useLegacyTcp = false;
+        hostConfigState.advertiseGlobal = networkConfig.discovery.advertiseServer;
+        hostConfigState.advertiseLan = networkConfig.discovery.lanBroadcastEnabled;
         hostConfigState.serverName = networkConfig.discovery.serverName;
         hostConfigState.maxPlayers = networkConfig.discovery.maxPlayers;
     }
