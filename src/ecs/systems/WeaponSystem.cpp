@@ -437,9 +437,9 @@ static void spawnGrenade(Registry& registry,
 {
     const GrenadeConfig& cfg = getGrenadeConfig(type);
 
-    // Rotate eyeDir upward around eyeRight by `throwPitchOffset` rad.
-    // Negative angle: pitch-up reduces world Y rotation when right points to the player's right.
-    const glm::vec3 throwDir = glm::normalize(glm::angleAxis(-cfg.throwPitchOffset, eyeRight) * eyeDir);
+    // Rotate eyeDir upward around eyeRight by `throwPitchOffset` rad so the throw
+    // arcs slightly above the crosshair. Positive angle about eyeRight pitches up.
+    const glm::vec3 throwDir = glm::normalize(glm::angleAxis(cfg.throwPitchOffset, eyeRight) * eyeDir);
 
     const entt::entity proj = registry.create();
     registry.emplace<Projectile>(proj,

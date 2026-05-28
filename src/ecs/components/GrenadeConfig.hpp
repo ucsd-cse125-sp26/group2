@@ -133,7 +133,7 @@ inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
         GrenadeConfig{
             .throwSpeed = 1500.0f,
             .throwPitchOffset = 0.14f,
-            .throwCooldown = 0.4f,
+            .throwCooldown = 1.0f,
             .fuseTime = 3.0f,
             .bounceRestitution = 0.5f,
             .sticky = false,
@@ -152,7 +152,7 @@ inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
         GrenadeConfig{
             .throwSpeed = 1200.0f,
             .throwPitchOffset = 0.20f,
-            .throwCooldown = 0.4f,
+            .throwCooldown = 1.0f,
             .fuseTime = -1.0f, // impact-detonate
             .bounceRestitution = 0.0f,
             .sticky = false,
@@ -168,7 +168,7 @@ inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
         GrenadeConfig{
             .throwSpeed = 1500.0f,
             .throwPitchOffset = 0.14f,
-            .throwCooldown = 0.4f,
+            .throwCooldown = 1.0f,
             .fuseTime = 1.0f, // ticks after sticking
             .bounceRestitution = 0.0f,
             .sticky = true,
