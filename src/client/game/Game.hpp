@@ -461,6 +461,51 @@ private:
     float recoilPushBack_ = 0.0f; ///< Current recoil backward offset (Quake units).
     float recoilRoll_ = 0.0f;     ///< Current recoil roll offset (degrees).
 
+    // Apex-style spring-damped camera recoil (actually deflects aim — bullets drift).
+    // Each frame the spring integrates toward `target`, then the per-frame delta is
+    // committed to `InputSnapshot.pitch`/`yaw` on the local player so raycasts,
+    // tracers, bullet-holes, and the replicated aim all follow the recoil. Target
+    // accumulates per shot during sustained fire and only decays back toward 0
+    // after `recoilIdleTime_` exceeds the idle threshold — that's what produces
+    // the auto-recovery feel without fighting active firing.
+    bool useSpringCameraRecoil_ = true;     ///< Toggle Apex-spring path vs legacy instant snap-pitch write.
+    float cameraRecoilPitch_ = 0.0f;        ///< Spring current offset (radians; negative = looking up).
+    float cameraRecoilYaw_ = 0.0f;
+    float cameraRecoilPitchVel_ = 0.0f;     ///< Spring velocity (rad/s).
+    float cameraRecoilYawVel_ = 0.0f;
+    float cameraRecoilTargetPitch_ = 0.0f;  ///< Spring target; accumulates per shot, decays only when idle.
+    float cameraRecoilTargetYaw_ = 0.0f;
+    float committedRecoilPitch_ = 0.0f;     ///< Portion of `cameraRecoilPitch_` already added to snap.pitch.
+    float committedRecoilYaw_ = 0.0f;       ///< Each frame we commit `(current - committed)` and update.
+    float recoilPatternScaleMultiplier_ = 2.0f; ///< Live multiplier on WeaponConfig.recoilPatternScale.
+                                                ///< 1.0 = nominal; 2.0 = double recoil. Tune in debug UI.
+    float cameraRecoilOmega_ = 35.0f;       ///< Spring angular frequency (rad/s). Higher = snappier kick.
+    float cameraRecoilTargetDecay_ = 5.0f;  ///< Idle-recovery decay rate (1/s). Higher = faster snap-back.
+    float cameraRecoilIdleThreshold_ = 0.18f; ///< Seconds off-trigger before target starts decaying.
+
+    // Recovery model — switch live between:
+    //   A) No recovery (CS-style). Aim stays where the recoil walked it; the
+    //      player owns 100% of the pull-down.
+    //   B) Compensated recovery (Apex-like). Auto-recovers after fire-off, BUT
+    //      while firing we measure the player's counter-mouse and subtract it
+    //      from the recovery debt — so the engine refunds only the un-paid
+    //      portion. Avoids the "double-compensation" crosshair-drop bug.
+    bool useRecoilCompensation_ = true;     ///< false = Approach A; true = Approach B.
+    float lastSnapPitchAfterCommit_ = 0.0f; ///< snap.pitch saved at end of last spring tick — diff against
+    float lastSnapYawAfterCommit_ = 0.0f;   ///< current to recover the player's mouse delta this frame.
+    bool haveLastSnap_ = false;             ///< Becomes true after the first frame the local player exists.
+
+    // Credit accumulator (Approach B). Each frame, the player's counter-mouse is
+    // banked into a signed credit (capped + slowly-decaying). The credit is then
+    // consumed against target — pre-payment of future kicks is preserved, and
+    // continued pull after fire-off still cancels recovery debt. Without this
+    // (cap-at-current-target naive comp), excess mouse input was wasted and the
+    // recovery refund overcompensated whatever debt remained.
+    float compensationCreditPitch_ = 0.0f;
+    float compensationCreditYaw_ = 0.0f;
+    float compensationCreditCap_ = 0.10f;   ///< Max banked credit (rad). ~5.7° per axis.
+    float compensationCreditDecay_ = 1.0f;  ///< Credit decay rate (1/s); stale credit fades.
+
     // Visual reload state
     float reloadDownwardOffset_ = 0.0f; ///< Downward offset for the reload animation
 
