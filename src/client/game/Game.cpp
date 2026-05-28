@@ -172,6 +172,28 @@ bool isRenderableGunType(WeaponType type)
     return static_cast<std::size_t>(type) < kWeaponAssets.size();
 }
 
+/// @brief Apply a recoil aim delta to a player's look angles safely.
+///
+/// Guarantees `snap.pitch`/`snap.yaw` stay finite and that pitch stays inside
+/// the gimbal-lock-safe range, regardless of the delta or the pre-existing
+/// value. A non-finite delta is ignored, and a non-finite base self-heals to 0.
+/// This makes it impossible for a single inf/NaN from any recoil source to
+/// permanently wedge the aim — the failure that previously showed up as pitch
+/// pinned to a huge number and yaw = NaN.
+void applyRecoilAimDelta(InputSnapshot& snap, float dPitch, float dYaw)
+{
+    float pitch = std::isfinite(snap.pitch) ? snap.pitch : 0.0f;
+    if (std::isfinite(dPitch))
+        pitch += dPitch;
+    snap.pitch = std::clamp(pitch, -glm::radians(89.0f), glm::radians(89.0f));
+
+    float yaw = std::isfinite(snap.yaw) ? snap.yaw : 0.0f;
+    if (std::isfinite(dYaw))
+        yaw += dYaw;
+    // Keep yaw bounded so it can never drift toward the limits of float range.
+    snap.yaw = std::remainder(yaw, glm::two_pi<float>());
+}
+
 const char* renderableWeaponDisplayName(WeaponType type)
 {
     const std::size_t idx = static_cast<std::size_t>(type);
@@ -2813,9 +2835,7 @@ SDL_AppResult Game::iterate()
                             cameraRecoilTargetYaw_ += yawKick;
                         } else {
                             auto& snap = registry.get<InputSnapshot>(localShooter);
-                            snap.pitch -= pitchKick;
-                            snap.yaw += yawKick;
-                            snap.pitch = std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
+                            applyRecoilAimDelta(snap, -pitchKick, yawKick);
                         }
                     }
                     localRecoilHeat_ += 1.0f;
@@ -4351,7 +4371,11 @@ SDL_AppResult Game::iterate()
             const float cosPitch = std::cos(renderPitch);
             const glm::vec3 forward{
                 std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
-            glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
+            // Guard the degenerate forward∥up case so normalize can't divide by
+            // ~0 and feed the viewmodel transform a NaN basis.
+            const glm::vec3 rightRaw = glm::cross(forward, glm::vec3{0, 1, 0});
+            const float rightLen = glm::length(rightRaw);
+            glm::vec3 right = (rightLen > 1e-4f) ? (rightRaw / rightLen) : glm::vec3{1.0f, 0.0f, 0.0f};
             glm::vec3 up = glm::normalize(glm::cross(right, forward));
 
             // Apply camera roll to the viewmodel basis so the weapon follows
@@ -4504,10 +4528,40 @@ SDL_AppResult Game::iterate()
                 }
 
                 // 4) Spring step (always — drives `current → target`).
+                //
+                // Self-heal first: a single NaN is absorbing, so if any spring
+                // state ever went non-finite (e.g. a pre-fix corrupted value, or
+                // some unforeseen overflow) it would wedge the aim forever. Reset
+                // to rest instead of propagating the poison.
+                if (!std::isfinite(cameraRecoilPitch_) || !std::isfinite(cameraRecoilPitchVel_) ||
+                    !std::isfinite(cameraRecoilYaw_) || !std::isfinite(cameraRecoilYawVel_) ||
+                    !std::isfinite(cameraRecoilTargetPitch_) || !std::isfinite(cameraRecoilTargetYaw_)) {
+                    cameraRecoilPitch_ = cameraRecoilPitchVel_ = 0.0f;
+                    cameraRecoilYaw_ = cameraRecoilYawVel_ = 0.0f;
+                    cameraRecoilTargetPitch_ = cameraRecoilTargetYaw_ = 0.0f;
+                    committedRecoilPitch_ = committedRecoilYaw_ = 0.0f;
+                }
+
+                // Semi-implicit Euler is only stable while the damping step obeys
+                // c*dt < 2 (here c = 2*omega, so dt < 1/omega ≈ 0.029s at the
+                // default omega). `frameTime` is capped at 0.25s upstream, so a
+                // single frame hitch / alt-tab / sub-30-FPS stall feeds the raw dt
+                // straight past the stability limit, the integrator diverges to
+                // ±inf within a few frames, and the next step computes inf - inf =
+                // NaN — which then gets committed into snap.pitch/yaw and never
+                // recovers. Substep so every integration step stays well inside
+                // the stability region (c*subDt = 1, k*subDt² = 0.25) no matter
+                // how big the frame time is.
+                const float maxSubDt = (omega > 1e-3f) ? (0.5f / omega) : dt;
+                const int subSteps =
+                    (maxSubDt > 0.0f) ? std::max(1, static_cast<int>(std::ceil(dt / maxSubDt))) : 1;
+                const float subDt = dt / static_cast<float>(subSteps);
                 auto stepSpring = [&](float& x, float& v, float target) {
-                    const float a = -k * (x - target) - c * v;
-                    v += a * dt;
-                    x += v * dt;
+                    for (int i = 0; i < subSteps; ++i) {
+                        const float a = -k * (x - target) - c * v;
+                        v += a * subDt;
+                        x += v * subDt;
+                    }
                 };
                 stepSpring(cameraRecoilPitch_, cameraRecoilPitchVel_, cameraRecoilTargetPitch_);
                 stepSpring(cameraRecoilYaw_, cameraRecoilYawVel_, cameraRecoilTargetYaw_);
@@ -4519,11 +4573,10 @@ SDL_AppResult Game::iterate()
                     const float dPitch = cameraRecoilPitch_ - committedRecoilPitch_;
                     const float dYaw = cameraRecoilYaw_ - committedRecoilYaw_;
                     registry.view<LocalPlayer, InputSnapshot>().each([&](InputSnapshot& snap) {
-                        if (std::abs(dPitch) > 0.0f || std::abs(dYaw) > 0.0f) {
-                            snap.pitch += dPitch;
-                            snap.yaw += dYaw;
-                            snap.pitch = std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
-                        }
+                        // Always route through applyRecoilAimDelta (even for a zero
+                        // delta) so a snap that is somehow already non-finite gets
+                        // sanitized rather than persisting.
+                        applyRecoilAimDelta(snap, dPitch, dYaw);
                         lastSnapPitchAfterCommit_ = snap.pitch;
                         lastSnapYawAfterCommit_ = snap.yaw;
                         haveLastSnap_ = true;
