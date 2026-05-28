@@ -30,6 +30,7 @@ void SkinnedRenderer::init(SDL_GPUDevice* device,
     // it here.  Otherwise leave it null and create it the first time
     // `draw()` would actually issue draws.
     createSkinningPipeline(colorTarget, shaderFormat);
+    createSkinnedDepthPipeline(shaderFormat);
 }
 
 void SkinnedRenderer::shutdown()
@@ -57,12 +58,15 @@ void SkinnedRenderer::shutdown()
         SDL_ReleaseGPUTransferBuffer(device_, instanceXfer_);
     if (pipeline_)
         SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
+    if (depthPipeline_)
+        SDL_ReleaseGPUGraphicsPipeline(device_, depthPipeline_);
 
     palettesSsboInfo_.ssbo_ = nullptr;
     instancesSsboInfo_.ssbo_ = nullptr;
     paletteXfer_ = nullptr;
     instanceXfer_ = nullptr;
     pipeline_ = nullptr;
+    depthPipeline_ = nullptr;
     palettesSsboInfo_.capacityBytes_ = 0;
     instancesSsboInfo_.capacityBytes_ = 0;
     paletteXferCapacityBytes_ = 0;
@@ -346,6 +350,41 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
     //   gl_Position   = viewProjection * worldPos;
 }
 
+void SkinnedRenderer::drawDepth(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* /*cmd*/)
+{
+    if (!rigInstalled_ || !depthPipeline_ || frameInstances_.empty() || !palettesSsboInfo_.ssbo_ ||
+        !instancesSsboInfo_.ssbo_)
+    {
+        return;
+    }
+
+    SDL_BindGPUGraphicsPipeline(renderPass, depthPipeline_);
+
+    // The caller (NewRenderer::drawGeometryDepthPass) already pushed the
+    // shadow view-projection at vertex UBO slot 0.
+
+    SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
+    SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
+    for (auto sm : skinnedMeshes_) {
+        if (!sm.vb || !sm.boneVb || !sm.ib) {
+            continue;
+        }
+        SDL_GPUBufferBinding vertexBufferBindings[2] = {
+            {.buffer = sm.vb, .offset = 0},
+            {.buffer = sm.boneVb, .offset = 0},
+        };
+        SDL_BindGPUVertexBuffers(renderPass, 0, vertexBufferBindings, 2);
+
+        SDL_GPUBufferBinding indexBufferBinding{
+            .buffer = sm.ib,
+            .offset = 0,
+        };
+        SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+        SDL_DrawGPUIndexedPrimitives(renderPass, sm.indexCount, frameInstances_.size(), 0, 0, 0);
+    }
+}
+
 bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat)
 {
     Boilerplate::ShaderInfo vertexShader{};
@@ -389,4 +428,58 @@ bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, 
         device_, colorTarget, shaderFormat, vertexShader, fragmentShader, vertexLayout, true, true);
 
     return pipeline_ != nullptr;
+}
+
+bool SkinnedRenderer::createSkinnedDepthPipeline(const SDL_GPUShaderFormat& shaderFormat)
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/skinned_geometry_depth.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+    vertexShader.uniformBufferCount = 1;
+    vertexShader.storageBufferCount = 2;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/emtpy.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+
+    SDL_GPUVertexBufferDescription vertexBufferDescription{};
+    vertexBufferDescription.slot = 0;
+    vertexBufferDescription.pitch = (sizeof(ModelVertex));
+    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vertexBufferDescription.instance_step_rate = 0;
+
+    SDL_GPUVertexBufferDescription vertexBoneInfluenceBufferDescription{};
+    vertexBoneInfluenceBufferDescription.slot = 1;
+    vertexBoneInfluenceBufferDescription.pitch = (sizeof(BoneInfluence));
+    vertexBoneInfluenceBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vertexBoneInfluenceBufferDescription.instance_step_rate = 0;
+
+    Boilerplate::VertexInputLayout vertexLayout{};
+    vertexLayout.bufferDescriptions.push_back(vertexBufferDescription);
+    vertexLayout.bufferDescriptions.push_back(vertexBoneInfluenceBufferDescription);
+    vertexLayout.attributes = {
+        // Mesh Vertex
+        Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, position), 0),
+        Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, normal), 0),
+        Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(ModelVertex, texCoord), 0),
+        Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(ModelVertex, tangent), 0),
+
+        // Bone Influence
+        Boilerplate::makeAttribute(4, SDL_GPU_VERTEXELEMENTFORMAT_INT4, offsetof(BoneInfluence, boneIndices), 1),
+        Boilerplate::makeAttribute(5, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(BoneInfluence, boneWeights), 1),
+    };
+
+    Boilerplate::PipelineDescription depthPipelineDesc{};
+    depthPipelineDesc.vertexShaderInfo = &vertexShader;
+    depthPipelineDesc.fragmentShaderInfo = &fragmentShader;
+    depthPipelineDesc.shaderFormat = shaderFormat;
+    depthPipelineDesc.vertexInputLayout = &vertexLayout;
+    depthPipelineDesc.colorTarget = nullptr;
+    depthPipelineDesc.depthTest = true;
+    depthPipelineDesc.depthWrite = true;
+    depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_NONE;
+
+    depthPipeline_ = Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
+
+    return depthPipeline_ != nullptr;
 }
