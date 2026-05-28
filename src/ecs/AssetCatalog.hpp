@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ecs/AssetRegistry.hpp"
+#include "ecs/components/WeaponState.hpp"
 
 #include <array>
 #include <glm/vec3.hpp>
@@ -40,7 +41,7 @@ inline const AssetDefinition kRocketProjectile{
     .flipUVs = true,
 };
 
-inline const std::array<AssetDefinition, 5> kWeaponAssets{{
+inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAssets{{
     {.name = "weapon_rifle",
      .filename = "assault_rifle.glb",
      .role = AssetRole::Entity,

@@ -2,7 +2,8 @@
 
 layout(location = 0) in vec3 frag_normal;
 layout(location = 1) in vec2 frag_vt;
-layout(location = 2) in vec4 frag_tangent;
+layout(location = 2) in vec3 frag_worldPos;
+layout(location = 3) in vec4 frag_tangent;
 
 layout(location = 0) out vec4 color;
 
@@ -18,6 +19,7 @@ layout(set = 3, binding = 1) uniform MaterialFlags {
     uint useTexture;
     uint useNormalTexture;
     uint useMetallicRoughnessTexture;
+    uint _pad0;
 } materialFlags;
 
 // Just a single directional light for now...
@@ -46,7 +48,6 @@ void main()
     float cosT = max(0.0f, dot(-light_direction, normal));
     vec4 irradiance = light_color * cosT + ambient_color;
 
-    albedo.rgb *= (normal * 0.5f) + 0.5f;
     vec3 diffuse = albedo.rgb * (1.0 - metallic) * irradiance.rgb;
     vec3 metal = albedo.rgb * metallic * light_color.rgb * cosT * (1.0 - 0.5 * roughness);
     color = vec4(diffuse + metal, albedo.a);
