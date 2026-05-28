@@ -22,6 +22,11 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
     ImGui::SetNextWindowPos(ImVec2(40.0f, 40.0f), ImGuiCond_Once);
     ImGui::SetNextWindowSize(ImVec2(380.0f, 300.0f), ImGuiCond_Once);
     if (ImGui::Begin("Lobby")) {
+        if (!config.serverName.empty()) {
+            ImGui::Text("Server: %.*s", static_cast<int>(config.serverName.size()), config.serverName.data());
+            ImGui::Separator();
+        }
+
         if (config.isHosting) {
             ImGui::SeparatorText("Hosting");
             ImGui::Text("Listen address: %.*s:%u",
@@ -50,6 +55,15 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         }
 
         ImGui::Separator();
+        ImGui::SeparatorText("Match Settings");
+        if (config.matchConfig) {
+            ImGui::Text("Kills to win: %d", config.matchConfig->killsToWin);
+            ImGui::Text("Max players: %d", config.matchConfig->maxPlayers);
+        } else {
+            ImGui::TextDisabled("Waiting for match settings");
+        }
+
+        ImGui::Separator();
         if (config.startCountdownActive) {
             ImGui::Text("Entering match countdown in %.1fs", static_cast<double>(config.startCountdownRemaining));
         }
@@ -70,7 +84,7 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         ImGui::EndDisabled();
 
         ImGui::Separator();
-        if (config.isHosting) {
+        if (config.isHost) {
             if (ImGui::Button("Back to Host Config")) {
                 result.returnToHostConfigClicked = true;
             }

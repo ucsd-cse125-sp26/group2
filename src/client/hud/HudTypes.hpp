@@ -270,7 +270,7 @@ struct HudShotgunPellet
 /// WeaponSystem.cpp so widget colours align with the actual rays fired.
 struct HudShotgunBlast
 {
-    bool valid = false;        ///< False = no recent blast; widget stays hidden.
+    bool valid = false;           ///< False = no recent blast; widget stays hidden.
     float secondsSinceFire = 0.f; ///< Drives the widget fade animation.
     std::array<HudShotgunPellet, 11> pellets{};
 };

@@ -92,14 +92,14 @@ const char* weaponTypeName(WeaponType type)
         return "HEGrenade";
     case WeaponType::Molotov:
         return "Molotov";
-    case WeaponType::Impulse:
-        return "Impulse";
+    case WeaponType::Sticky:
+        return "Sticky";
     }
     return "Unknown";
 }
 
 /// @brief Slot-eligible weapon types for the Weapon HUD slot selectors.
-/// Grenade types (HE/Molotov/Impulse) are excluded — they live in their own slot system.
+/// Grenade types (HE/Molotov/Sticky) are excluded — they live in their own slot system.
 constexpr std::array<WeaponType, 5> k_kSlotWeaponChoices{{
     WeaponType::Rifle,
     WeaponType::Rocket,
@@ -1197,7 +1197,7 @@ void DebugUI::buildWeaponUI(const Registry& registry)
             ImGui::EndCombo();
         }
     };
-    slotCombo("Primary",   WeaponSlot::PRIMARY,   pendingSetPrimaryWeapon_);
+    slotCombo("Primary", WeaponSlot::PRIMARY, pendingSetPrimaryWeapon_);
     slotCombo("Secondary", WeaponSlot::SECONDARY, pendingSetSecondaryWeapon_);
 
     // Flag checked by Game::iterate() to refill ammo (registry is const here).

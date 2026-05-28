@@ -336,8 +336,8 @@ public:
     /// this request to mirror the same state to the authoritative server.
     bool consumePhysicsCsvRecordingRequest(bool& enabled) noexcept;
 
-    bool pendingAmmoRefill_ = false;        ///< Set by Weapon HUD button, consumed by Game::iterate().
-    bool pendingAbilityLevelGrant_ = false; ///< Set by Weapon HUD button, consumed by Game::iterate().
+    bool pendingAmmoRefill_ = false;             ///< Set by Weapon HUD button, consumed by Game::iterate().
+    bool pendingAbilityLevelGrant_ = false;      ///< Set by Weapon HUD button, consumed by Game::iterate().
     std::int8_t pendingSetPrimaryWeapon_ = -1;   ///< -1 = none; else WeaponType ordinal. Consumed by Game::iterate().
     std::int8_t pendingSetSecondaryWeapon_ = -1; ///< Mirror for the secondary slot.
 

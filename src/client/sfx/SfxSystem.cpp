@@ -429,7 +429,7 @@ void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
         break;
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
-    case WeaponType::Impulse:
+    case WeaponType::Sticky:
         break;
     }
 }

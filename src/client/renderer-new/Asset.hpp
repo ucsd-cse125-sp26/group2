@@ -11,8 +11,8 @@
 #define MODEL_ROOT_NODE_INDEX 0
 #define ASSETS_DIR "assets"
 #include "glm/glm.hpp"
-#include <glm/gtc/quaternion.hpp>
 
+#include <glm/gtc/quaternion.hpp>
 #include <stb_image.h>
 #include <string>
 #include <unordered_map>

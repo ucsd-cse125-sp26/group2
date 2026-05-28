@@ -7,6 +7,7 @@
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/ChatProtocol.hpp"
+#include "network/MatchConfig.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
 #include "network/NetworkConfig.hpp"
@@ -162,6 +163,15 @@ public:
     /// @return False if the client isn't currently connected.
     bool sendLobbyStateToClient(ClientId clientId, const std::vector<LobbyPlayer>& players);
 
+    /// @brief Unicast the current match settings to a single client.
+    bool sendMatchConfigToClient(ClientId clientId, const MatchConfig& config);
+
+    /// @brief Update the authoritative client admission cap.
+    void setMaxPlayers(int maxPlayers);
+
+    /// @brief Enable or disable global directory heartbeats at runtime.
+    void setAdvertiseServer(bool enabled);
+
     /// @brief Drain every connection's outbound queue to its socket.
     ///
     /// Call once per server tick, after all per-tick broadcasts. Disconnects
@@ -184,6 +194,8 @@ public:
     /// @brief Get the actual port the server is listening on. Useful when the caller requested port 0 (auto-assign) and
     /// needs to know which port was assigned.
     uint16_t listeningPort() const;
+
+    void broadcastMatchConfig(const MatchConfig& config);
 
 private:
     ClientConnectedCallback clientConnectedFn_;       ///< Fired by acceptClients() when a new client is accepted.
@@ -405,6 +417,8 @@ private:
     std::atomic<std::uint32_t> directoryServerId_{0};
     Uint64 lastDirectoryHeartbeatMs_ = 0;
     std::uint32_t nextChatServerSeq_ = 0;
+    std::atomic<int> maxPlayers_{128};
+    std::atomic<bool> advertiseServer_{true}; ///< Runtime global-directory heartbeat toggle.
     bool usingUdpSession_ = false;
     Uint16 listenPort_ = 0;
     std::unordered_map<std::uint64_t, ClientId> connIdToClient_; ///< UDP connection-id → ClientId lookup.

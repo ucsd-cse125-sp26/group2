@@ -142,7 +142,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .recoilRampShots = 1.0f,
             .recoilRecovery = 30.0f,
             .recoilPatternScale = 0.0025f, // ~14.3° total vertical at full mag (100 units).
-        }, // Rifle
+        },                                 // Rifle
         WeaponConfig{
             .fireCooldown = 1.0f,
             .magazineSize = 4,
@@ -222,7 +222,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .hitscan = false,
             .initialProjectileSpeed = 1500.0f,
             .explosive = false,
-        }, // Impulse
+        }, // Sticky
     }};
 
     return k_kWeaponConfigs[static_cast<std::size_t>(type)];
@@ -250,7 +250,7 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
         ProjectileConfig{},                   // Shotgun — hitscan, no projectile
         ProjectileConfig{},                   // HEGrenade — flight params come from GrenadeConfig
         ProjectileConfig{},                   // Molotov
-        ProjectileConfig{},                   // Impulse
+        ProjectileConfig{},                   // Sticky
     }};
 
     return k_kProjectileConfigs[static_cast<std::size_t>(type)];

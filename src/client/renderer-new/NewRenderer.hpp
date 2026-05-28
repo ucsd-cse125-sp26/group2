@@ -18,13 +18,16 @@
 #include "Camera.hpp"
 #include "RendererTypes.hpp"
 #include "SkinnedRenderer.hpp"
+#include "Boilerplate.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
 
 #include <glm/glm.hpp>
+#include <queue>
 #include <string>
 #include <vector>
+
 
 class ParticleSystem; ///< Forward-declared — owned by Game, registered via setParticleSystem().
 
@@ -40,6 +43,13 @@ struct Vertex
     glm::vec2 texUV;
 };
 
+struct LightUBO {
+    uint32_t numPointLights = 0;
+    uint32_t numSpotLights = 0;
+    float pointLightFarPlane = 7500.0f;
+    float pointLightNearPlane = 100.0f;
+    PointLight pointLights[MAX_POINT_LIGHTS];
+};
 /// @brief Graphics-team's work-in-progress SDL3 GPU renderer.
 ///
 /// Pass architecture (target — current implementation only covers a subset):
@@ -326,7 +336,6 @@ public:
     // pattern so Game.cpp and the debug UI can read/write without a getter
     // ceremony.
 
-    AAMode aaMode = AAMode::SMAA_T2x;            ///< Anti-aliasing mode.  Re-applied at the start of each frame.
     float renderScale = 1.0f;                    ///< Internal-resolution multiplier (0.5 = half-res, 2.0 = SSAA).
     float mainHorizontalFovDegrees = 90.0f;      ///< Main camera horizontal field of view in degrees.
     float scopeZoom = 1.0f;                      ///< Per-frame scope zoom multiplier (FOV divisor).
@@ -342,22 +351,42 @@ private:
     // ─── Existing internal helpers ───────────────────────────────────────────
 
     bool createGeometryPipeline();
+    bool createDepthPipeline();
+    bool createDebugDepthPipeline();
     bool createHudPipeline();
+    bool createFxaaPipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
+    bool ensureSceneTextureSize(Uint32 width, Uint32 height);
     void createMeshBuffers(MeshIdInt meshId) const;
-    void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height);
-    void drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+    void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height, float fov);
+
+    void drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
+                               Uint8 layer,
+                               SDL_GPUCommandBuffer* cmd,
+                               const glm::mat4& shadowViewProjection);
+    void bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+    void drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+    void drawHudPass(SDL_GPUTexture* target, SDL_GPUCommandBuffer* cmd);
+    void drawFxaaPass(SDL_GPUTexture* sceneColor, SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const;
-    void drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
-    void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+    void drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
+    void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd);
     void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+
     void drawModel(ModelIdInt modelId,
                    const glm::mat4& modelTransform,
                    SDL_GPURenderPass* renderPass,
                    SDL_GPUCommandBuffer* cmd);
-    void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+
+    void drawModelDepth(ModelIdInt modelId,
+                   const glm::mat4& modelTransform,
+                   SDL_GPURenderPass* renderPass,
+                   SDL_GPUCommandBuffer* cmd);
+
+    void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth);
+
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
     void drawHud(SDL_GPURenderPass* pass);
 
@@ -369,10 +398,15 @@ private:
 
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* fxaaPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* depthPipeline_ = nullptr;
 
     SDL_GPUTextureFormat colorTarget_ = SDL_GPU_TEXTUREFORMAT_INVALID;
+    SDL_GPUTexture* sceneColor_ = nullptr;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
+    Uint32 sceneWidth_ = 0;
+    Uint32 sceneHeight_ = 0;
     Uint32 depthWidth_ = 0;
     Uint32 depthHeight_ = 0;
 
@@ -382,13 +416,19 @@ private:
 
     SDL_GPUTexture* hudTexture_ = nullptr;
     SDL_GPUSampler* hudSampler_ = nullptr;
+    SDL_GPUSampler* fxaaSampler_ = nullptr;
+
+    SDL_GPUSampler* depthSampler_ = nullptr;
+
+    LightUBO sceneLightInfo_;
+    std::queue<SDL_GPUTextureSamplerBinding> shadowMapBindings_;
+    std::queue<SDL_GPUTexture*> shadowMapTextureDeletionQueue;
 
     NewCamera camera_;
 
     // Per-frame captured state ───────────────────────────────────────────────
     std::vector<EntityRenderCmd> entities_;
     WeaponViewmodel weapon_{};
-    std::vector<PointLight> pointLights_;
     ParticleSystem* particleSystem_ = nullptr;
 
     // Settings captured state ─────────────────────────────────────────────────

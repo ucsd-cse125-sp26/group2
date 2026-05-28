@@ -363,10 +363,10 @@ struct CharacterAnimator::Impl
     SpineBendChain spineBend;
 
     // Phase F polish state.
-    int hipsJointIdx = -1;          ///< "mixamorig:Hips" index, drives the hip-lean coupling.
+    int hipsJointIdx = -1;             ///< "mixamorig:Hips" index, drives the hip-lean coupling.
     std::vector<bool> hipsDescendants; ///< Descendant mask for the hip-lean delta.
-    float recoilPitch = 0.0f;       ///< Current additive pitch from recoil (decays each frame).
-    float breathingPhase = 0.0f;    ///< Accumulated time for the breathing oscillator (s, wraps every 2*pi).
+    float recoilPitch = 0.0f;          ///< Current additive pitch from recoil (decays each frame).
+    float breathingPhase = 0.0f;       ///< Accumulated time for the breathing oscillator (s, wraps every 2*pi).
 
     // Weapon grip IK chains.
     ArmIkChain leftArm;
@@ -586,12 +586,10 @@ void CharacterAnimator::applyHandIkTargetsImpl(const HandIkTargets& targets, boo
 
         const glm::mat4& bM = impl_->jointModelMats[static_cast<size_t>(boneIdx)];
         const glm::mat4& pM = impl_->jointModelMats[static_cast<size_t>(parentIdx)];
-        const glm::mat3 bR(glm::normalize(glm::vec3(bM[0])),
-                           glm::normalize(glm::vec3(bM[1])),
-                           glm::normalize(glm::vec3(bM[2])));
-        const glm::mat3 pR(glm::normalize(glm::vec3(pM[0])),
-                           glm::normalize(glm::vec3(pM[1])),
-                           glm::normalize(glm::vec3(pM[2])));
+        const glm::mat3 bR(
+            glm::normalize(glm::vec3(bM[0])), glm::normalize(glm::vec3(bM[1])), glm::normalize(glm::vec3(bM[2])));
+        const glm::mat3 pR(
+            glm::normalize(glm::vec3(pM[0])), glm::normalize(glm::vec3(pM[1])), glm::normalize(glm::vec3(pM[2])));
 
         const glm::quat localRot = glm::normalize(glm::quat_cast(glm::transpose(pR) * bR));
         const glm::quat devFromRest = glm::normalize(localRot * glm::inverse(restLocal));
@@ -640,8 +638,7 @@ void CharacterAnimator::applyHandIkTargetsImpl(const HandIkTargets& targets, boo
         // over a small margin past full-extension distance.
         constexpr float k_reachFadeMargin = 4.0f; // model units (~4 cm).
         const float rawReach = upperLen + foreLen;
-        const float reachWeightRaw =
-            std::clamp(1.0f - (targetDist - rawReach) / k_reachFadeMargin, 0.0f, 1.0f);
+        const float reachWeightRaw = std::clamp(1.0f - (targetDist - rawReach) / k_reachFadeMargin, 0.0f, 1.0f);
         // Debug toggle (Right-Hand Hold Anchor tweaker): when fade is disabled
         // the IK always applies at full strength regardless of target distance.
         const float reachWeight = target.enableReachFade ? reachWeightRaw : 1.0f;
@@ -705,11 +702,8 @@ void CharacterAnimator::applyHandIkTargetsImpl(const HandIkTargets& targets, boo
         constexpr float k_elbowMaxSwingRad = 2.79253f; // 160 degrees.
         constexpr float k_elbowMaxTwistRad = 0.08727f; // 5 degrees.
         if (target.enableJointConstraints) {
-            applyJointConstraint(chain.foreArm,
-                                 chain.foreArmRestLocal,
-                                 chain.foreDescendants,
-                                 k_elbowMaxSwingRad,
-                                 k_elbowMaxTwistRad);
+            applyJointConstraint(
+                chain.foreArm, chain.foreArmRestLocal, chain.foreDescendants, k_elbowMaxSwingRad, k_elbowMaxTwistRad);
         }
         return true;
     };
@@ -755,8 +749,7 @@ void CharacterAnimator::applyHandIkTargetsImpl(const HandIkTargets& targets, boo
                     twistAngle += glm::two_pi<float>();
 
                 constexpr float k_maxWristTwistRad = 1.5708f; // 90 degrees.
-                const float clampedTwistAngle =
-                    std::clamp(twistAngle, -k_maxWristTwistRad, k_maxWristTwistRad);
+                const float clampedTwistAngle = std::clamp(twistAngle, -k_maxWristTwistRad, k_maxWristTwistRad);
                 if (std::abs(twistAngle - clampedTwistAngle) > 1e-4f)
                     twist = glm::angleAxis(clampedTwistAngle, twistAxis);
 
@@ -817,8 +810,7 @@ void CharacterAnimator::applyHandIkTargetsImpl(const HandIkTargets& targets, boo
                                         glm::normalize(glm::vec3(parentMat[2])));
 
                 // Recover the bone's animated local rotation = parent^{-1} * bone.
-                const glm::quat animatedLocal =
-                    glm::normalize(glm::quat_cast(glm::transpose(parentR) * boneR));
+                const glm::quat animatedLocal = glm::normalize(glm::quat_cast(glm::transpose(parentR) * boneR));
                 // Build the target local rotation from the authored (pitch, yaw)
                 // pair. fingerLocalQuat enforces the no-roll constraint by
                 // construction — any roll the editor might try to author has
@@ -828,12 +820,11 @@ void CharacterAnimator::applyHandIkTargetsImpl(const HandIkTargets& targets, boo
                 const glm::quat blendedLocal = glm::normalize(glm::slerp(animatedLocal, targetLocal, w));
 
                 // Delta rotation in MODEL space (left-multiply on the bone).
-                const glm::quat deltaRot = glm::normalize(
-                    glm::quat_cast(parentR * glm::mat3_cast(blendedLocal) * glm::transpose(boneR)));
+                const glm::quat deltaRot =
+                    glm::normalize(glm::quat_cast(parentR * glm::mat3_cast(blendedLocal) * glm::transpose(boneR)));
 
                 const glm::vec3 pivot = matrixTranslation(boneMat);
-                applyDeltaToMask(
-                    impl_->jointModelMats, fc.descendants[jointSlot], rotateAround(pivot, deltaRot));
+                applyDeltaToMask(impl_->jointModelMats, fc.descendants[jointSlot], rotateAround(pivot, deltaRot));
                 changed = true;
             }
         }
@@ -1399,8 +1390,8 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
     // slightly so the silhouette reads as leaning rather than folding.
     if (impl_->hipsJointIdx >= 0 && !impl_->hipsDescendants.empty() && inputs.hipLeanMultiplier != 0.0f) {
         constexpr float k_hipLeanMaxRad = 0.087266f; // 5 degrees.
-        const float hipPitch = std::clamp(
-            -inputs.pitchRad * inputs.hipLeanMultiplier, -k_hipLeanMaxRad, k_hipLeanMaxRad);
+        const float hipPitch =
+            std::clamp(-inputs.pitchRad * inputs.hipLeanMultiplier, -k_hipLeanMaxRad, k_hipLeanMaxRad);
         if (std::abs(hipPitch) > 1e-4f) {
             const glm::vec3 axis(1.0f, 0.0f, 0.0f);
             const glm::vec3 pivot = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(impl_->hipsJointIdx)]);

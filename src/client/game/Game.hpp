@@ -13,6 +13,7 @@
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
 #include "ecs/AssetRegistry.hpp"
+#include "ecs/components/GripPose.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerSimState.hpp"
@@ -20,7 +21,6 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
-#include "ecs/components/GripPose.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
@@ -329,8 +329,8 @@ private:
 
     // Legacy model index aliases (for code that still uses raw indices).
     // TODO: migrate all call sites to assets_.modelIndex("name") and remove these.
-    int weaponModelIndices_[4] = {-1, -1, -1, -1};
-    int weaponAssetIds_[4] = {-1, -1, -1, -1};
+    int weaponModelIndices_[kRenderableWeaponTypeCount] = {-1, -1, -1, -1, -1};
+    int weaponAssetIds_[kRenderableWeaponTypeCount] = {-1, -1, -1, -1, -1};
     int viewmodelLeftHandModelIdx_ = -1;
     int viewmodelRightHandModelIdx_ = -1;
     int handMountDebugMarkerModelIdx_ = -1;
@@ -408,10 +408,10 @@ private:
     // for the HUD ShotgunPelletWidget. The widget is fed via
     // `HudGameState.latestShotgunBlast`, which is just a copy of
     // `lastShotgunBlast_` updated each frame with elapsed time.
-    HudShotgunBlast shotgunPelletAccum_{};      ///< In-flight accumulator (resets when 9 pellets received).
-    int shotgunPelletAccumCount_ = 0;           ///< Pellets received for the current in-flight blast.
-    float shotgunPelletLastTimeSec_ = 0.f;      ///< Game-time of the last pellet (for stale-reset).
-    HudShotgunBlast lastShotgunBlast_{};        ///< Most recently completed blast (staged for HUD).
+    HudShotgunBlast shotgunPelletAccum_{}; ///< In-flight accumulator (resets when 9 pellets received).
+    int shotgunPelletAccumCount_ = 0;      ///< Pellets received for the current in-flight blast.
+    float shotgunPelletLastTimeSec_ = 0.f; ///< Game-time of the last pellet (for stale-reset).
+    HudShotgunBlast lastShotgunBlast_{};   ///< Most recently completed blast (staged for HUD).
 
     // Vignette state: track previous frame health/armor for delta detection.
     float prevHealth_ = 100.f;
@@ -478,20 +478,20 @@ private:
     // accumulates per shot during sustained fire and only decays back toward 0
     // after `recoilIdleTime_` exceeds the idle threshold — that's what produces
     // the auto-recovery feel without fighting active firing.
-    bool useSpringCameraRecoil_ = true;     ///< Toggle Apex-spring path vs legacy instant snap-pitch write.
-    float cameraRecoilPitch_ = 0.0f;        ///< Spring current offset (radians; negative = looking up).
+    bool useSpringCameraRecoil_ = true;         ///< Toggle Apex-spring path vs legacy instant snap-pitch write.
+    float cameraRecoilPitch_ = 0.0f;            ///< Spring current offset (radians; negative = looking up).
     float cameraRecoilYaw_ = 0.0f;
-    float cameraRecoilPitchVel_ = 0.0f;     ///< Spring velocity (rad/s).
+    float cameraRecoilPitchVel_ = 0.0f;         ///< Spring velocity (rad/s).
     float cameraRecoilYawVel_ = 0.0f;
-    float cameraRecoilTargetPitch_ = 0.0f;  ///< Spring target; accumulates per shot, decays only when idle.
+    float cameraRecoilTargetPitch_ = 0.0f;      ///< Spring target; accumulates per shot, decays only when idle.
     float cameraRecoilTargetYaw_ = 0.0f;
-    float committedRecoilPitch_ = 0.0f;     ///< Portion of `cameraRecoilPitch_` already added to snap.pitch.
-    float committedRecoilYaw_ = 0.0f;       ///< Each frame we commit `(current - committed)` and update.
+    float committedRecoilPitch_ = 0.0f;         ///< Portion of `cameraRecoilPitch_` already added to snap.pitch.
+    float committedRecoilYaw_ = 0.0f;           ///< Each frame we commit `(current - committed)` and update.
     float recoilPatternScaleMultiplier_ = 2.0f; ///< Live multiplier on WeaponConfig.recoilPatternScale.
                                                 ///< 1.0 = nominal; 2.0 = double recoil. Tune in debug UI.
-    float cameraRecoilOmega_ = 35.0f;       ///< Spring angular frequency (rad/s). Higher = snappier kick.
-    float cameraRecoilTargetDecay_ = 5.0f;  ///< Idle-recovery decay rate (1/s). Higher = faster snap-back.
-    float cameraRecoilIdleThreshold_ = 0.18f; ///< Seconds off-trigger before target starts decaying.
+    float cameraRecoilOmega_ = 35.0f;           ///< Spring angular frequency (rad/s). Higher = snappier kick.
+    float cameraRecoilTargetDecay_ = 5.0f;      ///< Idle-recovery decay rate (1/s). Higher = faster snap-back.
+    float cameraRecoilIdleThreshold_ = 0.18f;   ///< Seconds off-trigger before target starts decaying.
 
     // Recovery model — switch live between:
     //   A) No recovery (CS-style). Aim stays where the recoil walked it; the
@@ -513,11 +513,12 @@ private:
     // recovery refund overcompensated whatever debt remained.
     float compensationCreditPitch_ = 0.0f;
     float compensationCreditYaw_ = 0.0f;
-    float compensationCreditCap_ = 0.10f;   ///< Max banked credit (rad). ~5.7° per axis.
-    float compensationCreditDecay_ = 1.0f;  ///< Credit decay rate (1/s); stale credit fades.
+    float compensationCreditCap_ = 0.10f;  ///< Max banked credit (rad). ~5.7° per axis.
+    float compensationCreditDecay_ = 1.0f; ///< Credit decay rate (1/s); stale credit fades.
 
     // Visual reload state
-    float reloadDownwardOffset_ = 0.0f; ///< Downward offset for the reload animation
+    float reloadDownwardOffset_ = 0.0f;       ///< Downward offset for the reload animation
+    float grenadeThrowDownwardOffset_ = 0.0f; ///< Downward offset for the grenade-throw animation
 
     // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
     float localFireCooldown_ = 0.0f; ///< Countdown timer; fire VFX only when <= 0.
@@ -527,28 +528,38 @@ private:
     int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = previous slot, consumed each frame.
 
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
-    ThirdPersonWeaponParams tpWeaponParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
-    int tpTuneWeaponIdx_ = 0;                   ///< Which weapon type is being tuned.
-    int tpAnchorTuneStanceIdx_ = 0;             ///< Which HoldStance the right-hand anchor sliders are editing.
-    float tpAnchorRotStepDeg_ = 5.0f;           ///< Delta-rotation step (degrees) for the gimbal-free anchor rotation buttons.
-    float tpAnchorWorldRotStepDeg_ = 5.0f;      ///< Delta-rotation step (degrees) for the WORLD-space rotation buttons.
-    bool tpAnchorShowDebugMarker_ = true;       ///< Render the red-cube anchor wish-point marker when the 3P tweaker is open.
-    bool tpEnableJointConstraints_ = false;     ///< Debug toggle: pass enableJointConstraints into the arm IK targets. Default OFF — current shoulder/elbow/wrist clamps don't contribute usefully and fight the anchor authoring; flip on per-session if testing extreme poses.
-    bool tpEnableReachFade_ = true;             ///< Debug toggle: pass enableReachFade into the arm IK targets. Off = no fade-out when target is past arm reach.
-    bool tpFreezeAnimations_ = false;           ///< Debug toggle: freeze every animator's playback so world-space anchor sliders don't drift from idle bob.
-    bool showTPWeaponUI_ = false;               ///< Show the 3P Weapon Tweaker window.
+    ThirdPersonWeaponParams
+        tpWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from defaults.
+    int tpTuneWeaponIdx_ = 0;                        ///< Which weapon type is being tuned.
+    int tpAnchorTuneStanceIdx_ = 0;                  ///< Which HoldStance the right-hand anchor sliders are editing.
+    float tpAnchorRotStepDeg_ = 5.0f; ///< Delta-rotation step (degrees) for the gimbal-free anchor rotation buttons.
+    float tpAnchorWorldRotStepDeg_ = 5.0f; ///< Delta-rotation step (degrees) for the WORLD-space rotation buttons.
+    bool tpAnchorShowDebugMarker_ = true; ///< Render the red-cube anchor wish-point marker when the 3P tweaker is open.
+    bool tpEnableJointConstraints_ =
+        false; ///< Debug toggle: pass enableJointConstraints into the arm IK targets. Default OFF — current
+               ///< shoulder/elbow/wrist clamps don't contribute usefully and fight the anchor authoring; flip on
+               ///< per-session if testing extreme poses.
+    bool tpEnableReachFade_ = true;   ///< Debug toggle: pass enableReachFade into the arm IK targets. Off = no fade-out
+                                      ///< when target is past arm reach.
+    bool tpFreezeAnimations_ = false; ///< Debug toggle: freeze every animator's playback so world-space anchor sliders
+                                      ///< don't drift from idle bob.
+    bool showTPWeaponUI_ = false;     ///< Show the 3P Weapon Tweaker window.
 
     // Hand mount tuning for third-person player IK / weapon grips.
-    WeaponHandMountParams weaponHandMountParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
-    WeaponHandMountParams authoredWeaponHandMountParams_[4]; ///< Defaults loaded from authored weapon assets.
-    int handMountTuneWeaponIdx_ = 0;                 ///< Which weapon type is being tuned.
-    bool showHandMountUI_ = false;                   ///< Show the Hand Mount Tweaker window.
+    WeaponHandMountParams
+        weaponHandMountParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from defaults.
+    WeaponHandMountParams
+        authoredWeaponHandMountParams_[kRenderableWeaponTypeCount]; ///< Defaults loaded from authored weapon assets.
+    int handMountTuneWeaponIdx_ = 0;                                ///< Which weapon type is being tuned.
+    bool showHandMountUI_ = false;                                  ///< Show the Hand Mount Tweaker window.
 
     // First-person arm mount tuning (separate from third-person grips).
-    FirstPersonHandMountParams fpHandMountParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
-    FirstPersonHandMountParams authoredFPHandMountParams_[4]; ///< Defaults loaded from authored weapon assets.
-    int fpHandMountTuneWeaponIdx_ = 0;                ///< Which weapon type is being tuned.
-    bool showFPHandMountUI_ = false;                  ///< Show the FP Arm Tweaker window.
+    FirstPersonHandMountParams
+        fpHandMountParams_[kRenderableWeaponTypeCount];         ///< Runtime-tunable copy; initialised from defaults.
+    FirstPersonHandMountParams
+        authoredFPHandMountParams_[kRenderableWeaponTypeCount]; ///< Defaults loaded from authored weapon assets.
+    int fpHandMountTuneWeaponIdx_ = 0;                          ///< Which weapon type is being tuned.
+    bool showFPHandMountUI_ = false;                            ///< Show the FP Arm Tweaker window.
 
     enum class HandMountDebugSpace : std::uint8_t
     {
@@ -580,16 +591,23 @@ private:
     HandMountDebugTarget handMountDebugTarget_{};
 
     // Weapon spawner model tuning (per weapon type, live-adjustable via ImGui)
-    WeaponSpawnerModelParams spawnerWeaponParams_[4]; ///< Runtime-tunable copy; initialised from spawner defaults.
-    int spawnerTuneWeaponIdx_ = 0;                    ///< Which weapon type is being tuned.
-    bool showWeaponSpawnerModelUI_ = false;           ///< Show the Weapon Spawner Model Tweaker window.
+    WeaponSpawnerModelParams
+        spawnerWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from spawner defaults.
+    int spawnerTuneWeaponIdx_ = 0;                        ///< Which weapon type is being tuned.
+    bool showWeaponSpawnerModelUI_ = false;               ///< Show the Weapon Spawner Model Tweaker window.
 
     // Animation subsystem — shared rig + clip library + skinning backend.
     // CharacterAnimators (one per animated entity) hold non-owning refs.
-    CharacterRig charRig_;              ///< Shared skinned rig (skeleton + bind pose + weights).
-    int rightHandJointIdx_ = -1;        ///< Cached "mixamorig:RightHand" joint index (-1 = not present). Used to parent the third-person weapon mesh to the right-hand bone after IK.
-    int spine2JointIdx_ = -1;           ///< Cached "mixamorig:Spine2" joint index. Anchors the chest-relative right-hand IK target so the gun is held in front of the chest instead of hanging at the side.
-    std::array<WeaponGripPose, 4> weaponGripPoses_{}; ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from assets/weapons/<name>.grip.toml at startup. Joint data is per-joint (pitch, yaw) degrees so the editor can drive sliders directly against the runtime data; the animator builds a local-space quat per joint on the fly via fingerLocalQuat.
+    CharacterRig charRig_;       ///< Shared skinned rig (skeleton + bind pose + weights).
+    int rightHandJointIdx_ = -1; ///< Cached "mixamorig:RightHand" joint index (-1 = not present). Used to parent the
+                                 ///< third-person weapon mesh to the right-hand bone after IK.
+    int spine2JointIdx_ = -1;    ///< Cached "mixamorig:Spine2" joint index. Anchors the chest-relative right-hand IK
+                                 ///< target so the gun is held in front of the chest instead of hanging at the side.
+    std::array<WeaponGripPose, kRenderableWeaponTypeCount>
+        weaponGripPoses_{};      ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from
+                                 ///< assets/weapons/<name>.grip.toml at startup. Joint data is per-joint (pitch, yaw)
+    ///< degrees so the editor can drive sliders directly against the runtime data; the animator
+    ///< builds a local-space quat per joint on the fly via fingerLocalQuat.
     /// Per-entity weapon-swap crossfade state (Phase F polish). When an entity's
     /// equipped weapon changes, we reset `swapElapsedSec` to 0 and ramp the
     /// `*GripWeight` from 0 → 1 over `kGripSwapDurationSec` so the hands briefly
@@ -601,17 +619,22 @@ private:
         float swapElapsedSec = 1.0f; ///< Initialised to "already done" so freshly-seen entities start at full grip.
     };
     std::unordered_map<entt::entity, GripSwapState> gripSwapState_{};
-    std::array<std::string, 4> weaponGripPosePaths_{}; ///< Source TOML path for each weapon's grip pose; populated at init and reused for Phase E hot-reload + the per-finger authoring UI's save button.
-    std::array<std::filesystem::file_time_type, 4> weaponGripPoseMTimes_{}; ///< Last-observed mtime; reload triggers when the file mtime changes (Phase E hot reload).
-    float gripPoseReloadAccumulator_ = 0.0f;            ///< Seconds since last hot-reload mtime poll; throttle to ~4 Hz to keep filesystem stats cheap.
-    bool showGripPoseUI_ = false;                       ///< Show the per-finger Grip Pose Tweaker window (Phase E authoring tool).
-    int gripPoseTuneWeaponIdx_ = 0;                     ///< Which weapon's grip pose is being authored in the tweaker UI.
-    float aimAssistParityAccumSec_ = 0.0f;              ///< Seconds since the last aim-assist parity check log line (Phase F).
-    AnimationLibrary animLibrary_;      ///< Collection of ozz clips on the shared rig.
-    CpuLbsSkinningBackend skinBackend_; ///< Phase-1 CPU linear-blend-skinning backend.
-    AnimationTesterState animUI_;       ///< Persistent state for the Animation Tester panel.
-    HitboxRig clientHitboxRig_;         ///< Hitbox definitions for client-side debug visualization.
-    float kRigScale_ = 1.0f;            ///< Per-renderable scale for animated characters (auto-calculated, tunable).
+    std::array<std::string, kRenderableWeaponTypeCount>
+        weaponGripPosePaths_{};  ///< Source TOML path for each weapon's grip pose; populated at init and reused for
+                                 ///< Phase E hot-reload + the per-finger authoring UI's save button.
+    std::array<std::filesystem::file_time_type, kRenderableWeaponTypeCount>
+        weaponGripPoseMTimes_{}; ///< Last-observed mtime; reload triggers when the file mtime changes (Phase E hot
+                                 ///< reload).
+    float gripPoseReloadAccumulator_ =
+        0.0f; ///< Seconds since last hot-reload mtime poll; throttle to ~4 Hz to keep filesystem stats cheap.
+    bool showGripPoseUI_ = false;          ///< Show the per-finger Grip Pose Tweaker window (Phase E authoring tool).
+    int gripPoseTuneWeaponIdx_ = 0;        ///< Which weapon's grip pose is being authored in the tweaker UI.
+    float aimAssistParityAccumSec_ = 0.0f; ///< Seconds since the last aim-assist parity check log line (Phase F).
+    AnimationLibrary animLibrary_;         ///< Collection of ozz clips on the shared rig.
+    CpuLbsSkinningBackend skinBackend_;    ///< Phase-1 CPU linear-blend-skinning backend.
+    AnimationTesterState animUI_;          ///< Persistent state for the Animation Tester panel.
+    HitboxRig clientHitboxRig_;            ///< Hitbox definitions for client-side debug visualization.
+    float kRigScale_ = 1.0f;               ///< Per-renderable scale for animated characters (auto-calculated, tunable).
     float kRigVerticalOffset_ =
         -90.0f;                ///< Per-renderable Y translation for animated characters (auto-calculated, tunable).
     float rigMeshMinY_ = 0.0f; ///< Minimum Y of the bind-pose mesh vertices (model space).

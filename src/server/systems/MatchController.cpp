@@ -26,7 +26,7 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
         break;
     }
     case MatchPhase::IN_PROGRESS: {
-        if (systems::handleWinCondition(registry, k_killsToWin)) {
+        if (systems::handleWinCondition(registry, config.killsToWin)) {
             SDL_Log("MatchController: player has won, ending match");
             currentPhase = MatchPhase::FINISHED;
             countdownTimer = k_finishedDuration;
@@ -122,4 +122,54 @@ void MatchController::broadcastMatchState(Server& server)
     lastBroadcastWinnerId = winnerId;
     lastBroadcastCountdown = countdownTimer;
     ticksSinceBroadcast = 0;
+}
+
+bool MatchController::validateKillsToWin(int killsToWin)
+{
+    if (killsToWin <= 0)
+        return false;
+
+    return true;
+}
+
+bool MatchController::validateMaxPlayers(int maxPlayers)
+{
+    return maxPlayers >= 2 && maxPlayers <= 128;
+}
+
+void MatchController::broadcastMatchConfig(Server& server)
+{
+    server.broadcastMatchConfig(config);
+}
+
+bool MatchController::setMatchConfig(const MatchConfig& cfg)
+{
+    if (!validateKillsToWin(cfg.killsToWin) || !validateMaxPlayers(cfg.maxPlayers))
+        return false;
+
+    this->config = cfg;
+    return true;
+}
+
+bool MatchController::setKillsToWin(int killsToWin)
+{
+    if (!validateKillsToWin(killsToWin))
+        return false;
+
+    config.killsToWin = killsToWin;
+    return true;
+}
+
+bool MatchController::setMaxPlayers(int maxPlayers)
+{
+    if (!validateMaxPlayers(maxPlayers))
+        return false;
+
+    config.maxPlayers = maxPlayers;
+    return true;
+}
+
+[[nodiscard]] MatchConfig MatchController::getMatchConfig() const
+{
+    return config;
 }

@@ -160,7 +160,7 @@ struct RecoilParams
 /// @brief Returns viewmodel positioning params for a weapon type.
 inline const ViewmodelParams& getViewmodelParams(WeaponType type)
 {
-    static constexpr std::array<ViewmodelParams, 5> k_params{{
+    static constexpr std::array<ViewmodelParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle — existing tuning
         {.scale = 39.0f,
          .forward = 78.0f,
@@ -224,7 +224,7 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
     const std::array<HoldAnchor, kHoldStanceCount> k_defaultHolds{
         k_idleAnchor, k_crouchAnchor, k_airborneAnchor, k_slideAnchor, k_wallRunAnchor};
 
-    static const std::array<ThirdPersonWeaponParams, 5> k_params{{
+    static const std::array<ThirdPersonWeaponParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle — middleweight, full spine bend, moderate recoil.
         // Locomotion anchor hand-tuned via the 3P Weapon Tweaker; other
         // stances stay on the generic defaults until they're tuned.
@@ -234,8 +234,7 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
          .recoilKickRad = 0.05f,
          .rightHandHolds = {{
              // Locomotion: hand-tuned.
-             {.offset = {-12.69f, -8.23f, 22.32f},
-              .rotation = glm::quat(0.4410f, 0.5464f, 0.4894f, 0.5171f)},
+             {.offset = {-12.69f, -8.23f, 22.32f}, .rotation = glm::quat(0.4410f, 0.5464f, 0.4894f, 0.5171f)},
              k_crouchAnchor,
              k_airborneAnchor,
              k_slideAnchor,
@@ -292,7 +291,7 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
 /// @brief Returns hand grip/mount points for a weapon type.
 inline const WeaponHandMountParams& getWeaponHandMountParams(WeaponType type)
 {
-    static const std::array<WeaponHandMountParams, 5> k_params{{
+    static const std::array<WeaponHandMountParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle: trigger hand near the rear grip, support hand wrapped around the mag well.
         {.rightHand = {.elbowOffset = {-8.4f, -17.99f, -20.35f},
                        .palm = {.offset = {-1.05f, -11.39f, -7.2f}, .rotationDegrees = {-6.0f, 92.0f, 94.0f}},
@@ -401,7 +400,7 @@ inline const WeaponHandMountParams& getWeaponHandMountParams(WeaponType type)
 /// @brief Returns first-person-only arm controls for a weapon type.
 inline const FirstPersonHandMountParams& getFirstPersonHandMountParams(WeaponType type)
 {
-    static const std::array<FirstPersonHandMountParams, 5> k_params{{
+    static const std::array<FirstPersonHandMountParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle
         {.rightArm = {.shoulderOffset = {20.0f, -22.0f, -38.0f},
                       .elbowOffset = {14.0f, -12.0f, -22.0f},
@@ -520,7 +519,7 @@ inline const FirstPersonHandMountParams& getFirstPersonHandMountParams(WeaponTyp
 /// @brief Returns world weapon pickup/spawner model params for a weapon type.
 inline const WeaponSpawnerModelParams& getWeaponSpawnerModelParams(WeaponType type)
 {
-    static const std::array<WeaponSpawnerModelParams, 5> k_params{{
+    static const std::array<WeaponSpawnerModelParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle
         {.scale = {16.0f, 16.0f, 16.0f},
          .translation = {0.0f, 16.0f, 0.0f},
@@ -574,7 +573,7 @@ inline const WeaponSpawnerModelParams& getWeaponSpawnerModelParams(WeaponType ty
 /// @brief Returns the GLB filename and load flags for a weapon type.
 inline WeaponModelInfo getWeaponModelInfo(WeaponType type)
 {
-    static constexpr std::array<WeaponModelInfo, 5> k_infos{{
+    static constexpr std::array<WeaponModelInfo, kRenderableWeaponTypeCount> k_infos{{
         {.filename = "assault_rifle.glb", .flipUVs = true},
         {.filename = "rocket_launcher.glb", .flipUVs = true},
         {.filename = "rail_gun.glb", .flipUVs = true},
@@ -587,7 +586,7 @@ inline WeaponModelInfo getWeaponModelInfo(WeaponType type)
 /// @brief Returns visual recoil params for a weapon type.
 inline const RecoilParams& getRecoilParams(WeaponType type)
 {
-    static constexpr std::array<RecoilParams, 5> k_params{{
+    static constexpr std::array<RecoilParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle (R-301) — full-auto, low per-shot, fast recovery
         {.pitchKick = 2.0f, .pushBack = 1.5f, .rollKick = 0.5f, .recoverySpeed = 14.0f},
         // Rocket — big boom

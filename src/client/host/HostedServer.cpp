@@ -3,6 +3,8 @@
 
 #include "HostedServer.hpp"
 
+#include "network/ServerName.hpp"
+
 #include <SDL3/SDL.h>
 
 #if defined(_WIN32)
@@ -53,9 +55,20 @@ std::vector<std::string> buildServerArgs(const std::string& serverPath, const Ho
     args.emplace_back("--address=0.0.0.0");
     const int requestedPort = config.useSpecificPort ? config.port : 0;
     args.push_back("--port=" + std::to_string(requestedPort));
+    args.push_back("--server-name=" + server_name::sanitize(config.serverName));
+    if (!config.advertiseGlobal) {
+        args.emplace_back("--no-global-broadcast");
+    }
+    if (!config.advertiseLan) {
+        args.emplace_back("--no-lan-broadcast");
+    }
     if (config.useLegacyTcp) {
         args.emplace_back("--legacy-tcp");
     }
+
+    args.push_back("--killsToWin=" + std::to_string(config.killsToWin));
+    args.push_back("--max-players=" + std::to_string(config.maxPlayers));
+    args.emplace_back("--idle-shutdown-minutes=5");
     return args;
 }
 
@@ -148,7 +161,6 @@ std::string buildWindowsCommandLine(const std::vector<std::string>& args)
 
 bool HostedServer::start(HostConfigState const& config, std::string& outError)
 {
-    // TODO: Add real persistence: detach the child and add a way to find/shutdown only servers spawned by this client.
     if (isRunning()) {
         outError = "Hosted server is already running";
         return false;
@@ -230,6 +242,9 @@ bool HostedServer::start(HostConfigState const& config, std::string& outError)
                 SDL_Log("Hosted server process started with PID %lu at port %u",
                         static_cast<unsigned long>(childPid),
                         static_cast<unsigned>(boundPort));
+                if (config.persistAfterClientExit) {
+                    detachForPersistence();
+                }
                 return true;
             }
             continue;
@@ -280,6 +295,19 @@ bool HostedServer::start(HostConfigState const& config, std::string& outError)
         close(stdoutPipe[0]);
         dup2(stdoutPipe[1], STDOUT_FILENO);
         close(stdoutPipe[1]);
+        if (config.persistAfterClientExit) {
+            if (setsid() < 0) {
+                _exit(127);
+            }
+
+            const pid_t grandchild = fork();
+            if (grandchild < 0) {
+                _exit(127);
+            }
+            if (grandchild > 0) {
+                _exit(0);
+            }
+        }
 
         execv(serverPath.c_str(), argv.data());
 
@@ -301,6 +329,10 @@ bool HostedServer::start(HostConfigState const& config, std::string& outError)
             if (consumeReadyPort(output, boundPort)) {
                 close(stdoutPipe[0]);
                 SDL_Log("Hosted server process started with PID %d at port %u", pid, static_cast<unsigned>(boundPort));
+                if (config.persistAfterClientExit) {
+                    waitpid(childPid, nullptr, 0);
+                    detachForPersistence();
+                }
                 return true;
             }
         }
@@ -325,6 +357,20 @@ bool HostedServer::start(HostConfigState const& config, std::string& outError)
         }
     }
 #endif
+}
+
+void HostedServer::detachForPersistence()
+{
+#if defined(_WIN32)
+    if (childProcess != nullptr) {
+        CloseHandle(static_cast<HANDLE>(childProcess));
+        childProcess = nullptr;
+    }
+    childPid = 0;
+#else
+    childPid = -1;
+#endif
+    SDL_Log("Hosted server detached for persistence");
 }
 
 void HostedServer::shutdown()
@@ -433,4 +479,14 @@ bool HostedServer::isRunning()
 uint16_t HostedServer::port()
 {
     return boundPort;
+}
+
+bool HostedServer::hasSession() const
+{
+    return boundPort != 0;
+}
+
+void HostedServer::clearSession()
+{
+    boundPort = 0;
 }

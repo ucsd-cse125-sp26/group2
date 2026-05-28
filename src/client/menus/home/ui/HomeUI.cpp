@@ -55,9 +55,12 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImGui::Text("%u/%u", server.currentPlayers, server.maxPlayers);
                 ImGui::TableSetColumnIndex(3);
                 ImGui::PushID(i);
+                const bool lobbyFull = server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers;
+                ImGui::BeginDisabled(lobbyFull);
                 if (ImGui::SmallButton("Join")) {
                     result.localServerIndex = i;
                 }
+                ImGui::EndDisabled();
                 ImGui::PopID();
             }
 
@@ -100,9 +103,12 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImGui::Text("%llums", static_cast<unsigned long long>(server.lastSeenMs));
                 ImGui::TableSetColumnIndex(5);
                 ImGui::PushID(i);
+                const bool lobbyFull = server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers;
+                ImGui::BeginDisabled(lobbyFull);
                 if (ImGui::SmallButton("Join")) {
                     result.globalServerIndex = i;
                 }
+                ImGui::EndDisabled();
                 ImGui::PopID();
             }
 

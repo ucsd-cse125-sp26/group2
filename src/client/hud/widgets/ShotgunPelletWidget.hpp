@@ -15,10 +15,10 @@
 
 struct ShotgunPelletWidget : HudWidget
 {
-    float radius = 18.f;           ///< Pixel radius of the outer ring at uiScale=1.
-    float dotRadius = 3.5f;        ///< Pixel radius of each pellet dot at uiScale=1.
-    float holdDuration = 0.45f;    ///< Full opacity hold time after a blast.
-    float fadeDuration = 0.55f;    ///< Linear fade-out duration after the hold.
+    float radius = 18.f;        ///< Pixel radius of the outer ring at uiScale=1.
+    float dotRadius = 3.5f;     ///< Pixel radius of each pellet dot at uiScale=1.
+    float holdDuration = 0.45f; ///< Full opacity hold time after a blast.
+    float fadeDuration = 0.55f; ///< Linear fade-out duration after the hold.
 
     ShotgunPelletWidget();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
