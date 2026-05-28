@@ -263,15 +263,16 @@ struct HudShotgunPellet
     Result result = Result::Miss;
 };
 
-/// @brief A single completed shotgun blast (5 pellets) staged for the HUD widget.
-/// Pellets 0..4 are the 5 pentagon vertices (top → upper-left → lower-left →
-/// lower-right → upper-right; 72° spacing) matching the server's `k_offsets`
-/// in WeaponSystem.cpp. The widget converts the per-pellet result into colour.
+/// @brief A single completed shotgun blast (11 pellets) staged for the HUD widget.
+/// Index 0 = centre. Indices 1..5 = inner pentagon (×0.5 radius). Indices 6..10
+/// = outer pentagon (×1.0 radius). Both pentagons share the same 5 angles
+/// (72° spacing, top first). Order MUST match the server's `k_offsets` in
+/// WeaponSystem.cpp so widget colours align with the actual rays fired.
 struct HudShotgunBlast
 {
     bool valid = false;        ///< False = no recent blast; widget stays hidden.
     float secondsSinceFire = 0.f; ///< Drives the widget fade animation.
-    std::array<HudShotgunPellet, 5> pellets{};
+    std::array<HudShotgunPellet, 11> pellets{};
 };
 
 /// @brief Snapshot of game state consumed by the HUD each frame.

@@ -824,21 +824,33 @@ inline void handleFire(Registry& registry,
         };
 
         if (gun.type == WeaponType::Shotgun) {
-            // 5-pellet pentagon spread (Peacekeeper-style). Vertices evenly
-            // spaced at 72° apart starting from straight-up in the view's
-            // tangent plane. No centre pellet — pure pentagon. Each pellet
-            // runs an independent raycast and emits its own tracer/impact,
-            // so the HUD pellet widget reads the per-pellet hit/headshot
-            // info from the replicated NetParticleEvents.
-            static constexpr int k_pelletCount = 5;
-            static constexpr float k_spreadRad = 0.0873f; // ~5°
-            // Pre-computed (cos θ, sin θ) for θ = 90° + i*72°, i = 0..4.
+            // 11-pellet Peacekeeper pattern: 1 centre + inner pentagon (×0.5)
+            // + outer pentagon (×1.0). The two rings share the same 5 angles
+            // (72° spacing starting from straight-up), so each ray from the
+            // centre carries two pellets at different radii. Outer ring sits
+            // at the full ~5° spread; inner ring at ~2.5°. Each pellet runs
+            // an independent raycast and emits its own tracer/impact, so the
+            // HUD widget reads per-pellet hit/headshot from the replicated
+            // NetParticleEvents.
+            static constexpr int k_pelletCount = 11;
+            static constexpr float k_spreadRad = 0.0436f; // ~2.5° (outer ring) — tightened 50%
+            // Pre-computed offsets in tangent plane. Order MUST match
+            // ShotgunPelletWidget's k_pelletPositions so widget colours line
+            // up with the actual ray that was fired.
             static constexpr std::array<std::pair<float, float>, k_pelletCount> k_offsets{{
-                { 0.0000f,  1.0000f}, // top         (90°)
-                {-0.9511f,  0.3090f}, // upper-left  (162°)
-                {-0.5878f, -0.8090f}, // lower-left  (234°)
-                { 0.5878f, -0.8090f}, // lower-right (306°)
-                { 0.9511f,  0.3090f}, // upper-right (18°)
+                { 0.0000f,  0.0000f}, // 0: centre
+                // Inner pentagon (×0.5)
+                { 0.0000f,  0.5000f}, // 1: top
+                {-0.4755f,  0.1545f}, // 2: upper-left
+                {-0.2939f, -0.4045f}, // 3: lower-left
+                { 0.2939f, -0.4045f}, // 4: lower-right
+                { 0.4755f,  0.1545f}, // 5: upper-right
+                // Outer pentagon (×1.0)
+                { 0.0000f,  1.0000f}, // 6: top
+                {-0.9511f,  0.3090f}, // 7: upper-left
+                {-0.5878f, -0.8090f}, // 8: lower-left
+                { 0.5878f, -0.8090f}, // 9: lower-right
+                { 0.9511f,  0.3090f}, //10: upper-right
             }};
             const glm::vec3 worldUp{0.0f, 1.0f, 0.0f};
             // Avoid degenerate cross when looking nearly straight up/down.
