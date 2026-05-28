@@ -107,6 +107,7 @@ bool App::init()
         hostConfigState.port = networkConfig.serverNetwork.port;
         hostConfigState.useSpecificPort = false;
         hostConfigState.useLegacyTcp = false;
+        hostConfigState.serverName = networkConfig.discovery.serverName;
         hostConfigState.maxPlayers = networkConfig.discovery.maxPlayers;
     }
 
@@ -235,6 +236,7 @@ SDL_AppResult App::iterate()
                 home->setJoinError(joinErrorMessage(connectError));
             } else {
                 SDL_Log("Successfully connected to server at %s:%d", serverIp.c_str(), serverPort);
+                currentServerName = joinRequest->serverName.empty() ? serverIp : joinRequest->serverName;
                 transitionTo(Screen::Lobby);
             }
         }
@@ -276,6 +278,7 @@ SDL_AppResult App::iterate()
                 hostedServer.shutdown();
             } else {
                 SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
+                currentServerName = config.serverName;
             }
         }
 
@@ -467,6 +470,7 @@ AppContext App::screenContext()
         .developerConfig = developerConfig,
         .userSettings = userSettings,
         .userSettingsPath = userSettingsPath,
+        .currentServerName = currentServerName,
     };
 }
 

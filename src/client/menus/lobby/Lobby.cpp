@@ -19,6 +19,10 @@ bool Lobby::init(AppContext& ctx)
     window = &ctx.window;
     client = &ctx.client;
     isHosting = ctx.hostedServer.hasSession();
+    serverName = std::string(ctx.currentServerName);
+    if (serverName.empty() && isHosting) {
+        serverName = ctx.hostConfigState.serverName;
+    }
     hostPort = ctx.hostedServer.port();
     hostLanIp = isHosting ? local_address::firstLanIPv4() : std::string{};
 
@@ -142,6 +146,7 @@ SDL_AppResult Lobby::iterate()
         .startCountdownActive = startCountdownActive,
         .startCountdownRemaining = startCountdownRemaining,
         .matchConfig = matchConfig,
+        .serverName = serverName,
         .isHosting = isHosting,
         .hostLanIp = hostLanIp,
         .hostPort = hostPort,

@@ -22,6 +22,11 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
     ImGui::SetNextWindowPos(ImVec2(40.0f, 40.0f), ImGuiCond_Once);
     ImGui::SetNextWindowSize(ImVec2(380.0f, 300.0f), ImGuiCond_Once);
     if (ImGui::Begin("Lobby")) {
+        if (!config.serverName.empty()) {
+            ImGui::Text("Server: %.*s", static_cast<int>(config.serverName.size()), config.serverName.data());
+            ImGui::Separator();
+        }
+
         if (config.isHosting) {
             ImGui::SeparatorText("Hosting");
             ImGui::Text("Listen address: %.*s:%u",

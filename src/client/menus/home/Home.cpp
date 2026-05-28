@@ -98,7 +98,8 @@ SDL_AppResult Home::iterate()
         } else {
             pendingJoinRequest = JoinRequest{.serverIp = joinMenuState.serverIp,
                                              .serverPort = static_cast<uint16_t>(joinMenuState.serverPort),
-                                             .globalServerId = 0};
+                                             .globalServerId = 0,
+                                             .serverName = joinMenuState.serverIp};
         }
     }
     if (result.globalServerIndex >= 0 && result.globalServerIndex < static_cast<int>(servers.size())) {
@@ -107,8 +108,10 @@ SDL_AppResult Home::iterate()
             joinError = "Lobby full";
         } else {
             joinError.clear();
-            pendingJoinRequest =
-                JoinRequest{.serverIp = server.host, .serverPort = server.gamePort, .globalServerId = server.id};
+            pendingJoinRequest = JoinRequest{.serverIp = server.host,
+                                             .serverPort = server.gamePort,
+                                             .globalServerId = server.id,
+                                             .serverName = server.name};
         }
     } else if (result.localServerIndex >= 0 && result.localServerIndex < static_cast<int>(localServers.size())) {
         const auto& server = localServers[static_cast<std::size_t>(result.localServerIndex)];
@@ -116,8 +119,10 @@ SDL_AppResult Home::iterate()
             joinError = "Lobby full";
         } else {
             joinError.clear();
-            pendingJoinRequest =
-                JoinRequest{.serverIp = server.hostIp, .serverPort = server.gamePort, .globalServerId = 0};
+            pendingJoinRequest = JoinRequest{.serverIp = server.hostIp,
+                                             .serverPort = server.gamePort,
+                                             .globalServerId = 0,
+                                             .serverName = server.serverName};
         }
     }
 

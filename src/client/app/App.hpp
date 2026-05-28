@@ -59,6 +59,7 @@ private:
     DeveloperConfig developerConfig; ///< Developer toggles loaded from config.toml.
     UserSettings userSettings;       ///< User-specific input and gameplay settings.
     std::string userSettingsPath;    ///< Path used to load and save user settings.
+    std::string currentServerName;   ///< Display name for the connected server, if known.
     Client client;                   ///< Network client connected to the authoritative server when in a session.
     HostedServer hostedServer;       ///< Optional local server process launched by the host screen.
     HostConfigState hostConfigState{
@@ -66,6 +67,7 @@ private:
         .useSpecificPort = false,
         .useLegacyTcp = false,
         .persistAfterClientExit = false,
+        .serverName = "Group 2 Server",
         .killsToWin = 10,
         .maxPlayers = 8,
     }; ///< Persistent host screen draft state.

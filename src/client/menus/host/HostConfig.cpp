@@ -3,6 +3,7 @@
 
 #include "HostConfig.hpp"
 
+#include "network/ServerName.hpp"
 #include "ui/HostConfigUI.hpp"
 
 #include <algorithm>
@@ -163,12 +164,14 @@ HostConfigState HostConfig::draftConfig() const
             .useSpecificPort = false,
             .useLegacyTcp = false,
             .persistAfterClientExit = false,
+            .serverName = std::string(server_name::k_default),
             .killsToWin = 10,
             .maxPlayers = 8,
         };
 
     HostConfigState result = *draft;
     result.port = std::clamp(result.port, 0, 65535);
+    result.serverName = server_name::sanitize(result.serverName);
     result.killsToWin = std::clamp(result.killsToWin, 1, 100);
     result.maxPlayers = std::clamp(result.maxPlayers, 2, 128);
     return result;

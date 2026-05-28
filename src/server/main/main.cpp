@@ -6,6 +6,7 @@
 #include "network/DiscoveryServer.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
+#include "network/ServerName.hpp"
 #include "perf/Parallel.hpp"
 #include "perf/Profiler.hpp"
 
@@ -169,6 +170,7 @@ int main(int argc, char* argv[])
     argparse::ArgumentParser program("group2_server");
     program.add_argument("--address").help("Address to listen on for game clients (default: 127.0.0.1)");
     program.add_argument("--port").scan<'u', uint16_t>().help("Port to listen on for game clients (default: 9999)");
+    program.add_argument("--server-name").help("Name advertised in LAN/global server browsers");
     program.add_argument("--legacy-tcp").flag().help("Force legacy TCP transport for hosted-client launches");
     program.add_argument("--killsToWin")
         .scan<'i', int>()
@@ -227,6 +229,12 @@ int main(int argc, char* argv[])
 
     if (program.get<bool>("--legacy-tcp")) {
         cfg.transport.useUdpSessions = false;
+    }
+
+    if (program.is_used("--server-name")) {
+        cfg.discovery.serverName = server_name::sanitize(program.get<std::string>("--server-name"));
+    } else {
+        cfg.discovery.serverName = server_name::sanitize(cfg.discovery.serverName);
     }
 
     if (program.is_used("--max-players")) {

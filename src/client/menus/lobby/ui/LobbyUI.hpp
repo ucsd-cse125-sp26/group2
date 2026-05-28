@@ -29,6 +29,7 @@ struct LobbyUIConfig
     bool startCountdownActive;               ///< True while the pre-match countdown is running.
     float startCountdownRemaining;           ///< Seconds remaining in the countdown.
     std::optional<MatchConfig> matchConfig;  ///< Current match settings, if received from the server.
+    std::string_view serverName;             ///< Display name for the connected server.
     bool isHosting;                          ///< True if this client owns a local hosted server process.
     std::string_view hostLanIp;              ///< LAN IPv4 shown to other local players.
     uint16_t hostPort;                       ///< Port shown to other players when hosting locally.

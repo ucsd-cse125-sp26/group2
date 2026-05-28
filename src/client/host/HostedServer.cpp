@@ -3,6 +3,8 @@
 
 #include "HostedServer.hpp"
 
+#include "network/ServerName.hpp"
+
 #include <SDL3/SDL.h>
 
 #if defined(_WIN32)
@@ -53,6 +55,7 @@ std::vector<std::string> buildServerArgs(const std::string& serverPath, const Ho
     args.emplace_back("--address=0.0.0.0");
     const int requestedPort = config.useSpecificPort ? config.port : 0;
     args.push_back("--port=" + std::to_string(requestedPort));
+    args.push_back("--server-name=" + server_name::sanitize(config.serverName));
     if (config.useLegacyTcp) {
         args.emplace_back("--legacy-tcp");
     }

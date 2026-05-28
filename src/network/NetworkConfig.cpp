@@ -3,6 +3,8 @@
 
 #include "NetworkConfig.hpp"
 
+#include "ServerName.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <toml++/toml.hpp>
@@ -75,7 +77,7 @@ NetworkConfig loadNetworkConfig(const char* path)
     if (auto v = discovery["directory-udp-port"].value<uint16_t>())
         cfg.discovery.directoryUdpPort = *v;
     if (auto v = discovery["server-name"].value<std::string>())
-        cfg.discovery.serverName = *v;
+        cfg.discovery.serverName = server_name::sanitize(*v);
     if (auto v = discovery["max-players"].value<int>())
         cfg.discovery.maxPlayers = static_cast<uint8_t>(std::clamp(*v, 2, 128));
     if (auto v = discovery["refresh-seconds"].value<int>())

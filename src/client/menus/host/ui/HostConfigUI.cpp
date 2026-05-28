@@ -3,7 +3,10 @@
 
 #include "HostConfigUI.hpp"
 
+#include "network/ServerName.hpp"
+
 #include <imgui.h>
+#include <misc/cpp/imgui_stdlib.h>
 
 namespace host_config_ui
 {
@@ -19,6 +22,16 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
         if (ImGui::BeginTable("HostSettings", 2, ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, 150.0f);
             ImGui::TableSetupColumn("Value");
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Server Name");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::BeginDisabled(inputs.serverRunning);
+            ImGui::SetNextItemWidth(240.0f);
+            ImGui::InputText("##ServerName", &draft.serverName);
+            draft.serverName = server_name::clampUtf8Bytes(draft.serverName);
+            ImGui::EndDisabled();
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
