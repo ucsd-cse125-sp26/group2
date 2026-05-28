@@ -80,6 +80,8 @@ public:
     // ── Icons ───────────────────────────────────────────────────────────
 
     void icon(HudIcon id, float x, float y, float size, HudColor tint = HudColor::white());
+    void iconRect(HudIcon id, float x, float y, float w, float h, HudColor tint = HudColor::white());
+    void iconFillRect(HudIcon id, float x, float y, float w, float h, float fill01, HudColor tint);
 
     // ── Crosshair ───────────────────────────────────────────────────────
 

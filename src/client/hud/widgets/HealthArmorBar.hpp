@@ -8,7 +8,7 @@
 struct HealthArmorBar : HudWidget
 {
     float panelWidth = 650.f;     ///< Total bar width in the 2848x1494 prototype canvas.
-    float barHeight = 42.f;       ///< Total bar height.
+    float barHeight = 84.f;       ///< Total bar height.
     float chamferSize = 38.f;     ///< Left and right slant depth.
     float cornerCutSize = 10.f;   ///< Small lower-corner cuts that soften the side points.
     float outlineThickness = 3.f; ///< Hairline thickness around the full silhouette.

@@ -376,9 +376,26 @@ float HudContext::measureText(const char* str, float size) const
 
 void HudContext::icon(HudIcon id, float x, float y, float size, HudColor tint)
 {
+    iconRect(id, x, y, size, size, tint);
+}
+
+void HudContext::iconRect(HudIcon id, float x, float y, float w, float h, HudColor tint)
+{
     switch (id) {
     case HudIcon::NoIcon:
-        emitQuad(x, y, size, size, 0.f, 0.f, 1.f, 1.f, tint, 2.f);
+        emitQuad(x, y, w, h, 0.f, 0.f, 1.f, 1.f, tint, 2.f);
+        break;
+    case HudIcon::None:
+    default:
+        break;
+    }
+}
+
+void HudContext::iconFillRect(HudIcon id, float x, float y, float w, float h, float fill01, HudColor tint)
+{
+    switch (id) {
+    case HudIcon::NoIcon:
+        emitQuad(x, y, w, h, 0.f, 0.f, 1.f, 1.f, tint, 7.f, std::clamp(fill01, 0.f, 1.f));
         break;
     case HudIcon::None:
     default:

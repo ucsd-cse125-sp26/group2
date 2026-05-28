@@ -106,6 +106,17 @@ void main()
         vec4 texel = texture(iconAtlas, vUV) * vColor;
         outColor = premul(texel.rgb, texel.a);
 
+    } else if (mode == 7) {
+        // Left-to-right icon fill. The whole SVG mask stays registered in
+        // UV-space, but only pixels whose icon UV is inside the fill range
+        // receive color. This avoids relying on screen-space scissor clipping
+        // for bar-style SVG gauges.
+        vec4 texel = texture(iconAtlas, vUV) * vColor;
+        float fill = clamp(vShapeData.x, 0.0, 1.0);
+        float edge = max(fwidth(vUV.x), 0.001);
+        float fillMask = 1.0 - smoothstep(fill, fill + edge, vUV.x);
+        outColor = premul(texel.rgb, texel.a * fillMask);
+
     } else if (mode == 3) {
         // SDF rounded rectangle (analytic distance, no atlas needed).
         vec2  halfExt = vShapeData.xy;
