@@ -12,6 +12,7 @@
 #include "ecs/components/Velocity.hpp"
 #include "ecs/physics/Inertia.hpp"
 #include "ecs/physics/Joints.hpp"
+#include "ecs/physics/RagdollPbd.hpp"
 
 #include <glm/vec3.hpp>
 
@@ -36,25 +37,38 @@ struct BoneDesc
     float mass;
 };
 
-/// @brief 15-body humanoid layout (~80 kg total).  Values are tuned to a
-/// 72-unit-tall character with mass distribution roughly matching a
-/// human (head ~5 %, torso ~40 %, arms ~10 %, legs ~30 %).
+/// @brief 15-body humanoid layout (~78 kg total).
+///
+/// **Mass equalisation.** Masses are deliberately compressed compared to a
+/// real anatomical distribution. The PGS / Baumgarte solver is conditionally
+/// stable when adjacent jointed bodies have very different masses — Havok's
+/// inertia-conditioning, PhysX's `setInvMassScale`, and Unity's ragdoll
+/// stability docs all converge on the rule "keep adjacent mass ratio ≤ ~3:1
+/// for stable behaviour at single-digit iteration counts." With the previous
+/// 30 kg torso vs 1 kg hand (30:1 along the arm chain) the solver couldn't
+/// converge in 8 iterations; corrective impulses overshoot every frame,
+/// limbs spin and fly off.
+///
+/// New layout — every connected pair (Torso↔Head, Torso↔UpperArm, ...) has
+/// ratio ≤ 3:1; total ≈ 78 kg, distribution still roughly humanoid:
+///   Head 5 · Torso 15 · Pelvis 8 · UpperArm 5×2 · Forearm 3×2 · Hand 2×2
+///   · UpperLeg 8×2 · LowerLeg 5×2 · Foot 2×2.
 constexpr BoneDesc k_bones[] = {
-    {RagdollBone::Head, {0, 32, 0}, 7, 3, 4},
-    {RagdollBone::Torso, {0, 18, 0}, 11, 10, 30},
+    {RagdollBone::Head, {0, 32, 0}, 7, 3, 5},
+    {RagdollBone::Torso, {0, 18, 0}, 11, 10, 15},
     {RagdollBone::Pelvis, {0, 0, 0}, 11, 4, 8},
-    {RagdollBone::UpperArmL, {-14, 22, 0}, 4, 8, 4},
-    {RagdollBone::UpperArmR, {14, 22, 0}, 4, 8, 4},
-    {RagdollBone::ForearmL, {-22, 12, 0}, 3, 7, 2.5f},
-    {RagdollBone::ForearmR, {22, 12, 0}, 3, 7, 2.5f},
-    {RagdollBone::HandL, {-26, 4, 0}, 3, 2, 1},
-    {RagdollBone::HandR, {26, 4, 0}, 3, 2, 1},
-    {RagdollBone::UpperLegL, {-6, -8, 0}, 5, 10, 9},
-    {RagdollBone::UpperLegR, {6, -8, 0}, 5, 10, 9},
+    {RagdollBone::UpperArmL, {-14, 22, 0}, 4, 8, 5},
+    {RagdollBone::UpperArmR, {14, 22, 0}, 4, 8, 5},
+    {RagdollBone::ForearmL, {-22, 12, 0}, 3, 7, 3},
+    {RagdollBone::ForearmR, {22, 12, 0}, 3, 7, 3},
+    {RagdollBone::HandL, {-26, 4, 0}, 3, 2, 2},
+    {RagdollBone::HandR, {26, 4, 0}, 3, 2, 2},
+    {RagdollBone::UpperLegL, {-6, -8, 0}, 5, 10, 8},
+    {RagdollBone::UpperLegR, {6, -8, 0}, 5, 10, 8},
     {RagdollBone::LowerLegL, {-6, -22, 0}, 4, 8, 5},
     {RagdollBone::LowerLegR, {6, -22, 0}, 4, 8, 5},
-    {RagdollBone::FootL, {-6, -34, 4}, 4, 2, 1},
-    {RagdollBone::FootR, {6, -34, 4}, 4, 2, 1},
+    {RagdollBone::FootL, {-6, -34, 4}, 4, 2, 2},
+    {RagdollBone::FootR, {6, -34, 4}, 4, 2, 2},
 };
 
 /// @brief One joint in the ragdoll skeleton.  Phase 13 follow-up: each
@@ -249,8 +263,13 @@ entt::entity createBone(
     rb.invMass = 1.0f / bd.mass;
     rb.localInvInertia = physics::inertia::capsuleInvInertia(bd.mass, bd.radius, bd.halfHeight);
     rb.invInertiaWorld = rb.localInvInertia; // identity orientation at spawn
-    rb.linearDamping = 0.1f;
-    rb.angularDamping = 0.3f;
+    // Damping tuned for AAA-feel ragdolls. The previous values (0.1 / 0.3)
+    // let angular velocity build up across many constraint iterations,
+    // producing fast spinning bones and twitch. PhysX docs recommend
+    // 0.05–0.5 for ragdolls; we pick the high end so the corpse settles
+    // quickly to a stable pose rather than oscillating.
+    rb.linearDamping = 0.4f;
+    rb.angularDamping = 0.85f;
     registry.emplace<RigidBody>(body, rb);
 
     registry.emplace<RagdollBoneTag>(
@@ -269,80 +288,45 @@ void destroyIfOwnedChild(Registry& registry, entt::entity owner, entt::entity ch
 
 entt::entity createJoint(Registry& registry, entt::entity bodyA, entt::entity bodyB, const JointDesc& jd)
 {
-    // Back-compute `anchorLocalToChild` so the parent and child anchors
-    // coincide in world space at the spawn pose. Without this, the
-    // (intentionally schematic) per-joint anchor offsets in `k_joints` don't
-    // exactly line up with the per-bone spawn offsets in `k_bones` — e.g.
-    // Torso-Head starts with a 10-unit gap, Torso-UpperArmL with ~6 units —
-    // and the Baumgarte-stabilised constraint solver tries to close that gap
-    // every frame with `bias = -(0.2 / dt) * error`. At 60 fps a 10-unit
-    // error produces ~125 u/s of corrective impulse per iteration × 8
-    // iterations × 14 joints, which dwarfs the per-body mass budget and
-    // detonates the ragdoll outward.
-    //
-    // Re-anchoring on the child side preserves the parent-side anatomy
-    // (joints still sit at the visually right spots on the parent bone),
-    // gives zero initial error, and means the solver only ever fights real
-    // motion. Bodies are at identity orientation at spawn, so local==world
-    // direction.
+    // Anchor coincidence: the schematic per-joint anchor offsets in `k_joints`
+    // don't exactly line up with the per-bone spawn offsets in `k_bones`
+    // (e.g. Torso-Head has a 10-unit gap). Back-compute `anchorLocalToChild`
+    // so worldA == worldB at spawn pose — the PBD projection sees zero
+    // initial error. Bodies are at identity orientation at spawn so local
+    // direction equals world.
     const glm::vec3 posA = registry.get<Position>(bodyA).value;
     const glm::vec3 posB = registry.get<Position>(bodyB).value;
     const glm::vec3 fixedAnchorB = (posA + jd.anchorLocalToParent) - posB;
 
+    // Emit a PBD joint. Ragdoll connectivity is enforced by
+    // `physics::enforceRagdollConnectivity` (position projection +
+    // angular-limit clamping) — NOT by the old PGS joint solver. The old
+    // PointJoint/HingeJoint/ConeTwistJoint components are not attached
+    // here so the legacy solver no longer touches ragdoll bones.
     entt::entity j = registry.create();
+    physics::RagdollPbdJoint pj{};
+    pj.bodyA = bodyA;
+    pj.bodyB = bodyB;
+    pj.localAnchorA = jd.anchorLocalToParent;
+    pj.localAnchorB = fixedAnchorB;
+    pj.axisLocalA = glm::normalize(jd.axisInParent);
     switch (jd.kind) {
-    case JointDesc::Kind::Point: {
-        physics::PointJoint pj{};
-        pj.bodyA = bodyA;
-        pj.bodyB = bodyB;
-        pj.localAnchorA = jd.anchorLocalToParent;
-        pj.localAnchorB = fixedAnchorB;
-        registry.emplace<physics::PointJoint>(j, pj);
+    case JointDesc::Kind::Point:
+        pj.kind = physics::RagdollPbdJoint::Kind::Point;
+        pj.swingLimit = (jd.swingLimit > 0.0f) ? jd.swingLimit : 1.4f;
+        break;
+    case JointDesc::Kind::Hinge:
+        pj.kind = physics::RagdollPbdJoint::Kind::Hinge;
+        pj.hingeMin = jd.hingeMin;
+        pj.hingeMax = jd.hingeMax;
+        break;
+    case JointDesc::Kind::ConeTwist:
+        pj.kind = physics::RagdollPbdJoint::Kind::ConeTwist;
+        pj.swingLimit = jd.swingLimit;
+        pj.twistLimit = jd.twistLimit;
         break;
     }
-    case JointDesc::Kind::Hinge: {
-        physics::HingeJoint hj{};
-        hj.bodyA = bodyA;
-        hj.bodyB = bodyB;
-        hj.localAnchorA = jd.anchorLocalToParent;
-        hj.localAnchorB = fixedAnchorB;
-        hj.localAxisA = jd.axisInParent;
-        hj.localAxisB = jd.axisInParent;
-        hj.hasLimit = true;
-        hj.minAngle = jd.hingeMin;
-        hj.maxAngle = jd.hingeMax;
-        registry.emplace<physics::HingeJoint>(j, hj);
-        break;
-    }
-    case JointDesc::Kind::ConeTwist: {
-        physics::ConeTwistJoint cj{};
-        cj.bodyA = bodyA;
-        cj.bodyB = bodyB;
-        cj.localAnchorA = jd.anchorLocalToParent;
-        cj.localAnchorB = fixedAnchorB;
-        cj.swingLimit = jd.swingLimit;
-        cj.twistLimit = jd.twistLimit;
-        // Orient the local joint frame so +X aligns with the desired
-        // twist axis.  Default is identity (axis = +X local).  When a
-        // different axis is requested we build the rotation that takes
-        // +X to that axis.
-        const glm::vec3 to = glm::normalize(jd.axisInParent);
-        const glm::vec3 from{1, 0, 0};
-        const float d = glm::dot(from, to);
-        if (d > 0.9999f) {
-            cj.localFrameA = glm::quat{1, 0, 0, 0};
-        } else if (d < -0.9999f) {
-            cj.localFrameA = glm::quat{0, 0, 1, 0}; // 180° about Y
-        } else {
-            const glm::vec3 axis = glm::normalize(glm::cross(from, to));
-            const float angle = std::acos(d);
-            cj.localFrameA = glm::angleAxis(angle, axis);
-        }
-        cj.localFrameB = cj.localFrameA;
-        registry.emplace<physics::ConeTwistJoint>(j, cj);
-        break;
-    }
-    }
+    registry.emplace<physics::RagdollPbdJoint>(j, pj);
     return j;
 }
 

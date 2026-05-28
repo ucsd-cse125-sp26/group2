@@ -3,6 +3,8 @@
 
 #include "ecs/systems/DynamicsSystem.hpp"
 
+#include "ecs/physics/RagdollPbd.hpp"
+
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Orientation.hpp"
 #include "ecs/components/Position.hpp"
@@ -100,7 +102,23 @@ void runDynamics(Registry& registry,
 
     // 3: Solve everything.
     physics::solveContacts(registry, cache, solverCfg, dt);
+
+    // Legacy PGS joints (hinged props that may exist outside the ragdoll
+    // system). Ragdoll bones don't emit these any more — they go through
+    // `enforceRagdollConnectivity` below. Cheap when no PGS joints exist.
     physics::solveJoints(registry, solverCfg, dt);
+
+    // RAGDOLL CONNECTIVITY (PBD). Position projection on the joint anchors
+    // is a hard constraint: bones cannot detach from the skeleton under
+    // ANY forcing. The angular limit clamp then prevents elbows from
+    // bending backwards, etc. Replaces the velocity-bias PGS joint pass
+    // that could only beg the bodies to come back together.
+    physics::enforceRagdollConnectivity(registry, dt);
+
+    // Clamp angular/linear velocity to keep numerical blow-up off the
+    // table even when the PBD pass derives a large angular velocity from
+    // a single-tick orientation snap.
+    physics::clampVelocities(registry);
 
     // 4: Sleep state update.
     physics::updateSleep(registry, sleepCfg);

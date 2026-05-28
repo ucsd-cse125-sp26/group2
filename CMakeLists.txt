@@ -924,6 +924,8 @@ add_executable(group2
         src/ecs/physics/Solver.cpp
         src/ecs/physics/Joints.hpp
         src/ecs/physics/Joints.cpp
+        src/ecs/physics/RagdollPbd.hpp
+        src/ecs/physics/RagdollPbd.cpp
         src/ecs/physics/Sleep.hpp
         src/ecs/physics/Sleep.cpp
         src/ecs/physics/CookedMeshFormat.hpp
@@ -1262,6 +1264,8 @@ add_executable(server
         src/ecs/physics/Solver.cpp
         src/ecs/physics/Joints.hpp
         src/ecs/physics/Joints.cpp
+        src/ecs/physics/RagdollPbd.hpp
+        src/ecs/physics/RagdollPbd.cpp
         src/ecs/physics/Sleep.hpp
         src/ecs/physics/Sleep.cpp
         src/ecs/physics/CookedMeshFormat.hpp
@@ -1634,6 +1638,8 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Solver.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/RagdollPbd.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/RagdollPbd.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Sleep.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Sleep.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CookedMeshFormat.hpp"
@@ -1759,6 +1765,9 @@ add_test(NAME physics_trimesh_tests COMMAND physics_trimesh_tests)
 add_executable(ragdoll_system_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/ragdoll_system_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/RagdollSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/RagdollPbd.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Forces.cpp"
 )
 target_include_directories(ragdoll_system_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
