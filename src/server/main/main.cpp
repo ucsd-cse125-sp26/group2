@@ -340,14 +340,14 @@ int main(int argc, char* argv[])
                 return;
             }
             if (settings.advertiseLan && !lanDiscoveryRunning) {
-                lanDiscoveryRunning = discoveryServer.start(9998, serverInfo, playerCountFn, globalServerIdFn);
+                lanDiscoveryRunning = discoveryServer.start(cfg.discovery.lanBroadcastPort, serverInfo, playerCountFn, globalServerIdFn);
             } else if (!settings.advertiseLan && lanDiscoveryRunning) {
                 discoveryServer.stop();
                 lanDiscoveryRunning = false;
             }
         });
     if (cfg.discovery.enabled && cfg.discovery.lanBroadcastEnabled) {
-        lanDiscoveryRunning = discoveryServer.start(9998, serverInfo, playerCountFn, globalServerIdFn);
+        lanDiscoveryRunning = discoveryServer.start(cfg.discovery.lanBroadcastPort, serverInfo, playerCountFn, globalServerIdFn);
     }
 
     std::cout << "READY " << actualPort << '\n' << std::flush;

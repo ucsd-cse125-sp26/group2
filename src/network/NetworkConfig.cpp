@@ -74,6 +74,8 @@ NetworkConfig loadNetworkConfig(const char* path)
         cfg.discovery.advertiseServer = *v;
     if (auto v = discovery["lan-broadcast-enabled"].value<bool>())
         cfg.discovery.lanBroadcastEnabled = *v;
+    if (auto v = discovery["lan-broadcast-port"].value<uint16_t>())
+        cfg.discovery.lanBroadcastPort = *v;
     if (auto v = discovery["directory-host"].value<std::string>())
         cfg.discovery.directoryHost = *v;
     if (auto v = discovery["directory-tcp-port"].value<uint16_t>())

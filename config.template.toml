@@ -3,11 +3,11 @@
 
 [client-network]
 host = "0.0.0.0"
-port = 9999
+port = 2310
 
 [server-network]
 host = "0.0.0.0"
-port = 9999
+port = 2310
 
 [server-replication]
 # How often the server emits a full registry snapshot to each client.
@@ -37,6 +37,7 @@ snapshot-hz = 128
 enabled = true
 advertise-server = true
 lan-broadcast-enabled = true
+lan-broadcast-port = 2311
 directory-host = "157.245.233.91"
 directory-udp-port = 10081
 server-name = "Palantir"
