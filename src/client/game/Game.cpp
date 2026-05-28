@@ -2650,10 +2650,20 @@ SDL_AppResult Game::iterate()
                         float yawKick =
                             wpnCfg.recoilYawPerShot * (oNow * std::sin(hNow * 0.35f) - oPrev * std::sin(hPrev * 0.35f));
 
-                        auto& snap = registry.get<InputSnapshot>(localShooter);
-                        snap.pitch -= pitchKick;
-                        snap.yaw += yawKick;
-                        snap.pitch = std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
+                        if (useSpringCameraRecoil_) {
+                            // Apex-style: push the spring target. The integrator in the
+                            // per-frame recoil-decay block chases this each frame, and
+                            // the offset is added to the view AFTER cachedCamFwd_ is
+                            // computed — so bullets fly along the un-punched aim.
+                            cameraRecoilTargetPitch_ -= pitchKick;
+                            cameraRecoilTargetYaw_ += yawKick;
+                        } else {
+                            // Legacy: directly mutate the replicated input snapshot.
+                            auto& snap = registry.get<InputSnapshot>(localShooter);
+                            snap.pitch -= pitchKick;
+                            snap.yaw += yawKick;
+                            snap.pitch = std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
+                        }
                     }
                     localRecoilHeat_ += 1.0f;
                 }
@@ -4261,6 +4271,73 @@ SDL_AppResult Game::iterate()
                     recoilRoll_ = 0.0f;
             }
 
+            // --- Apex-style camera recoil spring ---
+            // Critically-damped second-order spring chases `cameraRecoilTarget*`,
+            // and the per-frame delta is COMMITTED to the local player's
+            // InputSnapshot.pitch/yaw — so raycasts, tracers, bullet-holes, and
+            // the replicated aim all actually drift with the recoil. The spring
+            // is just the delivery shape; the offset is authoritative.
+            //
+            // Target accumulates per-shot during sustained fire and only decays
+            // toward 0 after `recoilIdleTime_` exceeds the idle threshold — that
+            // produces auto-recovery without fighting an active burst.
+            {
+                const float dt = frameTime;
+                const float omega = cameraRecoilOmega_;
+                const float k = omega * omega;
+                const float c = 2.0f * omega;
+
+                if (recoilIdleTime_ > cameraRecoilIdleThreshold_) {
+                    const float targetDecay = std::exp(-cameraRecoilTargetDecay_ * dt);
+                    cameraRecoilTargetPitch_ *= targetDecay;
+                    cameraRecoilTargetYaw_ *= targetDecay;
+                }
+
+                auto stepSpring = [&](float& x, float& v, float target) {
+                    const float a = -k * (x - target) - c * v;
+                    v += a * dt;
+                    x += v * dt;
+                };
+                stepSpring(cameraRecoilPitch_, cameraRecoilPitchVel_, cameraRecoilTargetPitch_);
+                stepSpring(cameraRecoilYaw_, cameraRecoilYawVel_, cameraRecoilTargetYaw_);
+
+                // Commit the per-frame change in spring offset to the local
+                // player's actual aim. The spring is monotonic during a burst
+                // (deflecting aim) and reverses sign during recovery (bringing
+                // aim back to pre-burst). NOTE: snap convention is pitch- = up,
+                // and our per-shot push does `target -= pitchKick`, so deltas
+                // here will be negative going into a burst and positive on
+                // recovery — assigning straight into snap is correct.
+                if (useSpringCameraRecoil_) {
+                    const float dPitch = cameraRecoilPitch_ - committedRecoilPitch_;
+                    const float dYaw = cameraRecoilYaw_ - committedRecoilYaw_;
+                    if (std::abs(dPitch) > 0.0f || std::abs(dYaw) > 0.0f) {
+                        registry.view<LocalPlayer, InputSnapshot>().each([&](InputSnapshot& snap) {
+                            snap.pitch += dPitch;
+                            snap.yaw += dYaw;
+                            snap.pitch =
+                                std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
+                        });
+                    }
+                    committedRecoilPitch_ = cameraRecoilPitch_;
+                    committedRecoilYaw_ = cameraRecoilYaw_;
+                }
+
+                // Kill tiny residuals so the spring fully settles.
+                if (std::abs(cameraRecoilPitch_) < 1e-5f && std::abs(cameraRecoilPitchVel_) < 1e-4f) {
+                    cameraRecoilPitch_ = 0.0f;
+                    cameraRecoilPitchVel_ = 0.0f;
+                }
+                if (std::abs(cameraRecoilYaw_) < 1e-5f && std::abs(cameraRecoilYawVel_) < 1e-4f) {
+                    cameraRecoilYaw_ = 0.0f;
+                    cameraRecoilYawVel_ = 0.0f;
+                }
+                if (std::abs(cameraRecoilTargetPitch_) < 1e-5f)
+                    cameraRecoilTargetPitch_ = 0.0f;
+                if (std::abs(cameraRecoilTargetYaw_) < 1e-5f)
+                    cameraRecoilTargetYaw_ = 0.0f;
+            }
+
             // --- Reload animation ---
             {
                 auto smooth = [](float e0, float e1, float x) {
@@ -4643,11 +4720,25 @@ SDL_AppResult Game::iterate()
             ImGui::DragFloat("Sway Decay", &swayDecayRate_, 0.5f, 1.0f, 30.0f);
             ImGui::DragFloat("Sway Smooth", &swaySmoothing_, 0.01f, 0.01f, 1.0f);
 
-            ImGui::SeparatorText("Recoil");
+            ImGui::SeparatorText("Recoil (viewmodel)");
             ImGui::Text("Pitch: %.2f  PushBack: %.2f  Roll: %.2f",
                         static_cast<double>(recoilPitch_),
                         static_cast<double>(recoilPushBack_),
                         static_cast<double>(recoilRoll_));
+
+            ImGui::SeparatorText("Camera Recoil (Apex spring — commits to aim)");
+            ImGui::Checkbox("Spring path (un-check = legacy instant snap-pitch)", &useSpringCameraRecoil_);
+            ImGui::DragFloat("Spring omega (rad/s)", &cameraRecoilOmega_, 0.5f, 4.0f, 80.0f, "%.1f");
+            ImGui::DragFloat("Recovery decay (1/s)", &cameraRecoilTargetDecay_, 0.25f, 0.5f, 30.0f, "%.2f");
+            ImGui::DragFloat("Idle threshold (s)", &cameraRecoilIdleThreshold_, 0.01f, 0.0f, 1.5f, "%.2f");
+            ImGui::Text("Pitch:  cur=%.3f° tgt=%.3f° vel=%.3f",
+                        static_cast<double>(glm::degrees(cameraRecoilPitch_)),
+                        static_cast<double>(glm::degrees(cameraRecoilTargetPitch_)),
+                        static_cast<double>(glm::degrees(cameraRecoilPitchVel_)));
+            ImGui::Text("Yaw:    cur=%.3f° tgt=%.3f° vel=%.3f",
+                        static_cast<double>(glm::degrees(cameraRecoilYaw_)),
+                        static_cast<double>(glm::degrees(cameraRecoilTargetYaw_)),
+                        static_cast<double>(glm::degrees(cameraRecoilYawVel_)));
         }
         ImGui::End();
     }

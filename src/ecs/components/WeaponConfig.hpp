@@ -71,11 +71,16 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .reloadTime = 1.25f,
-            .recoilFreeShots = 3,
-            .recoilPitchPerShot = 0.007f,
-            .recoilYawPerShot = 0.04f,
-            .recoilRampShots = 12.0f,
-            .recoilRecovery = 40.0f,
+            // Apex R-99-ish: kicks from shot 1, strong vertical, mild horizontal walk.
+            // Per-shot pitch ~1.1° base ramping under the heat curve; per-shot yaw
+            // ~0.45° modulated by the sin envelope so the pattern walks right-then-
+            // left over ~18 shots. Recovery slightly slower to give the auto-spring
+            // a noticeable settle window after fire-off.
+            .recoilFreeShots = 0,
+            .recoilPitchPerShot = 0.020f,
+            .recoilYawPerShot = 0.008f,
+            .recoilRampShots = 10.0f,
+            .recoilRecovery = 30.0f,
         }, // Rifle
         WeaponConfig{
             .fireCooldown = 1.0f,

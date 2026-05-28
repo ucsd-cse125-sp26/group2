@@ -461,6 +461,26 @@ private:
     float recoilPushBack_ = 0.0f; ///< Current recoil backward offset (Quake units).
     float recoilRoll_ = 0.0f;     ///< Current recoil roll offset (degrees).
 
+    // Apex-style spring-damped camera recoil (actually deflects aim — bullets drift).
+    // Each frame the spring integrates toward `target`, then the per-frame delta is
+    // committed to `InputSnapshot.pitch`/`yaw` on the local player so raycasts,
+    // tracers, bullet-holes, and the replicated aim all follow the recoil. Target
+    // accumulates per shot during sustained fire and only decays back toward 0
+    // after `recoilIdleTime_` exceeds the idle threshold — that's what produces
+    // the auto-recovery feel without fighting active firing.
+    bool useSpringCameraRecoil_ = true;     ///< Toggle Apex-spring path vs legacy instant snap-pitch write.
+    float cameraRecoilPitch_ = 0.0f;        ///< Spring current offset (radians; negative = looking up).
+    float cameraRecoilYaw_ = 0.0f;
+    float cameraRecoilPitchVel_ = 0.0f;     ///< Spring velocity (rad/s).
+    float cameraRecoilYawVel_ = 0.0f;
+    float cameraRecoilTargetPitch_ = 0.0f;  ///< Spring target; accumulates per shot, decays only when idle.
+    float cameraRecoilTargetYaw_ = 0.0f;
+    float committedRecoilPitch_ = 0.0f;     ///< Portion of `cameraRecoilPitch_` already added to snap.pitch.
+    float committedRecoilYaw_ = 0.0f;       ///< Each frame we commit `(current - committed)` and update.
+    float cameraRecoilOmega_ = 35.0f;       ///< Spring angular frequency (rad/s). Higher = snappier kick.
+    float cameraRecoilTargetDecay_ = 5.0f;  ///< Idle-recovery decay rate (1/s). Higher = faster snap-back.
+    float cameraRecoilIdleThreshold_ = 0.18f; ///< Seconds off-trigger before target starts decaying.
+
     // Visual reload state
     float reloadDownwardOffset_ = 0.0f; ///< Downward offset for the reload animation
 
