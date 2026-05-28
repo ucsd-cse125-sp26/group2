@@ -449,7 +449,7 @@ static void spawnGrenade(Registry& registry,
                                      .owner = shooter,
                                      .explosive = false, // grenades route via fuse / impact, not the rocket path
                                      .currentLifeTime = 0.0f,
-                                     // Sticky grenades (Impulse) start with no fuse — CollisionSystem arms it on first
+                                     // Sticky grenades start with no fuse — CollisionSystem arms it on first
                                      // surface hit. Non-sticky grenades (HE w/ fuseTime=3.0; Molotov w/ fuseTime=-1 for
                                      // impact-detonate) use the config value directly.
                                      .fuseTimer = cfg.sticky ? -1.0f : cfg.fuseTime,

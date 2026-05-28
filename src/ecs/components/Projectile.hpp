@@ -26,5 +26,12 @@ struct Projectile
     float fuseTimer = -1.0f;             ///< Countdown; <0 means no fuse (impact-only).
     float bounceRestitution = 0.0f;      ///< 0 = no bounce. CollisionSystem reflects velocity * this on hit.
     bool sticky = false;                 ///< If true, sets vel=0 on first surface hit and starts fuse.
+
+    // Stick-to-player state (sticky grenades). When `stuckTo` is a live player,
+    // the projectile rides that player each tick (pos = host pos + stuckOffset)
+    // and detonation guarantees a kill on the host.
+    entt::entity stuckTo = entt::null;   ///< Player this grenade is stuck to, or null.
+    glm::vec3 stuckOffset{0.0f};         ///< Offset from the host's origin at stick time.
+
     glm::vec3 tint = {1.0f, 1.0f, 1.0f}; ///< Render tint multiplier (cosmetic, client-side).
 };

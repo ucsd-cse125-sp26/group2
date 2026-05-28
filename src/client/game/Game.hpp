@@ -329,8 +329,8 @@ private:
 
     // Legacy model index aliases (for code that still uses raw indices).
     // TODO: migrate all call sites to assets_.modelIndex("name") and remove these.
-    int weaponModelIndices_[4] = {-1, -1, -1, -1};
-    int weaponAssetIds_[4] = {-1, -1, -1, -1};
+    int weaponModelIndices_[kRenderableWeaponTypeCount] = {-1, -1, -1, -1, -1};
+    int weaponAssetIds_[kRenderableWeaponTypeCount] = {-1, -1, -1, -1, -1};
     int viewmodelLeftHandModelIdx_ = -1;
     int viewmodelRightHandModelIdx_ = -1;
     int handMountDebugMarkerModelIdx_ = -1;
@@ -517,7 +517,7 @@ private:
     float compensationCreditDecay_ = 1.0f; ///< Credit decay rate (1/s); stale credit fades.
 
     // Visual reload state
-    float reloadDownwardOffset_ = 0.0f; ///< Downward offset for the reload animation
+    float reloadDownwardOffset_ = 0.0f;       ///< Downward offset for the reload animation
     float grenadeThrowDownwardOffset_ = 0.0f; ///< Downward offset for the grenade-throw animation
 
     // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
@@ -528,9 +528,10 @@ private:
     int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = previous slot, consumed each frame.
 
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
-    ThirdPersonWeaponParams tpWeaponParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
-    int tpTuneWeaponIdx_ = 0;                   ///< Which weapon type is being tuned.
-    int tpAnchorTuneStanceIdx_ = 0;             ///< Which HoldStance the right-hand anchor sliders are editing.
+    ThirdPersonWeaponParams
+        tpWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from defaults.
+    int tpTuneWeaponIdx_ = 0;                        ///< Which weapon type is being tuned.
+    int tpAnchorTuneStanceIdx_ = 0;                  ///< Which HoldStance the right-hand anchor sliders are editing.
     float tpAnchorRotStepDeg_ = 5.0f; ///< Delta-rotation step (degrees) for the gimbal-free anchor rotation buttons.
     float tpAnchorWorldRotStepDeg_ = 5.0f; ///< Delta-rotation step (degrees) for the WORLD-space rotation buttons.
     bool tpAnchorShowDebugMarker_ = true; ///< Render the red-cube anchor wish-point marker when the 3P tweaker is open.
@@ -545,16 +546,20 @@ private:
     bool showTPWeaponUI_ = false;     ///< Show the 3P Weapon Tweaker window.
 
     // Hand mount tuning for third-person player IK / weapon grips.
-    WeaponHandMountParams weaponHandMountParams_[4];         ///< Runtime-tunable copy; initialised from defaults.
-    WeaponHandMountParams authoredWeaponHandMountParams_[4]; ///< Defaults loaded from authored weapon assets.
-    int handMountTuneWeaponIdx_ = 0;                         ///< Which weapon type is being tuned.
-    bool showHandMountUI_ = false;                           ///< Show the Hand Mount Tweaker window.
+    WeaponHandMountParams
+        weaponHandMountParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from defaults.
+    WeaponHandMountParams
+        authoredWeaponHandMountParams_[kRenderableWeaponTypeCount]; ///< Defaults loaded from authored weapon assets.
+    int handMountTuneWeaponIdx_ = 0;                                ///< Which weapon type is being tuned.
+    bool showHandMountUI_ = false;                                  ///< Show the Hand Mount Tweaker window.
 
     // First-person arm mount tuning (separate from third-person grips).
-    FirstPersonHandMountParams fpHandMountParams_[4];         ///< Runtime-tunable copy; initialised from defaults.
-    FirstPersonHandMountParams authoredFPHandMountParams_[4]; ///< Defaults loaded from authored weapon assets.
-    int fpHandMountTuneWeaponIdx_ = 0;                        ///< Which weapon type is being tuned.
-    bool showFPHandMountUI_ = false;                          ///< Show the FP Arm Tweaker window.
+    FirstPersonHandMountParams
+        fpHandMountParams_[kRenderableWeaponTypeCount];         ///< Runtime-tunable copy; initialised from defaults.
+    FirstPersonHandMountParams
+        authoredFPHandMountParams_[kRenderableWeaponTypeCount]; ///< Defaults loaded from authored weapon assets.
+    int fpHandMountTuneWeaponIdx_ = 0;                          ///< Which weapon type is being tuned.
+    bool showFPHandMountUI_ = false;                            ///< Show the FP Arm Tweaker window.
 
     enum class HandMountDebugSpace : std::uint8_t
     {
@@ -586,9 +591,10 @@ private:
     HandMountDebugTarget handMountDebugTarget_{};
 
     // Weapon spawner model tuning (per weapon type, live-adjustable via ImGui)
-    WeaponSpawnerModelParams spawnerWeaponParams_[4]; ///< Runtime-tunable copy; initialised from spawner defaults.
-    int spawnerTuneWeaponIdx_ = 0;                    ///< Which weapon type is being tuned.
-    bool showWeaponSpawnerModelUI_ = false;           ///< Show the Weapon Spawner Model Tweaker window.
+    WeaponSpawnerModelParams
+        spawnerWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from spawner defaults.
+    int spawnerTuneWeaponIdx_ = 0;                        ///< Which weapon type is being tuned.
+    bool showWeaponSpawnerModelUI_ = false;               ///< Show the Weapon Spawner Model Tweaker window.
 
     // Animation subsystem — shared rig + clip library + skinning backend.
     // CharacterAnimators (one per animated entity) hold non-owning refs.
@@ -597,7 +603,7 @@ private:
                                  ///< third-person weapon mesh to the right-hand bone after IK.
     int spine2JointIdx_ = -1;    ///< Cached "mixamorig:Spine2" joint index. Anchors the chest-relative right-hand IK
                                  ///< target so the gun is held in front of the chest instead of hanging at the side.
-    std::array<WeaponGripPose, 4>
+    std::array<WeaponGripPose, kRenderableWeaponTypeCount>
         weaponGripPoses_{};      ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from
                                  ///< assets/weapons/<name>.grip.toml at startup. Joint data is per-joint (pitch, yaw)
     ///< degrees so the editor can drive sliders directly against the runtime data; the animator
@@ -613,10 +619,10 @@ private:
         float swapElapsedSec = 1.0f; ///< Initialised to "already done" so freshly-seen entities start at full grip.
     };
     std::unordered_map<entt::entity, GripSwapState> gripSwapState_{};
-    std::array<std::string, 4>
+    std::array<std::string, kRenderableWeaponTypeCount>
         weaponGripPosePaths_{};  ///< Source TOML path for each weapon's grip pose; populated at init and reused for
                                  ///< Phase E hot-reload + the per-finger authoring UI's save button.
-    std::array<std::filesystem::file_time_type, 4>
+    std::array<std::filesystem::file_time_type, kRenderableWeaponTypeCount>
         weaponGripPoseMTimes_{}; ///< Last-observed mtime; reload triggers when the file mtime changes (Phase E hot
                                  ///< reload).
     float gripPoseReloadAccumulator_ =

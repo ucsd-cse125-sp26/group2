@@ -6,10 +6,12 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerSimState.hpp"
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Projectile.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/physics/DebugCollisionDraw.hpp"
@@ -57,6 +59,7 @@ void detonateGrenade(Registry& registry, const Projectile& projectile, glm::vec3
     const GrenadeConfig& cfg = getGrenadeConfig(projectile.type);
     switch (cfg.detonation) {
     case GrenadeDetonationKind::Explosion:
+        // A grenade stuck to a player guarantees a kill on its host (directKillTarget).
         queueExplosion(registry,
                        position,
                        cfg.explosionRadius,
@@ -65,12 +68,52 @@ void detonateGrenade(Registry& registry, const Projectile& projectile, glm::vec3
                        cfg.damageFalloffExp,
                        cfg.selfDamageMult,
                        cfg.maxKnockback,
-                       cfg.knockbackFalloffExp);
+                       cfg.knockbackFalloffExp,
+                       projectile.stuckTo);
         break;
     case GrenadeDetonationKind::FireField:
         spawnFireField(registry, position, cfg.fireRadius, cfg.fireDuration, cfg.fireDps, projectile.owner);
         break;
     }
+}
+
+/// @brief Sweep a projectile AABB against every live player and return the earliest hit.
+///
+/// Skips the owner (no self direct-hits; explosion self-damage is handled separately)
+/// and dead players (those carrying a RespawnTimer). `sweepAABBvsBox` ignores starts
+/// already inside a box, so a grenade spawned overlapping the thrower never registers.
+///
+/// @param outHitPlayer  Set to the player entity that was hit first, or entt::null.
+physics::HitResult sweepPlayers(Registry& registry,
+                                glm::vec3 halfExtents,
+                                glm::vec3 start,
+                                glm::vec3 end,
+                                entt::entity owner,
+                                entt::entity& outHitPlayer)
+{
+    physics::HitResult best;
+    best.hit = false;
+    outHitPlayer = entt::null;
+
+    auto players = registry.view<Player, Position, CollisionShape>();
+    for (const entt::entity player : players) {
+        if (player == owner) {
+            continue;
+        }
+        if (registry.all_of<RespawnTimer>(player)) {
+            continue; // dead — no hitbox
+        }
+        const Position& ppos = players.get<Position>(player);
+        const CollisionShape& pshape = players.get<CollisionShape>(player);
+        const physics::WorldAABB box{.min = ppos.value - pshape.halfExtents, .max = ppos.value + pshape.halfExtents};
+
+        const physics::HitResult hit = physics::sweepAABBvsBox(halfExtents, start, end, box);
+        if (hit.hit && (!best.hit || hit.tFirst < best.tFirst)) {
+            best = hit;
+            outHitPlayer = player;
+        }
+    }
+    return best;
 }
 
 } // namespace
@@ -432,8 +475,25 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 return;
             }
 
+            // Stuck to a player: ride the host's position each tick (no gravity, no
+            // collision) and let the fuse run. If the host vanished (disconnect /
+            // cleanup) detach and fall normally. The fuse tick below detonates at the
+            // updated position, and detonateGrenade passes stuckTo as directKillTarget.
+            bool stuckToPlayer = false;
+            if (projectile.stuckTo != entt::null) {
+                const Position* hostPos =
+                    registry.valid(projectile.stuckTo) ? registry.try_get<Position>(projectile.stuckTo) : nullptr;
+                if (hostPos != nullptr) {
+                    pos.value = hostPos->value + projectile.stuckOffset;
+                    vel.value = glm::vec3{0.0f};
+                    stuckToPlayer = true;
+                } else {
+                    projectile.stuckTo = entt::null;
+                }
+            }
+
             // Grenade fuse tick. Negative fuseTimer means "no fuse, impact-detonate" — leave alone.
-            // (Sticky grenades like Impulse spawn with fuseTimer=-1 and only arm in the stick handler below.)
+            // (Sticky grenades spawn with fuseTimer=-1 and only arm in the stick handler below.)
             // Tick BEFORE movement integration so a cooked grenade detonates exactly at its current
             // position rather than after one more tick of zero/coast velocity.
             if (projectile.fuseTimer >= 0.0f) {
@@ -448,6 +508,11 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             }
 
             projectile.currentLifeTime += dt;
+
+            // Stuck grenades don't move under physics — they're glued to the host.
+            if (stuckToPlayer) {
+                return;
+            }
 
             // Apply gravity to grenade projectiles only. Rockets (and other non-grenade
             // projectiles) remain ballistic-straight so existing tuning (e.g. rocket
@@ -465,7 +530,17 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
 
             for (int clip = 0; clip < 4 && remainingTime > 1e-5f; ++clip) {
                 const glm::vec3 k_target = pos.value + vel.value * remainingTime;
-                const physics::HitResult k_hit = physics::sweepAll(shape.halfExtents, pos.value, k_target, world);
+                const physics::HitResult k_worldHit = physics::sweepAll(shape.halfExtents, pos.value, k_target, world);
+
+                // Sweep against players too, so projectiles collide with bodies (rocket direct
+                // impact, sticky-to-player) and not just static world geometry.
+                entt::entity hitPlayer = entt::null;
+                const physics::HitResult k_playerHit =
+                    sweepPlayers(registry, shape.halfExtents, pos.value, k_target, projectile.owner, hitPlayer);
+
+                // Resolve whichever surface is struck first.
+                const bool playerFirst = k_playerHit.hit && (!k_worldHit.hit || k_playerHit.tFirst <= k_worldHit.tFirst);
+                const physics::HitResult k_hit = playerFirst ? k_playerHit : k_worldHit;
 
                 if (!k_hit.hit) {
                     pos.value = k_target;
@@ -475,11 +550,16 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 pos.value += vel.value * k_hit.tFirst * remainingTime;
                 remainingTime *= (1.0f - k_hit.tFirst);
 
-                // Sticky grenades: freeze velocity and arm the fuse if it wasn't already running.
-                // Consume `sticky` so subsequent hits don't keep snapping to zero.
+                // Sticky grenades: glue to the surface (or player) and arm the fuse if it wasn't
+                // already running. Consume `sticky` so subsequent hits don't keep snapping to zero.
                 if (projectile.sticky) {
                     vel.value = glm::vec3{0.0f};
                     projectile.sticky = false;
+                    if (playerFirst) {
+                        // Ride this player and guarantee a kill on detonation.
+                        projectile.stuckTo = hitPlayer;
+                        projectile.stuckOffset = pos.value - registry.get<Position>(hitPlayer).value;
+                    }
                     if (projectile.fuseTimer < 0.0f) {
                         const GrenadeConfig& cfg = getGrenadeConfig(projectile.type);
                         projectile.fuseTimer = cfg.fuseTime;
@@ -488,6 +568,7 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 }
 
                 // Bouncy grenades: reflect velocity, lose energy via restitution, keep going.
+                // Bounces off players too (HE frags ricochet off bodies just like walls).
                 if (projectile.bounceRestitution > 0.0f) {
                     const glm::vec3 k_n = k_hit.normal;
                     vel.value = (vel.value - 2.0f * glm::dot(vel.value, k_n) * k_n) * projectile.bounceRestitution;
@@ -495,7 +576,7 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 }
 
                 // Default impact: detonate if applicable, then destroy.
-                //   - Rocket-style explosive (projectile.explosive=true): unchanged path.
+                //   - Rocket-style explosive (projectile.explosive=true): explode on world OR player.
                 //   - Grenade impact-detonate (Molotov has fuseTimer<0, sticky=false, explosive=false):
                 //     route to detonateGrenade so it can spawn a FireField.
                 if (projectile.explosive && projConfig.explosionRadius > 0.0f) {

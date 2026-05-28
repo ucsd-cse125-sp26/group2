@@ -83,6 +83,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
@@ -105,6 +106,13 @@
 namespace
 {
 constexpr float kMinFootstepIntervalSeconds = 0.14f;
+constexpr std::array<const char*, 2> kOptionalTestModelFilenames{{"test_model.glb", "test model.glb"}};
+constexpr glm::vec3 kOptionalTestModelRifleSpawnerOffset{0.0f, 50.0f, 0.0f};
+constexpr float kOptionalTestModelLoadScale = 10.0f;
+constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponNames{
+    "Rifle", "Rocket", "RailGun", "EnergyGun", "Shotgun"};
+constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponDisplayNames{
+    "Rifle (R-301)", "Rocket", "RailGun (Triple Take)", "EnergyGun (Wingman)", "Shotgun"};
 // (kThirdPersonWeaponPitchMax was used by the removed buildThirdPersonWeaponAttachment;
 // the bone-parented weapon path doesn't pitch-clamp the weapon — the spine bend
 // max-pitch in CharacterAnimator handles that.)
@@ -117,6 +125,34 @@ int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
 {
     return assets.add(
         def.name, def.filename, def.role, def.renderScale, def.renderTranslation, def.renderRotationDegrees);
+}
+
+std::filesystem::path assetPathFor(const char* filename)
+{
+    const char* const base = SDL_GetBasePath();
+    std::filesystem::path path = base ? base : "";
+    path /= ASSETS_DIR;
+    path /= filename;
+    return path;
+}
+
+const char* findExistingOptionalTestModelFilename()
+{
+    for (const char* filename : kOptionalTestModelFilenames) {
+        std::error_code ec;
+        if (std::filesystem::exists(assetPathFor(filename), ec))
+            return filename;
+    }
+    return nullptr;
+}
+
+std::optional<glm::vec3> findOptionalTestModelPosition()
+{
+    for (const gamemap::WeaponSpawner& spawner : gamemap::weaponSpawner_) {
+        if (spawner.type == WeaponType::Rifle)
+            return spawner.pos + kOptionalTestModelRifleSpawnerOffset;
+    }
+    return std::nullopt;
 }
 
 glm::quat assetRotation(const AssetEntry& asset)
@@ -134,6 +170,14 @@ WeaponSpawnerModelParams defaultSpawnerModelParams(WeaponType type)
 bool isRenderableGunType(WeaponType type)
 {
     return static_cast<std::size_t>(type) < kWeaponAssets.size();
+}
+
+const char* renderableWeaponDisplayName(WeaponType type)
+{
+    const std::size_t idx = static_cast<std::size_t>(type);
+    if (idx >= kRenderableWeaponDisplayNames.size())
+        return "Unsupported";
+    return kRenderableWeaponDisplayNames[idx];
 }
 
 /// @brief Translate CharacterAnimator's internal Mode enum value into the
@@ -327,18 +371,17 @@ void copyHandMountSet(std::ostringstream& out, const char* label, const HandMoun
 std::string buildHandMountClipboardText(const WeaponHandMountParams* mountParams,
                                         const ThirdPersonWeaponParams* tpParams)
 {
-    static constexpr const char* k_weaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
     std::ostringstream out;
     out << std::fixed << std::setprecision(3);
     out << "// Current third-person weapon scales\n";
-    for (int i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < kRenderableWeaponTypeCount; ++i) {
         const auto& tp = tpParams[i];
-        out << "// " << k_weaponNames[i] << ": scale=" << tp.scale << "f\n";
+        out << "// " << kRenderableWeaponNames[i] << ": scale=" << tp.scale << "f\n";
     }
     out << "\n// Current WeaponHandMountParams entries\n";
-    out << "static const std::array<WeaponHandMountParams, 4> k_params{{\n";
-    for (int i = 0; i < 4; ++i) {
-        out << "    // " << k_weaponNames[i] << "\n";
+    out << "static const std::array<WeaponHandMountParams, kRenderableWeaponTypeCount> k_params{{\n";
+    for (std::size_t i = 0; i < kRenderableWeaponTypeCount; ++i) {
+        out << "    // " << kRenderableWeaponNames[i] << "\n";
         out << "    {";
         copyHandMountSet(out, "rightHand", mountParams[i].rightHand);
         out << ",\n     ";
@@ -368,13 +411,12 @@ void copyFirstPersonArmMountSet(std::ostringstream& out, const char* label, cons
 
 std::string buildFirstPersonHandMountClipboardText(const FirstPersonHandMountParams* mountParams)
 {
-    static constexpr const char* k_weaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
     std::ostringstream out;
     out << std::fixed << std::setprecision(3);
     out << "// Current FirstPersonHandMountParams entries\n";
-    out << "static const std::array<FirstPersonHandMountParams, 4> k_params{{\n";
-    for (int i = 0; i < 4; ++i) {
-        out << "    // " << k_weaponNames[i] << "\n";
+    out << "static const std::array<FirstPersonHandMountParams, kRenderableWeaponTypeCount> k_params{{\n";
+    for (std::size_t i = 0; i < kRenderableWeaponTypeCount; ++i) {
+        out << "    // " << kRenderableWeaponNames[i] << "\n";
         out << "    {";
         copyFirstPersonArmMountSet(out, "rightArm", mountParams[i].rightArm);
         out << ",\n     ";
@@ -590,7 +632,7 @@ std::string_view fireAudioEventForWeapon(WeaponType type) noexcept
         return "weapon.shotgun.fire"; // falls back gracefully if SFX bank lacks this event.
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
-    case WeaponType::Impulse:
+    case WeaponType::Sticky:
         return "weapon.grenade.throw";
     }
     return {};
@@ -916,6 +958,29 @@ bool Game::init(AppContext& ctx)
         }
     }
 
+    // Optional art-check GLB. Drop assets/test_model.glb into the copied assets
+    // directory to see it 50 units above the authored rifle spawner.
+    if (const char* testModelFilename = findExistingOptionalTestModelFilename(); testModelFilename != nullptr) {
+        if (const std::optional<glm::vec3> testModelPos = findOptionalTestModelPosition(); testModelPos.has_value()) {
+            const int id = assets_.add("test_model", testModelFilename, AssetRole::Prop);
+            const int modelIdx =
+                renderer->loadSceneModel(testModelFilename, *testModelPos, kOptionalTestModelLoadScale, false);
+            assets_.setModelIndex(id, modelIdx);
+            if (modelIdx >= 0) {
+                renderer->setModelScenePass(modelIdx, true);
+                SDL_Log("[client] test model '%s' loaded at (%.1f, %.1f, %.1f)",
+                        testModelFilename,
+                        static_cast<double>(testModelPos->x),
+                        static_cast<double>(testModelPos->y),
+                        static_cast<double>(testModelPos->z));
+            } else {
+                SDL_Log("[client] WARNING: test model '%s' failed to load", testModelFilename);
+            }
+        } else {
+            SDL_Log("[client] test model '%s' present, but no rifle spawner was loaded", testModelFilename);
+        }
+    }
+
     // ── Load props (render + collision) ───────────────────────────────────
     // These are standalone GLB models placed at fixed world positions.
     // Both visual and collision are loaded so players/projectiles interact.
@@ -1227,7 +1292,7 @@ bool Game::init(AppContext& ctx)
     client->onShotDebugReport([this](const net::shotdebug::ShotDebugCapture& cap) { debugUI.pushServerShot(cap); });
 
     // Initialize runtime 3P weapon params from defaults
-    for (int i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < kRenderableWeaponTypeCount; ++i) {
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
         authoredWeaponHandMountParams_[i] = getWeaponHandMountParams(static_cast<WeaponType>(i));
         authoredFPHandMountParams_[i] = getFirstPersonHandMountParams(static_cast<WeaponType>(i));
@@ -1326,10 +1391,11 @@ bool Game::init(AppContext& ctx)
             // files are non-fatal — the animator falls back to the idle finger pose
             // for any (weapon, hand) pair without authored data.
             const std::string weaponsDir = std::string(base ? base : "") + "assets/weapons/";
-            static constexpr std::array<const char*, 4> k_weaponGripFiles{
+            static constexpr std::array<const char*, kRenderableWeaponTypeCount> k_weaponGripFiles{
                 "rifle.grip.toml",
                 "rocket_launcher.grip.toml",
                 "rail_gun.grip.toml",
+                "energy_gun.grip.toml",
                 "energy_gun.grip.toml",
             };
             for (std::size_t i = 0; i < k_weaponGripFiles.size(); ++i) {
@@ -2614,6 +2680,8 @@ SDL_AppResult Game::iterate()
                     return;
                 auto* ac = registry.try_get<AnimatedCharacter>(localShooter);
                 if (ac == nullptr || !ac->animator)
+                    return;
+                if (!isRenderableGunType(currentEquippedType_))
                     return;
                 const auto& tpRecoil = tpWeaponParams_[static_cast<int>(currentEquippedType_)];
                 ac->animator->applyRecoilImpulse(tpRecoil.recoilKickRad);
@@ -4044,7 +4112,7 @@ SDL_AppResult Game::iterate()
             world = glm::scale(world, rend.scale);
 
             // Projectile entities carry a per-grenade tint (HE = green,
-            // Molotov = orange, Impulse = blue) so the shared rocket model
+            // Molotov = orange, Sticky = blue) so the shared rocket model
             // is visually distinct in flight.  Non-projectile entities use
             // the default white tint (no recolor).
             glm::vec4 tint{1.0f};
@@ -4244,8 +4312,10 @@ SDL_AppResult Game::iterate()
         hideRailgunViewmodelForScope = currentEquippedType_ == WeaponType::RailGun && input.scoped;
     });
 
+    const bool currentWeaponRenderable = isRenderableGunType(currentEquippedType_);
+
     // Auto-apply per-weapon viewmodel defaults when weapon changes
-    if (currentEquippedType_ != lastEquippedType_ || !viewmodelDefaultsApplied_) {
+    if (currentWeaponRenderable && (currentEquippedType_ != lastEquippedType_ || !viewmodelDefaultsApplied_)) {
         const auto& vp = getViewmodelParams(currentEquippedType_);
         vmScale = vp.scale;
         vmForward = vp.forward;
@@ -4258,7 +4328,8 @@ SDL_AppResult Game::iterate()
         viewmodelDefaultsApplied_ = true;
     }
 
-    const int currentWeaponModelIdx = weaponModelIndices_[static_cast<int>(currentEquippedType_)];
+    const int currentWeaponModelIdx =
+        currentWeaponRenderable ? weaponModelIndices_[static_cast<int>(currentEquippedType_)] : -1;
 
     // Build weapon viewmodel
     {
@@ -4879,8 +4950,7 @@ SDL_AppResult Game::iterate()
             ImGui::DragFloat("Scale", &vmScale, 0.001f, 0.001f, 10.0f, "%.4f");
 
             ImGui::Separator();
-            const char* weaponNames[] = {"Rifle (R-301)", "Rocket", "RailGun (Triple Take)", "EnergyGun (Wingman)"};
-            ImGui::Text("Equipped: %s", weaponNames[static_cast<int>(currentEquippedType_)]);
+            ImGui::Text("Equipped: %s", renderableWeaponDisplayName(currentEquippedType_));
 
             if (ImGui::Button("Load weapon defaults")) {
                 const auto& vp = getViewmodelParams(currentEquippedType_);
@@ -5010,8 +5080,10 @@ SDL_AppResult Game::iterate()
     // Third-person weapon tweaker — per-weapon tuning for remote player weapons.
     if (showTPWeaponUI_) {
         if (ImGui::Begin("3P Weapon Tweaker", &showTPWeaponUI_)) {
-            const char* tpWeaponNames[] = {"Rifle (R-301)", "Rocket", "RailGun (Triple Take)", "EnergyGun (Wingman)"};
-            ImGui::Combo("Weapon", &tpTuneWeaponIdx_, tpWeaponNames, 4);
+            ImGui::Combo("Weapon",
+                         &tpTuneWeaponIdx_,
+                         kRenderableWeaponDisplayNames.data(),
+                         static_cast<int>(kRenderableWeaponDisplayNames.size()));
 
             auto& tp = tpWeaponParams_[tpTuneWeaponIdx_];
 
@@ -5247,8 +5319,10 @@ SDL_AppResult Game::iterate()
     // Hand mount tweaker — weapon grip table used by third-person IK.
     if (showHandMountUI_) {
         if (ImGui::Begin("Hand Mount Tweaker", &showHandMountUI_)) {
-            const char* weaponNames[] = {"Rifle (R-301)", "Rocket", "RailGun / Charge Rifle", "EnergyGun"};
-            ImGui::Combo("Weapon", &handMountTuneWeaponIdx_, weaponNames, 4);
+            ImGui::Combo("Weapon",
+                         &handMountTuneWeaponIdx_,
+                         kRenderableWeaponDisplayNames.data(),
+                         static_cast<int>(kRenderableWeaponDisplayNames.size()));
 
             auto& mounts = weaponHandMountParams_[handMountTuneWeaponIdx_];
             ImGui::DragFloat("Viewmodel Hand Scale", &mounts.viewmodelHandScale, 0.25f, 1.0f, 120.0f, "%.2f");
@@ -5309,11 +5383,14 @@ SDL_AppResult Game::iterate()
     // First-person arm tweaker — independent shoulder/elbow/palm/finger controls.
     if (showFPHandMountUI_) {
         if (ImGui::Begin("FP Arm Tweaker", &showFPHandMountUI_)) {
-            const char* weaponNames[] = {"Rifle (R-301)", "Rocket", "RailGun / Charge Rifle", "EnergyGun"};
+            const bool equippedRenderable = isRenderableGunType(currentEquippedType_);
             const int equippedWeaponIdx = static_cast<int>(currentEquippedType_);
-            ImGui::Text("Equipped: %s", weaponNames[equippedWeaponIdx]);
-            ImGui::Combo("Weapon", &fpHandMountTuneWeaponIdx_, weaponNames, 4);
-            if (fpHandMountTuneWeaponIdx_ != equippedWeaponIdx) {
+            ImGui::Text("Equipped: %s", renderableWeaponDisplayName(currentEquippedType_));
+            ImGui::Combo("Weapon",
+                         &fpHandMountTuneWeaponIdx_,
+                         kRenderableWeaponDisplayNames.data(),
+                         static_cast<int>(kRenderableWeaponDisplayNames.size()));
+            if (equippedRenderable && fpHandMountTuneWeaponIdx_ != equippedWeaponIdx) {
                 ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Selected weapon is not currently visible.");
                 ImGui::SameLine();
                 if (ImGui::Button("Select Equipped"))
@@ -5388,8 +5465,10 @@ SDL_AppResult Game::iterate()
     // gimbal lock to worry about, and no impossible-to-pose-mistakenly roll DOF.
     if (showGripPoseUI_) {
         if (ImGui::Begin("Grip Pose Tweaker", &showGripPoseUI_)) {
-            const char* weaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
-            ImGui::Combo("Weapon", &gripPoseTuneWeaponIdx_, weaponNames, 4);
+            ImGui::Combo("Weapon",
+                         &gripPoseTuneWeaponIdx_,
+                         kRenderableWeaponNames.data(),
+                         static_cast<int>(kRenderableWeaponNames.size()));
 
             const std::size_t wIdx = static_cast<std::size_t>(gripPoseTuneWeaponIdx_);
             WeaponGripPose& pose = weaponGripPoses_[wIdx];
@@ -5474,8 +5553,10 @@ SDL_AppResult Game::iterate()
     // Weapon spawner model tweaker — per-weapon tuning for world pickup models.
     if (showWeaponSpawnerModelUI_) {
         if (ImGui::Begin("Weapon Spawner Tweaker", &showWeaponSpawnerModelUI_)) {
-            const char* spawnerWeaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
-            ImGui::Combo("Weapon", &spawnerTuneWeaponIdx_, spawnerWeaponNames, 4);
+            ImGui::Combo("Weapon",
+                         &spawnerTuneWeaponIdx_,
+                         kRenderableWeaponNames.data(),
+                         static_cast<int>(kRenderableWeaponNames.size()));
 
             auto& params = spawnerWeaponParams_[spawnerTuneWeaponIdx_];
 
