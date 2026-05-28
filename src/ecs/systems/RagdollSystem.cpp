@@ -269,6 +269,26 @@ void destroyIfOwnedChild(Registry& registry, entt::entity owner, entt::entity ch
 
 entt::entity createJoint(Registry& registry, entt::entity bodyA, entt::entity bodyB, const JointDesc& jd)
 {
+    // Back-compute `anchorLocalToChild` so the parent and child anchors
+    // coincide in world space at the spawn pose. Without this, the
+    // (intentionally schematic) per-joint anchor offsets in `k_joints` don't
+    // exactly line up with the per-bone spawn offsets in `k_bones` — e.g.
+    // Torso-Head starts with a 10-unit gap, Torso-UpperArmL with ~6 units —
+    // and the Baumgarte-stabilised constraint solver tries to close that gap
+    // every frame with `bias = -(0.2 / dt) * error`. At 60 fps a 10-unit
+    // error produces ~125 u/s of corrective impulse per iteration × 8
+    // iterations × 14 joints, which dwarfs the per-body mass budget and
+    // detonates the ragdoll outward.
+    //
+    // Re-anchoring on the child side preserves the parent-side anatomy
+    // (joints still sit at the visually right spots on the parent bone),
+    // gives zero initial error, and means the solver only ever fights real
+    // motion. Bodies are at identity orientation at spawn, so local==world
+    // direction.
+    const glm::vec3 posA = registry.get<Position>(bodyA).value;
+    const glm::vec3 posB = registry.get<Position>(bodyB).value;
+    const glm::vec3 fixedAnchorB = (posA + jd.anchorLocalToParent) - posB;
+
     entt::entity j = registry.create();
     switch (jd.kind) {
     case JointDesc::Kind::Point: {
@@ -276,7 +296,7 @@ entt::entity createJoint(Registry& registry, entt::entity bodyA, entt::entity bo
         pj.bodyA = bodyA;
         pj.bodyB = bodyB;
         pj.localAnchorA = jd.anchorLocalToParent;
-        pj.localAnchorB = jd.anchorLocalToChild;
+        pj.localAnchorB = fixedAnchorB;
         registry.emplace<physics::PointJoint>(j, pj);
         break;
     }
@@ -285,7 +305,7 @@ entt::entity createJoint(Registry& registry, entt::entity bodyA, entt::entity bo
         hj.bodyA = bodyA;
         hj.bodyB = bodyB;
         hj.localAnchorA = jd.anchorLocalToParent;
-        hj.localAnchorB = jd.anchorLocalToChild;
+        hj.localAnchorB = fixedAnchorB;
         hj.localAxisA = jd.axisInParent;
         hj.localAxisB = jd.axisInParent;
         hj.hasLimit = true;
@@ -299,7 +319,7 @@ entt::entity createJoint(Registry& registry, entt::entity bodyA, entt::entity bo
         cj.bodyA = bodyA;
         cj.bodyB = bodyB;
         cj.localAnchorA = jd.anchorLocalToParent;
-        cj.localAnchorB = jd.anchorLocalToChild;
+        cj.localAnchorB = fixedAnchorB;
         cj.swingLimit = jd.swingLimit;
         cj.twistLimit = jd.twistLimit;
         // Orient the local joint frame so +X aligns with the desired

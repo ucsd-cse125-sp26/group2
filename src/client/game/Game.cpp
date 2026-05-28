@@ -473,11 +473,23 @@ std::unordered_map<ClientId, ClientRagdollPose> collectClientRagdollPoses(Regist
 void applyRagdollPoseToSkinPalette(std::vector<glm::mat4>& skinMatrices,
                                    const CharacterRig& rig,
                                    const ClientRagdollPose& pose,
-                                   const glm::mat4& instanceWorld)
+                                   const glm::mat4& instanceWorld,
+                                   float rigScale)
 {
     const auto& jointMap = rig.jointMap();
     const auto& inverseBind = rig.inverseBindMatrices();
     const glm::mat4 inverseInstanceWorld = glm::inverse(instanceWorld);
+
+    // The mesh bind pose lives in MESH space (typically Mixamo ~160 units
+    // tall), while the ragdoll physics bones are in WORLD space (player
+    // capsule is 72 units tall). The skin matrix must scale vertex offsets
+    // FROM mesh-space units TO world-space units before placing them at the
+    // ragdoll bone, otherwise the rendered mesh appears at mesh scale and
+    // looks ~2× larger than the live player capsule. Multiplying `boneWorld`
+    // by `scale(rigScale)` does exactly that: inverseBind produces a
+    // bind-local mesh-unit offset, scale() converts it to world units, then
+    // the rotation + translation places it at the ragdoll bone.
+    const glm::mat4 ragdollBoneScale = glm::scale(glm::mat4(1.0f), glm::vec3(rigScale));
 
     for (const RagdollJointBinding& binding : kRagdollJointBindings) {
         const size_t boneIndex = static_cast<size_t>(binding.bone);
@@ -496,8 +508,8 @@ void applyRagdollPoseToSkinPalette(std::vector<glm::mat4>& skinMatrices,
         }
 
         const ClientRagdollBonePose& bone = pose[boneIndex];
-        const glm::mat4 boneWorld =
-            glm::translate(glm::mat4(1.0f), bone.position) * glm::mat4_cast(glm::normalize(bone.orientation));
+        const glm::mat4 boneWorld = glm::translate(glm::mat4(1.0f), bone.position) *
+                                    glm::mat4_cast(glm::normalize(bone.orientation)) * ragdollBoneScale;
         const glm::mat4 modelSpaceBone = inverseInstanceWorld * boneWorld;
         skinMatrices[static_cast<size_t>(jointIndex)] = modelSpaceBone * inverseBind[static_cast<size_t>(jointIndex)];
     }
@@ -3787,7 +3799,7 @@ SDL_AppResult Game::iterate()
                 world *= glm::mat4_cast(orient);
                 world = glm::scale(world, scale);
 
-                applyRagdollPoseToSkinPalette(ragdollSkinMatrices, charRig_, poseIt->second, world);
+                applyRagdollPoseToSkinPalette(ragdollSkinMatrices, charRig_, poseIt->second, world, kRigScale_);
 
                 SkinnedInstance instance;
                 instance.worldTransform = world;
