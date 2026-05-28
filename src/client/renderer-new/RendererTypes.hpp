@@ -18,14 +18,6 @@
 
 // ─── Existing types ──────────────────────────────────────────────────────────
 
-/// @brief Anti-aliasing mode selection — exposed to ImGui.
-enum class AAMode : int
-{
-    Off = 0,      ///< No anti-aliasing.
-    SMAA_1x = 1,  ///< Spatial SMAA only, zero ghosting.
-    SMAA_T2x = 2, ///< 2-sample temporal + spatial SMAA (recommended).
-};
-
 /// @brief Live toggles for every render system — exposed to ImGui.
 ///
 /// All default to true (everything on).  The renderer checks these each

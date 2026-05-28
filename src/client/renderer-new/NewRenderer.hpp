@@ -326,7 +326,6 @@ public:
     // pattern so Game.cpp and the debug UI can read/write without a getter
     // ceremony.
 
-    AAMode aaMode = AAMode::SMAA_T2x;            ///< Anti-aliasing mode.  Re-applied at the start of each frame.
     float renderScale = 1.0f;                    ///< Internal-resolution multiplier (0.5 = half-res, 2.0 = SSAA).
     float mainHorizontalFovDegrees = 90.0f;      ///< Main camera horizontal field of view in degrees.
     float scopeZoom = 1.0f;                      ///< Per-frame scope zoom multiplier (FOV divisor).
@@ -343,13 +342,17 @@ private:
 
     bool createGeometryPipeline();
     bool createHudPipeline();
+    bool createFxaaPipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
+    bool ensureSceneTextureSize(Uint32 width, Uint32 height);
     void createMeshBuffers(MeshIdInt meshId) const;
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height);
-    void drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+    void drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+    void drawHudPass(SDL_GPUTexture* target, SDL_GPUCommandBuffer* cmd);
+    void drawFxaaPass(SDL_GPUTexture* sceneColor, SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const;
-    void drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+    void drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd);
     void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
@@ -369,10 +372,14 @@ private:
 
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* fxaaPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
 
     SDL_GPUTextureFormat colorTarget_ = SDL_GPU_TEXTUREFORMAT_INVALID;
+    SDL_GPUTexture* sceneColor_ = nullptr;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
+    Uint32 sceneWidth_ = 0;
+    Uint32 sceneHeight_ = 0;
     Uint32 depthWidth_ = 0;
     Uint32 depthHeight_ = 0;
 
@@ -382,6 +389,7 @@ private:
 
     SDL_GPUTexture* hudTexture_ = nullptr;
     SDL_GPUSampler* hudSampler_ = nullptr;
+    SDL_GPUSampler* fxaaSampler_ = nullptr;
 
     NewCamera camera_;
 

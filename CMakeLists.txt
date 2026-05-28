@@ -694,6 +694,7 @@ set(SHADER_NEW_SOURCES
         skinned_geometry.vert debug.frag
         geometry.vert geometry.frag
         hud.vert hud.frag
+        fxaa.frag
 )
 
 foreach(SHADER_SRC ${SHADER_NEW_SOURCES})
