@@ -74,6 +74,7 @@
 #include "systems/InputSendSystem.hpp"
 #include "systems/PredictionSystem.hpp"
 #include "systems/ReconciliationSystem.hpp"
+#include "util/InputCapture.hpp"
 
 #include <SDL3/SDL_video.h>
 
@@ -1241,8 +1242,11 @@ bool Game::init(AppContext& ctx)
     }
 
     // Grab the mouse into relative mode so camera look works immediately.
-    SDL_SetWindowRelativeMouseMode(window, true);
+    // Goes through the shared helper so a fresh Game instance entering after a
+    // prior match cannot inherit stale text-input mode or queued mouse delta.
+    input_capture::acquireGameplayInputCapture(window);
     mouseCaptured = true;
+    chatOpen_ = false;
 
     // Load the shared skinned-character rig (skeleton + bind pose + weights).
     // Loading a single FBX is enough — any file with matching skin data works;
@@ -6255,7 +6259,7 @@ void Game::quit()
 {
     if (window) {
         mouseCaptured = false;
-        SDL_SetWindowRelativeMouseMode(window, false);
+        input_capture::releaseGameplayInputCapture(window);
     }
     if (userSettings) {
         userSettings->mouseSensitivity = mouseSensitivity;
