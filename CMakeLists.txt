@@ -1859,9 +1859,6 @@ add_executable(audio_math_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/audio_math_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.hpp"
-        src/ecs/systems/HealthPackSpawnerSystem.hpp
-        src/ecs/systems/HealthPackSpawnerSystem.cpp
-        src/ecs/components/HealthPackSpawner.hpp
 )
 target_include_directories(audio_math_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
