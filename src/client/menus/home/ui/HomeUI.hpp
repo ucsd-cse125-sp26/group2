@@ -14,7 +14,7 @@
 struct JoinMenuState
 {
     std::string serverIp = "127.0.0.1"; ///< Server hostname or IP address entered by the user.
-    int serverPort = 9999;              ///< Server port entered by the user.
+    int serverPort = 2310;              ///< Server port entered by the user.
 };
 
 /// @brief Output from a single home UI frame.

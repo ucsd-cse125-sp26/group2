@@ -459,6 +459,10 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
     drawWorldModelInstances(geometryPass, cmd, true);
     drawEntityModels(geometryPass, cmd, true);
 
+    // Rasterise the skinned player rig into the shadow map so the player
+    // casts a shadow (the shadow view-projection is already at vertex slot 0).
+    skinnedRenderer_.drawDepth(geometryPass, cmd);
+
     SDL_EndGPURenderPass(geometryPass);
 }
 

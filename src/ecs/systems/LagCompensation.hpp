@@ -111,7 +111,8 @@ private:
     Registry* registry_ = nullptr;
     std::vector<std::pair<entt::entity, std::vector<WorldCapsule>>> saved_;
 
-    friend RewindHitboxesGuard rewindHitboxes(Registry&, entt::entity, const glm::vec3*, const glm::vec3*, float);
+    friend RewindHitboxesGuard
+    rewindHitboxes(Registry&, entt::entity, const glm::vec3*, const glm::vec3*, float, float);
 };
 
 /// @brief Rewind every other player's hitbox capsules to where they
@@ -148,7 +149,8 @@ inline RewindHitboxesGuard rewindHitboxes(Registry& registry,
                                           entt::entity shooter,
                                           const glm::vec3* rayOrigin = nullptr,
                                           const glm::vec3* rayDirection = nullptr,
-                                          float rayMaxDistance = 0.0f)
+                                          float rayMaxDistance = 0.0f,
+                                          float bulletRadius = 0.0f)
 {
     RewindHitboxesGuard guard;
 
@@ -195,6 +197,10 @@ inline RewindHitboxesGuard rewindHitboxes(Registry& registry,
                 if (const auto* vel = registry.try_get<Velocity>(entity)) {
                     expand += glm::abs(vel->value) * lagWindowSec;
                 }
+                // Match the inflated narrow-phase hit shape ("cylinder hitreg"):
+                // dilate the broad-phase AABB by the bullet radius so a thick
+                // shot that grazes this player isn't pruned before rewind.
+                expand += glm::vec3{bulletRadius};
                 const physics::WorldAABB bounds{
                     .min = pos->value - expand,
                     .max = pos->value + expand,

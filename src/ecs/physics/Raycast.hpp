@@ -669,8 +669,18 @@ inline bool raycastCapsule(glm::vec3 origin,
 /// `JointMatrices` — i.e. animated characters — so it's a stronger
 /// gate than `Player` anyway and the filter is now strictly more
 /// permissive without picking up any non-character entities.
-inline HitboxHit raycastPlayerHitboxes(
-    Registry& registry, entt::entity shooter, glm::vec3 origin, glm::vec3 direction, float maxDistance)
+/// @param bulletRadius  Cylinder/swept-sphere radius (world units) added to
+///        every capsule's radius. A thick ray of radius R vs a capsule of
+///        radius r is the thin ray vs a capsule of radius (R + r) — so the
+///        whole "cylinder hitreg" reduces to inflating the capsule. 0 = exact
+///        ray (legacy). The reported hit distance is the distance to the
+///        bullet CENTRE at first contact (slightly in front of the surface).
+inline HitboxHit raycastPlayerHitboxes(Registry& registry,
+                                       entt::entity shooter,
+                                       glm::vec3 origin,
+                                       glm::vec3 direction,
+                                       float maxDistance,
+                                       float bulletRadius = 0.0f)
 {
     HitboxHit bestHit;
     bestHit.distance = maxDistance;
@@ -706,8 +716,11 @@ inline HitboxHit raycastPlayerHitboxes(
             glm::vec3 boundsMin{std::numeric_limits<float>::max()};
             glm::vec3 boundsMax{std::numeric_limits<float>::lowest()};
             for (const WorldCapsule& cap : hitboxes.capsules) {
-                const glm::vec3 capMin = glm::min(cap.pointA, cap.pointB) - glm::vec3{cap.radius};
-                const glm::vec3 capMax = glm::max(cap.pointA, cap.pointB) + glm::vec3{cap.radius};
+                // Dilate by bulletRadius so the broad-phase never rejects a
+                // near-miss that the inflated narrow-phase would catch.
+                const glm::vec3 inflate{cap.radius + bulletRadius};
+                const glm::vec3 capMin = glm::min(cap.pointA, cap.pointB) - inflate;
+                const glm::vec3 capMax = glm::max(cap.pointA, cap.pointB) + inflate;
                 boundsMin = glm::min(boundsMin, capMin);
                 boundsMax = glm::max(boundsMax, capMax);
             }
@@ -721,8 +734,14 @@ inline HitboxHit raycastPlayerHitboxes(
             for (const WorldCapsule& cap : hitboxes.capsules) {
                 float dist = bestHit.distance;
                 glm::vec3 normal{0.0f};
-                if (!raycastCapsule(
-                        origin, direction, cap.pointA, cap.pointB, cap.radius, bestHit.distance, dist, normal))
+                if (!raycastCapsule(origin,
+                                    direction,
+                                    cap.pointA,
+                                    cap.pointB,
+                                    cap.radius + bulletRadius,
+                                    bestHit.distance,
+                                    dist,
+                                    normal))
                     continue;
 
                 bestHit.hit = true;
@@ -741,7 +760,15 @@ inline HitboxHit raycastPlayerHitboxes(
 ///
 /// World geometry first, then player hitbox capsules (closest wins).
 /// Falls back to the old AABB path for players without HitboxInstance.
-inline HitboxHit resolveHitscanHitbox(Registry& registry, entt::entity shooter, glm::vec3 origin, glm::vec3 direction)
+///
+/// @param bulletRadius  Swept-sphere "cylinder hitreg" radius (world units)
+///        applied to PLAYER hitboxes only. World geometry stays a thin ray so
+///        bullets still require crosshair line-of-sight past walls. 0 = ray.
+inline HitboxHit resolveHitscanHitbox(Registry& registry,
+                                      entt::entity shooter,
+                                      glm::vec3 origin,
+                                      glm::vec3 direction,
+                                      float bulletRadius = 0.0f)
 {
     // World geometry pass (returns HitscanHit but we need HitboxHit).
     const HitscanHit worldHit = raycastWorld(origin, direction, activeWorld());
@@ -756,7 +783,8 @@ inline HitboxHit resolveHitscanHitbox(Registry& registry, entt::entity shooter, 
     }
 
     // Player hitbox pass.
-    const HitboxHit playerHit = raycastPlayerHitboxes(registry, shooter, origin, direction, bestHit.distance);
+    const HitboxHit playerHit =
+        raycastPlayerHitboxes(registry, shooter, origin, direction, bestHit.distance, bulletRadius);
     if (playerHit.hit && playerHit.distance < bestHit.distance) {
         bestHit = playerHit;
     }
