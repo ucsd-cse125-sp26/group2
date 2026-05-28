@@ -206,6 +206,7 @@ void ServerGame::run()
         registry.emplace<CollisionShape>(spawner, shape);
     }
 
+
     // Respawn points (with cooldown state)
     for (const glm::vec3& spawnPos : gamemap::spawnPoints_) {
         const entt::entity spawnPoint = registry.create();

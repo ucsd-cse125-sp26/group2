@@ -634,11 +634,19 @@ inline void handleFire(Registry& registry,
             if (gun.recoilHeat <= float(config.recoilFreeShots))
                 gun.recoilHeat = 0.0f;
         }
+        // Semi-auto: trigger release re-arms the next shot.
+        gun.firedSinceTriggerPress = false;
         return;
     }
     gun.recoilIdleTime = 0.0f;
 
     if (gun.fireCooldown > 0.0f) {
+        return;
+    }
+
+    // Semi-auto weapons (e.g. pump shotgun) must release+repress the trigger
+    // between shots. Holding the trigger only fires once per press.
+    if (config.semiAuto && gun.firedSinceTriggerPress) {
         return;
     }
 
@@ -648,6 +656,7 @@ inline void handleFire(Registry& registry,
 
     gun.fireCooldown = config.fireCooldown;
     gun.recoilHeat += 1.0f;
+    gun.firedSinceTriggerPress = true;
 
     // Railgun handling
     if (config.isCharge) {
@@ -734,79 +743,118 @@ inline void handleFire(Registry& registry,
 
     if (config.hitscan) {
         // Phase 6 lag-compensated hitscan (see beam path for details).
-        // PR-5: ray-filtered rewind.
-        const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
-        const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, direction);
+        // PR-5: ray-filtered rewind. Rewind uses the central aim direction; all
+        // pellets in a shotgun blast share the same rewound state.
+        const auto rewindGuard =
+            systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
 
-        // PR-18b: log to server-side shot-resolution CSV.  Discrete
-        // hitscan path: one log row per click-fire.
-        logShot(registry, shooter, input.tick, eye, direction, hit);
-        // PR-20: capture rewound state for the live debug visualizer.
-        captureShotDebug(registry, shooter, input.tick, eye, direction, physics::k_hitscanRange, hit, outShotDebug);
+        // Per-pellet resolver: runs the raycast, applies damage, emits the
+        // tracer + impact events. Used once for normal hitscan and N times for
+        // shotgun in a star spread.
+        const auto resolvePellet = [&](const glm::vec3& pelletDir, bool logCenter) {
+            const HitboxHit hit = resolveHitscanHitbox(registry, shooter, eye, pelletDir);
 
-        // Snapshot armor before damage for shield-break detection.
-        float armorBefore = 0.f;
-        if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            if (const auto* hp = registry.try_get<Health>(hit.entity))
-                armorBefore = hp->armor;
-        }
-
-        // Apply damage with body-region multiplier.
-        float dealtDamage = 0.f;
-        if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
-            dealtDamage =
-                applyDamage(config.damage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
-            if (hit.region == BodyRegion::Head && combatLogEnabled()) {
-                SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",
-                        static_cast<int>(shooter),
-                        static_cast<int>(hit.entity),
-                        static_cast<double>(dealtDamage),
-                        static_cast<double>(config.damage),
-                        static_cast<double>(multiplier));
+            if (logCenter) {
+                logShot(registry, shooter, input.tick, eye, pelletDir, hit);
+                captureShotDebug(
+                    registry, shooter, input.tick, eye, pelletDir, physics::k_hitscanRange, hit, outShotDebug);
             }
-        }
 
-        // Check if armor was just depleted to zero by this shot.
-        bool shieldBroke = false;
-        if (hit.entity != entt::null && registry.valid(hit.entity)) {
-            if (const auto* hp = registry.try_get<Health>(hit.entity))
-                shieldBroke = (armorBefore > 0.f && hp->armor <= 0.f);
-        }
-
-        // Emit replicated particle events for client FX.
-        // 1) Tracer or beam from muzzle to hit point.
-        {
-            NetParticleEvent tracerEvt;
-            tracerEvt.source = shooter;
-            tracerEvt.weaponType = gun.type;
-            if (gun.type == WeaponType::RailGun || gun.type == WeaponType::EnergyGun) {
-                tracerEvt.effectType = ParticleEffectType::HitscanBeam;
-                tracerEvt.pos1 = muzzle;
-                tracerEvt.pos2 = hit.point;
-            } else {
-                tracerEvt.effectType = ParticleEffectType::BulletTracer;
-                tracerEvt.pos1 = muzzle;
-                tracerEvt.pos2 = glm::normalize(hit.point - muzzle);
-                tracerEvt.param = hit.distance;
+            float armorBefore = 0.f;
+            if (hit.entity != entt::null && registry.valid(hit.entity)) {
+                if (const auto* hp = registry.try_get<Health>(hit.entity))
+                    armorBefore = hp->armor;
             }
-            outParticles.push_back(tracerEvt);
-        }
-        // 2) Impact effect at hit location.
-        {
-            NetParticleEvent impactEvt;
-            impactEvt.source = shooter;
-            impactEvt.effectType = ParticleEffectType::Impact;
-            impactEvt.weaponType = gun.type;
-            impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
-            impactEvt.headshot = (hit.region == BodyRegion::Head) ? uint8_t{1} : uint8_t{0};
-            impactEvt.shieldBreak = shieldBroke ? uint8_t{1} : uint8_t{0};
-            impactEvt.hadArmor = (armorBefore > 0.f) ? uint8_t{1} : uint8_t{0};
-            impactEvt.damage = dealtDamage;
-            impactEvt.target = hit.entity;
-            impactEvt.pos1 = hit.point;
-            impactEvt.pos2 = hit.normal;
-            outParticles.push_back(impactEvt);
+
+            float dealtDamage = 0.f;
+            if (hit.entity != entt::null && registry.valid(hit.entity)) {
+                const float multiplier =
+                    defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
+                dealtDamage = applyDamage(
+                    config.damage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+                if (hit.region == BodyRegion::Head && combatLogEnabled()) {
+                    SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",
+                            static_cast<int>(shooter),
+                            static_cast<int>(hit.entity),
+                            static_cast<double>(dealtDamage),
+                            static_cast<double>(config.damage),
+                            static_cast<double>(multiplier));
+                }
+            }
+
+            bool shieldBroke = false;
+            if (hit.entity != entt::null && registry.valid(hit.entity)) {
+                if (const auto* hp = registry.try_get<Health>(hit.entity))
+                    shieldBroke = (armorBefore > 0.f && hp->armor <= 0.f);
+            }
+
+            // 1) Tracer/beam from muzzle to hit point.
+            {
+                NetParticleEvent tracerEvt;
+                tracerEvt.source = shooter;
+                tracerEvt.weaponType = gun.type;
+                if (gun.type == WeaponType::RailGun || gun.type == WeaponType::EnergyGun) {
+                    tracerEvt.effectType = ParticleEffectType::HitscanBeam;
+                    tracerEvt.pos1 = muzzle;
+                    tracerEvt.pos2 = hit.point;
+                } else {
+                    tracerEvt.effectType = ParticleEffectType::BulletTracer;
+                    tracerEvt.pos1 = muzzle;
+                    tracerEvt.pos2 = glm::normalize(hit.point - muzzle);
+                    tracerEvt.param = hit.distance;
+                }
+                outParticles.push_back(tracerEvt);
+            }
+            // 2) Impact effect at hit location.
+            {
+                NetParticleEvent impactEvt;
+                impactEvt.source = shooter;
+                impactEvt.effectType = ParticleEffectType::Impact;
+                impactEvt.weaponType = gun.type;
+                impactEvt.surfaceType = (hit.entity != entt::null) ? SurfaceType::Flesh : SurfaceType::Concrete;
+                impactEvt.headshot = (hit.region == BodyRegion::Head) ? uint8_t{1} : uint8_t{0};
+                impactEvt.shieldBreak = shieldBroke ? uint8_t{1} : uint8_t{0};
+                impactEvt.hadArmor = (armorBefore > 0.f) ? uint8_t{1} : uint8_t{0};
+                impactEvt.damage = dealtDamage;
+                impactEvt.target = hit.entity;
+                impactEvt.pos1 = hit.point;
+                impactEvt.pos2 = hit.normal;
+                outParticles.push_back(impactEvt);
+            }
+        };
+
+        if (gun.type == WeaponType::Shotgun) {
+            // 5-pellet pentagon spread (Peacekeeper-style). Vertices evenly
+            // spaced at 72° apart starting from straight-up in the view's
+            // tangent plane. No centre pellet — pure pentagon. Each pellet
+            // runs an independent raycast and emits its own tracer/impact,
+            // so the HUD pellet widget reads the per-pellet hit/headshot
+            // info from the replicated NetParticleEvents.
+            static constexpr int k_pelletCount = 5;
+            static constexpr float k_spreadRad = 0.0873f; // ~5°
+            // Pre-computed (cos θ, sin θ) for θ = 90° + i*72°, i = 0..4.
+            static constexpr std::array<std::pair<float, float>, k_pelletCount> k_offsets{{
+                { 0.0000f,  1.0000f}, // top         (90°)
+                {-0.9511f,  0.3090f}, // upper-left  (162°)
+                {-0.5878f, -0.8090f}, // lower-left  (234°)
+                { 0.5878f, -0.8090f}, // lower-right (306°)
+                { 0.9511f,  0.3090f}, // upper-right (18°)
+            }};
+            const glm::vec3 worldUp{0.0f, 1.0f, 0.0f};
+            // Avoid degenerate cross when looking nearly straight up/down.
+            const glm::vec3 rightAxis = (std::abs(direction.y) > 0.99f)
+                                            ? glm::vec3{1.0f, 0.0f, 0.0f}
+                                            : glm::normalize(glm::cross(direction, worldUp));
+            const glm::vec3 upAxis = glm::normalize(glm::cross(rightAxis, direction));
+            const float tanSpread = std::tan(k_spreadRad);
+            for (int i = 0; i < k_pelletCount; ++i) {
+                const auto [ox, oy] = k_offsets[i];
+                const glm::vec3 pelletDir =
+                    glm::normalize(direction + tanSpread * (ox * rightAxis + oy * upAxis));
+                resolvePellet(pelletDir, /*logCenter=*/i == 0);
+            }
+        } else {
+            resolvePellet(direction, /*logCenter=*/true);
         }
 
     } else {
@@ -885,6 +933,32 @@ void runWeapon(Registry& registry,
                 grenades.ammo[i] = getWeaponConfig(kGrenadeTypes[i]).defaultAmmoCapacity;
             }
             input.refillAmmo = false; // consume the flag
+        }
+
+        // Debug: replace a slot's weapon when the client requests it. Resets
+        // mag/ammo/reload/cooldown so the new weapon comes up clean. -1 means
+        // "no change"; we consume the request (write back -1) so it pulses once.
+        auto setSlotWeapon = [](GunInstance& g, WeaponType t) {
+            const WeaponConfig& c = getWeaponConfig(t);
+            g.type = t;
+            g.currentMagAmmo = c.magazineSize;
+            g.totalAmmo = c.defaultAmmoCapacity;
+            g.fireCooldown = 0.f;
+            g.chargeTime = 0.f;
+            g.isReloading = false;
+            g.reloadTime = 0.f;
+            g.recoilHeat = 0.f;
+            g.recoilIdleTime = 0.f;
+        };
+        if (input.debugSetPrimaryWeapon >= 0) {
+            setSlotWeapon(getSlot(weapon, WeaponSlot::PRIMARY),
+                          static_cast<WeaponType>(input.debugSetPrimaryWeapon));
+            input.debugSetPrimaryWeapon = -1;
+        }
+        if (input.debugSetSecondaryWeapon >= 0) {
+            setSlotWeapon(getSlot(weapon, WeaponSlot::SECONDARY),
+                          static_cast<WeaponType>(input.debugSetSecondaryWeapon));
+            input.debugSetSecondaryWeapon = -1;
         }
     });
 }

@@ -338,6 +338,8 @@ public:
 
     bool pendingAmmoRefill_ = false;        ///< Set by Weapon HUD button, consumed by Game::iterate().
     bool pendingAbilityLevelGrant_ = false; ///< Set by Weapon HUD button, consumed by Game::iterate().
+    std::int8_t pendingSetPrimaryWeapon_ = -1;   ///< -1 = none; else WeaponType ordinal. Consumed by Game::iterate().
+    std::int8_t pendingSetSecondaryWeapon_ = -1; ///< Mirror for the secondary slot.
 
 private:
     /// Per-window visibility toggles — persistent across frames.

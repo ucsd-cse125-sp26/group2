@@ -27,6 +27,8 @@ struct WeaponConfig
     float maxChargeTime = 0.0f;      ///< in seconds
     float reloadTime = 0.0f;         ///< Time to complete a reload, in seconds.
 
+    bool semiAuto = false;           ///< If true, fire requires trigger release between shots (pump/burst weapons).
+
     int recoilFreeShots = 0;         ///< Shots before recoil kicks in (legacy formula path).
     float recoilPitchPerShot = 0.0f; ///< Upward kick per shot (legacy formula path).
     float recoilYawPerShot = 0.0f;   ///< Horizontal swing strength (legacy formula path).
@@ -118,7 +120,7 @@ struct ProjectileConfig
 /// @brief Returns the gameplay config for a weapon type.
 inline const WeaponConfig& getWeaponConfig(WeaponType type)
 {
-    static constexpr std::array<WeaponConfig, 7> k_kWeaponConfigs{{
+    static constexpr std::array<WeaponConfig, 8> k_kWeaponConfigs{{
         WeaponConfig{
             .fireCooldown = 0.10f,
             .magazineSize = 50,
@@ -178,6 +180,23 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .reloadTime = 2.0f,
         }, // EnergyGun
         WeaponConfig{
+            // Peacekeeper-style pump shotgun: hitscan multi-pellet star spread.
+            // The fire path in WeaponSystem.cpp checks `type == Shotgun` and loops
+            // 9 raycasts in an asterisk pattern (1 center + 8 outer). Per-pellet
+            // damage is `damage` below (so max body damage = 9 * damage).
+            .fireCooldown = 0.9f,
+            .magazineSize = 6,
+            .defaultAmmoCapacity = 36,
+            .damage = 20.0f, // per-pellet; 5 pellets → 100 body max, ~150 head.
+            .hitscan = true,
+            .initialProjectileSpeed = 0.0f,
+            .explosive = false,
+            .reloadTime = 2.5f,
+            // semiAuto intentionally left false — shotgun auto-fires on cooldown
+            // while LMB is held (matches charge rifle in normal mode). The
+            // 0.9s fireCooldown is what gates the rate.
+        }, // Shotgun
+        WeaponConfig{
             .fireCooldown = 0.4f,
             .magazineSize = 1,
             .defaultAmmoCapacity = 99,
@@ -212,7 +231,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
 /// @brief Returns the projectile config for a weapon type.
 inline const ProjectileConfig& getProjectileConfig(WeaponType type)
 {
-    static constexpr std::array<ProjectileConfig, 7> k_kProjectileConfigs{{
+    static constexpr std::array<ProjectileConfig, 8> k_kProjectileConfigs{{
         ProjectileConfig{}, // Rifle
         ProjectileConfig{
             .modelId = 1,
@@ -228,6 +247,7 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
         },                                    // Rocket
         ProjectileConfig{},                   // RailGun
         ProjectileConfig{},                   // EnergyGun
+        ProjectileConfig{},                   // Shotgun — hitscan, no projectile
         ProjectileConfig{},                   // HEGrenade — flight params come from GrenadeConfig
         ProjectileConfig{},                   // Molotov
         ProjectileConfig{},                   // Impulse

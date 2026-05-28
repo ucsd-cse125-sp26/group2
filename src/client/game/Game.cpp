@@ -574,6 +574,8 @@ std::string_view fireAudioEventForWeapon(WeaponType type) noexcept
         return "weapon.railgun.fire";
     case WeaponType::EnergyGun:
         return "weapon.energy.fire";
+    case WeaponType::Shotgun:
+        return "weapon.shotgun.fire"; // falls back gracefully if SFX bank lacks this event.
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
     case WeaponType::Impulse:
@@ -1046,6 +1048,41 @@ bool Game::init(AppContext& ctx)
                 accumResetTimer_ = 2.0f; // reset after 2s of no hits
                 // Track latest hit type for accumulator color.
                 accumLastHitType_ = isHeadshot ? uint8_t{2} : (isShielded ? uint8_t{1} : uint8_t{0});
+            }
+        }
+
+        // Shotgun pellet readout: aggregate the 9 per-pellet impact events emitted
+        // by the server into one HUD blast. Pellets arrive in server-emit order
+        // within a single server tick → one client frame, so a simple index counter
+        // matches the server's k_offsets star pattern. If a stale partial blast
+        // exists (e.g., packet loss dropped a pellet), the time-gap reset starts
+        // a fresh accumulator on the next shot.
+        if (evt.source == localPlayer && evt.weaponType == WeaponType::Shotgun &&
+            evt.effectType == ParticleEffectType::Impact)
+        {
+            const float nowSec = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+            const bool stale = (shotgunPelletAccumCount_ > 0) &&
+                               (nowSec - shotgunPelletLastTimeSec_) > 0.25f;
+            if (shotgunPelletAccumCount_ == 0 || stale) {
+                shotgunPelletAccum_ = HudShotgunBlast{};
+                shotgunPelletAccumCount_ = 0;
+            }
+            if (shotgunPelletAccumCount_ < static_cast<int>(shotgunPelletAccum_.pellets.size())) {
+                const bool isHit = (evt.surfaceType == SurfaceType::Flesh);
+                const bool isHead = (evt.headshot != 0);
+                shotgunPelletAccum_.pellets[shotgunPelletAccumCount_].result =
+                    isHead   ? HudShotgunPellet::Result::Head
+                    : isHit  ? HudShotgunPellet::Result::Body
+                             : HudShotgunPellet::Result::Miss;
+                ++shotgunPelletAccumCount_;
+                shotgunPelletLastTimeSec_ = nowSec;
+                if (shotgunPelletAccumCount_ ==
+                    static_cast<int>(shotgunPelletAccum_.pellets.size())) {
+                    shotgunPelletAccum_.valid = true;
+                    shotgunPelletAccum_.secondsSinceFire = 0.0f;
+                    lastShotgunBlast_ = shotgunPelletAccum_;
+                    shotgunPelletAccumCount_ = 0;
+                }
             }
         }
 
@@ -4754,6 +4791,22 @@ SDL_AppResult Game::iterate()
             registry.view<LocalPlayer, InputSnapshot>().each(
                 [wantRefill](InputSnapshot& snap) { snap.refillAmmo = wantRefill; });
         }
+
+        // Process weapon-slot swap requests from the Weapon HUD debug menu.
+        // ALWAYS overwrite the snap field — when there's no pending change the
+        // value is -1, which clears any prior frame's request. Without this,
+        // the snap held the last requested value forever, the server applied
+        // it every tick, and the slot's ammo never decreased ("auto-refill" bug).
+        {
+            const std::int8_t wantPrimary = debugUI.pendingSetPrimaryWeapon_;
+            const std::int8_t wantSecondary = debugUI.pendingSetSecondaryWeapon_;
+            debugUI.pendingSetPrimaryWeapon_ = -1;
+            debugUI.pendingSetSecondaryWeapon_ = -1;
+            registry.view<LocalPlayer, InputSnapshot>().each([&](InputSnapshot& snap) {
+                snap.debugSetPrimaryWeapon = wantPrimary;
+                snap.debugSetSecondaryWeapon = wantSecondary;
+            });
+        }
         debugUI.buildParticleUI(particleSystem, cachedEye_, cachedCamFwd_);
         buildAnimationTesterUI(animUI_, registry, kRigScale_, kRigVerticalOffset_);
 
@@ -5621,6 +5674,14 @@ SDL_AppResult Game::iterate()
             hudHitConfirms.push_back({hitmarkerIsHeadshot_, false, hitmarkerShieldBreak_});
         }
         hudState.hitConfirms = hudHitConfirms;
+
+        // ── Shotgun blast: age the most recent completed blast and stage it
+        //    for the ShotgunPelletWidget. The widget detects "fresh" by
+        //    comparing secondsSinceFire to its own cached age.
+        if (lastShotgunBlast_.valid) {
+            lastShotgunBlast_.secondsSinceFire += frameTime;
+        }
+        hudState.latestShotgunBlast = lastShotgunBlast_;
 
         // ── Vignette: detect health/armor deltas for damage & shield break ──
         {

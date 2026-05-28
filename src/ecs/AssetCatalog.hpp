@@ -40,7 +40,7 @@ inline const AssetDefinition kRocketProjectile{
     .flipUVs = true,
 };
 
-inline const std::array<AssetDefinition, 4> kWeaponAssets{{
+inline const std::array<AssetDefinition, 5> kWeaponAssets{{
     {.name = "weapon_rifle",
      .filename = "assault_rifle.glb",
      .role = AssetRole::Entity,
@@ -59,6 +59,12 @@ inline const std::array<AssetDefinition, 4> kWeaponAssets{{
      .renderRotationDegrees = {0.0f, 0.0f, 0.0f}},
     {.name = "weapon_energy",
      .filename = "energy_gun.glb",
+     .role = AssetRole::Entity,
+     .flipUVs = true,
+     .renderScale = {20.0f, 20.0f, 20.0f},
+     .renderRotationDegrees = {0.0f, 0.0f, 0.0f}},
+    {.name = "weapon_shotgun",
+     .filename = "energy_gun.glb", // reuses energy gun mesh until a dedicated shotgun model is authored.
      .role = AssetRole::Entity,
      .flipUVs = true,
      .renderScale = {20.0f, 20.0f, 20.0f},

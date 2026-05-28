@@ -251,6 +251,29 @@ struct HudMatchInfo
     bool valid = false;         ///< False when no match metadata is available.
 };
 
+/// @brief Per-pellet result for a single shotgun blast, used by ShotgunPelletWidget.
+struct HudShotgunPellet
+{
+    enum class Result : uint8_t
+    {
+        Miss = 0,
+        Body = 1,
+        Head = 2,
+    };
+    Result result = Result::Miss;
+};
+
+/// @brief A single completed shotgun blast (5 pellets) staged for the HUD widget.
+/// Pellets 0..4 are the 5 pentagon vertices (top → upper-left → lower-left →
+/// lower-right → upper-right; 72° spacing) matching the server's `k_offsets`
+/// in WeaponSystem.cpp. The widget converts the per-pellet result into colour.
+struct HudShotgunBlast
+{
+    bool valid = false;        ///< False = no recent blast; widget stays hidden.
+    float secondsSinceFire = 0.f; ///< Drives the widget fade animation.
+    std::array<HudShotgunPellet, 5> pellets{};
+};
+
 /// @brief Snapshot of game state consumed by the HUD each frame.
 ///
 /// Filled by Game from ECS data. The HUD never imports ECS headers.
@@ -278,6 +301,7 @@ struct HudGameState
     std::span<const HudHitConfirm> hitConfirms;
     std::span<const HudDamageNumber> damageNumbers; ///< Floating damage numbers to spawn this frame.
     HudDamageAccum damageAccum;                     ///< Running damage total to current target.
+    HudShotgunBlast latestShotgunBlast;             ///< Most recent shotgun blast; valid=false when none.
 
     // View/projection for world→screen projection (damage numbers).
     glm::mat4 viewProj{1.f};

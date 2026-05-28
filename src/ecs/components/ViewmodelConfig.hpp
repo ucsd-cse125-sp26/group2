@@ -160,7 +160,7 @@ struct RecoilParams
 /// @brief Returns viewmodel positioning params for a weapon type.
 inline const ViewmodelParams& getViewmodelParams(WeaponType type)
 {
-    static constexpr std::array<ViewmodelParams, 4> k_params{{
+    static constexpr std::array<ViewmodelParams, 5> k_params{{
         // Rifle — existing tuning
         {.scale = 39.0f,
          .forward = 78.0f,
@@ -193,6 +193,14 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
+        // Shotgun — reuses EnergyGun viewmodel tuning (same mesh).
+        {.scale = 20.0f,
+         .forward = 80.0f,
+         .right = 38.5f,
+         .down = 24.0f,
+         .yawOffset = 0.0f,
+         .pitchOffset = 0.0f,
+         .rollOffset = 0.0f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
@@ -216,7 +224,7 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
     const std::array<HoldAnchor, kHoldStanceCount> k_defaultHolds{
         k_idleAnchor, k_crouchAnchor, k_airborneAnchor, k_slideAnchor, k_wallRunAnchor};
 
-    static const std::array<ThirdPersonWeaponParams, 4> k_params{{
+    static const std::array<ThirdPersonWeaponParams, 5> k_params{{
         // Rifle — middleweight, full spine bend, moderate recoil.
         // Locomotion anchor hand-tuned via the 3P Weapon Tweaker; other
         // stances stay on the generic defaults until they're tuned.
@@ -264,6 +272,18 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
              {.offset = {5.0f, 0.0f, 16.0f}, .rotation = glm::quat(1, 0, 0, 0)},
              {.offset = {3.0f, 4.0f, 8.0f}, .rotation = glm::quat(1, 0, 0, 0)},
          }}},
+        // Shotgun — copies EnergyGun (same mesh); heavier kick.
+        {.scale = 1.0f,
+         .spineBendMultiplier = 1.0f,
+         .hipLeanMultiplier = 0.1f,
+         .recoilKickRad = 0.12f,
+         .rightHandHolds = {{
+             {.offset = {5.0f, 4.0f, 12.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {3.0f, 6.0f, 10.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {5.0f, 2.0f, 14.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {5.0f, 0.0f, 16.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+             {.offset = {3.0f, 4.0f, 8.0f}, .rotation = glm::quat(1, 0, 0, 0)},
+         }}},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
@@ -272,7 +292,7 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
 /// @brief Returns hand grip/mount points for a weapon type.
 inline const WeaponHandMountParams& getWeaponHandMountParams(WeaponType type)
 {
-    static const std::array<WeaponHandMountParams, 4> k_params{{
+    static const std::array<WeaponHandMountParams, 5> k_params{{
         // Rifle: trigger hand near the rear grip, support hand wrapped around the mag well.
         {.rightHand = {.elbowOffset = {-8.4f, -17.99f, -20.35f},
                        .palm = {.offset = {-1.05f, -11.39f, -7.2f}, .rotationDegrees = {-6.0f, 92.0f, 94.0f}},
@@ -353,6 +373,26 @@ inline const WeaponHandMountParams& getWeaponHandMountParams(WeaponType type)
                           {.offset = {1.3f, 1.3f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
                       }}},
          .viewmodelHandScale = 42.0f},
+        // Shotgun: copy EnergyGun grip until tuned (same mesh).
+        {.rightHand = {.elbowOffset = {10.0f, -8.0f, -14.0f},
+                       .palm = {.offset = {2.0f, -4.0f, -4.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                       .fingers = {{
+                           {.offset = {-1.7f, 1.3f, 1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                           {.offset = {-1.2f, 2.0f, 2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                           {.offset = {-0.2f, 1.7f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                           {.offset = {0.8f, 1.4f, 1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                           {.offset = {1.7f, 1.1f, 1.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                       }}},
+         .leftHand = {.elbowOffset = {-15.0f, -9.0f, 0.0f},
+                      .palm = {.offset = {-5.5f, -4.5f, 5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                      .fingers = {{
+                          {.offset = {2.0f, 1.3f, -2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {-0.7f, 2.2f, 1.8f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {0.0f, 2.0f, 2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {0.7f, 1.7f, 2.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {1.3f, 1.3f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                      }}},
+         .viewmodelHandScale = 42.0f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
@@ -361,7 +401,7 @@ inline const WeaponHandMountParams& getWeaponHandMountParams(WeaponType type)
 /// @brief Returns first-person-only arm controls for a weapon type.
 inline const FirstPersonHandMountParams& getFirstPersonHandMountParams(WeaponType type)
 {
-    static const std::array<FirstPersonHandMountParams, 4> k_params{{
+    static const std::array<FirstPersonHandMountParams, 5> k_params{{
         // Rifle
         {.rightArm = {.shoulderOffset = {20.0f, -22.0f, -38.0f},
                       .elbowOffset = {14.0f, -12.0f, -22.0f},
@@ -450,6 +490,28 @@ inline const FirstPersonHandMountParams& getFirstPersonHandMountParams(WeaponTyp
                          {.offset = {-4.2f, -3.2f, 7.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
                      }}},
          .scale = 42.0f},
+        // Shotgun — copies EnergyGun arm controls (same mesh).
+        {.rightArm = {.shoulderOffset = {18.0f, -22.0f, -34.0f},
+                      .elbowOffset = {12.0f, -12.0f, -18.0f},
+                      .palm = {.offset = {2.0f, -4.0f, -4.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                      .fingers = {{
+                          {.offset = {0.3f, -2.7f, -2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {0.8f, -2.0f, -1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {1.8f, -2.3f, -2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {2.8f, -2.6f, -2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {3.7f, -2.9f, -3.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                      }}},
+         .leftArm = {.shoulderOffset = {-25.0f, -22.0f, -18.0f},
+                     .elbowOffset = {-17.0f, -12.0f, -2.0f},
+                     .palm = {.offset = {-5.5f, -4.5f, 5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                     .fingers = {{
+                         {.offset = {-3.5f, -3.2f, 3.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {-6.2f, -2.3f, 6.8f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {-5.5f, -2.5f, 7.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {-4.8f, -2.8f, 7.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {-4.2f, -3.2f, 7.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                     }}},
+         .scale = 42.0f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
@@ -458,7 +520,7 @@ inline const FirstPersonHandMountParams& getFirstPersonHandMountParams(WeaponTyp
 /// @brief Returns world weapon pickup/spawner model params for a weapon type.
 inline const WeaponSpawnerModelParams& getWeaponSpawnerModelParams(WeaponType type)
 {
-    static const std::array<WeaponSpawnerModelParams, 4> k_params{{
+    static const std::array<WeaponSpawnerModelParams, 5> k_params{{
         // Rifle
         {.scale = {16.0f, 16.0f, 16.0f},
          .translation = {0.0f, 16.0f, 0.0f},
@@ -495,6 +557,15 @@ inline const WeaponSpawnerModelParams& getWeaponSpawnerModelParams(WeaponType ty
          .spinDegreesPerSecond = 45.0f,
          .bobAmplitude = 6.0f,
          .bobHz = 0.6f},
+        // Shotgun — pickup model reuses energy gun mesh.
+        {.scale = {10.0f, 10.0f, 10.0f},
+         .translation = {0.0f, 2.0f, 0.0f},
+         .yawOffset = 0.0f,
+         .pitchOffset = 0.0f,
+         .rollOffset = 0.0f,
+         .spinDegreesPerSecond = 45.0f,
+         .bobAmplitude = 6.0f,
+         .bobHz = 0.6f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
@@ -503,11 +574,12 @@ inline const WeaponSpawnerModelParams& getWeaponSpawnerModelParams(WeaponType ty
 /// @brief Returns the GLB filename and load flags for a weapon type.
 inline WeaponModelInfo getWeaponModelInfo(WeaponType type)
 {
-    static constexpr std::array<WeaponModelInfo, 4> k_infos{{
+    static constexpr std::array<WeaponModelInfo, 5> k_infos{{
         {.filename = "assault_rifle.glb", .flipUVs = true},
         {.filename = "rocket_launcher.glb", .flipUVs = true},
         {.filename = "rail_gun.glb", .flipUVs = true},
         {.filename = "energy_gun.glb", .flipUVs = true},
+        {.filename = "energy_gun.glb", .flipUVs = true}, // Shotgun — reuses energy gun model
     }};
     return k_infos[static_cast<std::size_t>(type)];
 }
@@ -515,7 +587,7 @@ inline WeaponModelInfo getWeaponModelInfo(WeaponType type)
 /// @brief Returns visual recoil params for a weapon type.
 inline const RecoilParams& getRecoilParams(WeaponType type)
 {
-    static constexpr std::array<RecoilParams, 4> k_params{{
+    static constexpr std::array<RecoilParams, 5> k_params{{
         // Rifle (R-301) — full-auto, low per-shot, fast recovery
         {.pitchKick = 2.0f, .pushBack = 1.5f, .rollKick = 0.5f, .recoverySpeed = 14.0f},
         // Rocket — big boom
@@ -524,6 +596,8 @@ inline const RecoilParams& getRecoilParams(WeaponType type)
         {.pitchKick = 5.0f, .pushBack = 3.0f, .rollKick = 1.0f, .recoverySpeed = 8.0f},
         // EnergyGun (Wingman) — hand cannon
         {.pitchKick = 6.0f, .pushBack = 4.0f, .rollKick = 1.5f, .recoverySpeed = 7.0f},
+        // Shotgun (Peacekeeper) — heavy single thump
+        {.pitchKick = 9.0f, .pushBack = 6.0f, .rollKick = 1.0f, .recoverySpeed = 5.0f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
