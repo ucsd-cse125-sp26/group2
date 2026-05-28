@@ -422,11 +422,18 @@ inline void captureShotDebug(Registry& registry,
 /// @brief Spawn a grenade projectile from the player's eye position.
 ///
 /// Computes a throw direction by rotating the eye direction upward by the
-/// configured pitch offset (so a perfectly horizontal aim still arcs).
+/// configured (small) pitch offset, then adds the thrower's velocity so a
+/// grenade thrown on the move inherits the player's momentum (Halo-style):
+/// moving forward extends the throw, backpedaling shortens it.
 /// Copies all flight-relevant fields from the grenade's GrenadeConfig into
 /// the new Projectile entity so CollisionSystem can dispatch on them.
-static void spawnGrenade(
-    Registry& registry, entt::entity shooter, WeaponType type, glm::vec3 muzzle, glm::vec3 eyeDir, glm::vec3 eyeRight)
+static void spawnGrenade(Registry& registry,
+                         entt::entity shooter,
+                         WeaponType type,
+                         glm::vec3 muzzle,
+                         glm::vec3 eyeDir,
+                         glm::vec3 eyeRight,
+                         glm::vec3 throwerVel)
 {
     const GrenadeConfig& cfg = getGrenadeConfig(type);
 
@@ -451,7 +458,7 @@ static void spawnGrenade(
                                      .tint = cfg.tint,
                                  });
     registry.emplace<Position>(proj, Position{.value = muzzle});
-    registry.emplace<Velocity>(proj, Velocity{.value = throwDir * cfg.throwSpeed});
+    registry.emplace<Velocity>(proj, Velocity{.value = throwDir * cfg.throwSpeed + throwerVel});
     registry.emplace<CollisionShape>(proj, CollisionShape{.halfExtents = {5.0f, 5.0f, 5.0f}});
 }
 
@@ -490,7 +497,10 @@ inline void handleGrenadeInput(Registry& registry,
         eyeRight = eyeRight * (1.0f / std::sqrt(eyeRightLen2));
     }
 
-    spawnGrenade(registry, shooter, type, muzzle, direction, eyeRight);
+    const Velocity* throwerVel = registry.try_get<Velocity>(shooter);
+    const glm::vec3 inheritVel = (throwerVel != nullptr) ? throwerVel->value : glm::vec3{0.0f};
+
+    spawnGrenade(registry, shooter, type, muzzle, direction, eyeRight, inheritVel);
     grenades.cooldown = getGrenadeConfig(type).throwCooldown;
     --grenadeAmmo(grenades, type);
 }

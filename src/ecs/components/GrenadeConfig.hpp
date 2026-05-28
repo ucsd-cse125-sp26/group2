@@ -28,7 +28,8 @@ struct GrenadeConfig
 {
     // Throw mechanics
     float throwSpeed = 1500.0f;     ///< Initial speed along throw direction (u/s).
-    float throwPitchOffset = 0.35f; ///< Upward rotation applied to eye dir (rad, ~20°).
+    float throwPitchOffset = 0.14f; ///< Slight upward bias on eye dir (rad). Keep small so the grenade
+                                    ///< visibly tracks the crosshair; gravity supplies the arc.
     float throwCooldown = 0.4f;     ///< Min seconds between throws.
 
     // Flight physics
@@ -131,7 +132,7 @@ inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
         // HEGrenade
         GrenadeConfig{
             .throwSpeed = 1500.0f,
-            .throwPitchOffset = 0.35f,
+            .throwPitchOffset = 0.14f,
             .throwCooldown = 0.4f,
             .fuseTime = 3.0f,
             .bounceRestitution = 0.5f,
@@ -150,7 +151,7 @@ inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
         // Molotov
         GrenadeConfig{
             .throwSpeed = 1200.0f,
-            .throwPitchOffset = 0.44f,
+            .throwPitchOffset = 0.20f,
             .throwCooldown = 0.4f,
             .fuseTime = -1.0f, // impact-detonate
             .bounceRestitution = 0.0f,
@@ -166,7 +167,7 @@ inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
         // Impulse
         GrenadeConfig{
             .throwSpeed = 1500.0f,
-            .throwPitchOffset = 0.35f,
+            .throwPitchOffset = 0.14f,
             .throwCooldown = 0.4f,
             .fuseTime = 1.0f, // ticks after sticking
             .bounceRestitution = 0.0f,
