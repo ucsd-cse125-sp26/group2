@@ -24,6 +24,8 @@
 #include <iostream>
 #include <unordered_map>
 #include <vector>
+#include <queue>
+#include <deque>
 
 namespace
 {
@@ -60,7 +62,7 @@ bool NewRenderer::init(SDL_Window* window)
                                                     | SDL_GPU_SHADERFORMAT_DXIL
 #endif
         ;
-    device_ = SDL_CreateGPUDevice(k_wantedFormats, false, nullptr);
+    device_ = SDL_CreateGPUDevice(k_wantedFormats, true, nullptr);
     if (!device_) {
         SDL_Log("NewRenderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
@@ -97,6 +99,11 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
+    if (!createDepthPipeline()) {
+        SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
+        return false;
+    }
+
     if (!createFxaaPipeline()) {
         SDL_Log("NewRenderer: failed to create FXAA pipeline: %s", SDL_GetError());
         return false;
@@ -111,6 +118,12 @@ bool NewRenderer::init(SDL_Window* window)
     hudSampler_ = Boilerplate::createLinearRepeatSampler(device_);
     if (!hudSampler_) {
         SDL_Log("NewRenderer: failed to create hud sampler: %s", SDL_GetError());
+        return false;
+    }
+
+    depthSampler_ = Boilerplate::createLinearComparisonSampler(device_);
+    if (!depthSampler_) {
+        SDL_Log("NewRenderer: failed to create depth sampler: %s", SDL_GetError());
         return false;
     }
 
@@ -130,6 +143,7 @@ bool NewRenderer::init(SDL_Window* window)
     camera_ = NewCamera();
 
     skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
+
 
     return true;
 }
@@ -182,10 +196,10 @@ bool NewRenderer::createGeometryPipeline()
     vertexShader.uniformBufferCount = 2;
 
     Boilerplate::ShaderInfo fragmentShader{};
-    fragmentShader.path = "shaders-new/geometry.frag";
+    fragmentShader.path = "shaders-new/geometry_shadowed.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    fragmentShader.samplerCount = 1;
-    fragmentShader.uniformBufferCount = 2;
+    fragmentShader.samplerCount = 1 + 1;
+    fragmentShader.uniformBufferCount = 3;
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;
@@ -208,6 +222,50 @@ bool NewRenderer::createGeometryPipeline()
     return geometryPipeline_ != nullptr;
 }
 
+bool NewRenderer::createDepthPipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/geometry_depth.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+    vertexShader.uniformBufferCount = 2;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/emtpy.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.uniformBufferCount = 0;
+
+    SDL_GPUVertexBufferDescription vertexBufferDescription{};
+    vertexBufferDescription.slot = 0;
+    vertexBufferDescription.pitch = (sizeof(Vertex));
+    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vertexBufferDescription.instance_step_rate = 0;
+
+    Boilerplate::VertexInputLayout vertexLayout{};
+    // vertexLayout.vertexPitch = sizeof(Vertex);
+    vertexLayout.bufferDescriptions.push_back(vertexBufferDescription);
+    vertexLayout.attributes = {
+        Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, position)),
+        Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, normal)),
+        Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, texUV)),
+    };
+
+    Boilerplate::PipelineDescription depthPipelineDesc{};
+    depthPipelineDesc.vertexShaderInfo = &vertexShader;
+    depthPipelineDesc.fragmentShaderInfo = &fragmentShader;
+    depthPipelineDesc.shaderFormat = shaderFormat_;
+    depthPipelineDesc.vertexInputLayout = &vertexLayout;
+    depthPipelineDesc.colorTarget = nullptr;
+    depthPipelineDesc.depthTest = true;
+    depthPipelineDesc.depthWrite = true;
+    //depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_BACK;
+    //depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_FRONT;
+    depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_NONE;
+
+    depthPipeline_ = Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
+
+    return depthPipeline_ != nullptr;
+}
+
 void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 {
     Asset::Mesh& mesh = Asset::meshes_.at(meshId);
@@ -225,6 +283,7 @@ void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 }
 
 // ─── Per-frame entry point ──────────────────────────────────────────────────
+
 
 void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 {
@@ -261,8 +320,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         return;
     }
 
-    setMainCamera(eye, yaw, pitch, roll, width, height);
-
     // Per-frame uploads (skinning palette/instances, etc.) happen BEFORE
     // the first render pass so the copy is sequenced ahead of the draws.
     {
@@ -272,6 +329,79 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
             SDL_EndGPUCopyPass(copyPass);
         }
     }
+
+    ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
+    //constexpr uint32_t shadowSize = 2048;
+    // constexpr uint32_t shadowSize = 1024;
+     constexpr uint32_t shadowSize = 1024;
+    constexpr Uint8 numCubeFaces = 6;
+
+    static glm::vec3 cubeFaceTargets[numCubeFaces];
+    static glm::vec3 cubeFaceUps[numCubeFaces];
+
+    cubeFaceTargets[0] = glm::vec3(1,0,0);
+    cubeFaceTargets[1] = glm::vec3(-1,0,0);
+    cubeFaceTargets[2] = glm::vec3(0,1,0);
+    cubeFaceTargets[3] = glm::vec3(0,-1,0);
+    cubeFaceTargets[4] = glm::vec3(0,0,1);
+    cubeFaceTargets[5] = glm::vec3(0,0,-1);
+
+    cubeFaceUps[0] = glm::vec3(0,-1,0);
+    cubeFaceUps[1] = glm::vec3(0,-1,0);
+    cubeFaceUps[2] = glm::vec3(0,0,1);
+    cubeFaceUps[3] = glm::vec3(0,0,-1);
+    cubeFaceUps[4] = glm::vec3(0,-1,0);
+    cubeFaceUps[5] = glm::vec3(0,-1,0);
+
+    std::vector<PointLight> sampleLights;
+    PointLight pl0{};
+    pl0.position = glm::vec3(300,100.0f,500);
+    pl0.intensity = 250000;
+    pl0.color = glm::vec3(1.0f,0.7f,0.5f);
+    pl0.range = 500.0f;
+    sampleLights.push_back(pl0);
+    setPointLights(sampleLights);
+
+    SDL_GPUTexture* shadowMap = nullptr;
+
+    // SDL_Log("farPlane=%f numLights=%u",
+    //     sceneLightInfo_.pointLightFarPlane,
+    //     sceneLightInfo_.numPointLights);
+
+    if (sceneLightInfo_.numPointLights < 1) {
+        shadowMap = Boilerplate::createEmptyTextureD32F(device_, 1, 1,true,MAX_POINT_LIGHTS);
+    } else {
+        //std::cout << "NewRenderer::drawFrame: sceneLightInfo_.numPointLights = " << sceneLightInfo_.numPointLights << std::endl;
+        shadowMap = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize,true,MAX_POINT_LIGHTS);
+
+        glm::mat4 shadowProjection = glm::perspective(glm::radians(90.0f),1.0f,sceneLightInfo_.pointLightNearPlane,sceneLightInfo_.pointLightFarPlane);
+        shadowProjection[1][1] *= -1;
+        for (Uint8 iLight = 0; iLight < sceneLightInfo_.numPointLights; iLight++) {
+            PointLight &light = sceneLightInfo_.pointLights[iLight];
+            glm::vec3 yNegatedLightPosition = light.position;
+            // yNegatedLightPosition.y *= -1.0f;
+
+            for (int face = 0; face < numCubeFaces; face++) {
+                glm::vec3 &iCubeFaceTarget = cubeFaceTargets[face];
+                glm::vec3 &iCubeFaceUp = cubeFaceUps[face];
+
+
+                glm::mat4 shadowView = glm::lookAt(yNegatedLightPosition,yNegatedLightPosition + iCubeFaceTarget,iCubeFaceUp);
+                const glm::mat4 shadowViewProjection = shadowProjection * shadowView;
+
+
+                drawGeometryDepthPass(shadowMap, iLight * 6 + face, cmd, shadowViewProjection);
+            }
+        }
+
+    }
+
+    ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
+    // shadowMapBindings_.push({shadowMap, depthSampler_});
+    shadowMapTextureDeletionQueue.push(shadowMap);
+
+    float fov = 60.0f;
+    setMainCamera(eye, yaw, pitch, roll, width, height, fov);
 
     drawGeometryPass(sceneColor_, cmd);
     drawWeaponPass(sceneColor_, cmd);
@@ -287,12 +417,23 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     const Uint64 t3 = SDL_GetPerformanceCounter();
     lastSubmitMs_ = ticksToMs(t3 - t2, freq);
 
+    //for (auto smb : shadowMapBindings_) {
+    //for (auto smb : shadowMapBindings_) {
+    if (shadowMapTextureDeletionQueue.size() > 1){
+        SDL_ReleaseGPUTexture(device_, shadowMapTextureDeletionQueue.front());
+        shadowMapTextureDeletionQueue.pop();
+    }
+
     // TODO(graphics): if `pendingScreenshotPath_` is non-empty, schedule a
     // swapchain readback and write a PNG.  See `requestScreenshot` doc.
 }
 
-void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height)
+void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height,float fov)
 {
+    camera_.setFov(fov);
+    // camera_.setZNear(zNear);
+    // camera_.setZFar(zFar);
+
     camera_.setEye(eye);
     camera_.setTarget(pitch, yaw, roll);
     camera_.setAspect(static_cast<float>(width), static_cast<float>(height));
@@ -304,6 +445,29 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
     camera_.computeViewProjectionMatrix();
 }
 
+void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,Uint8 layer, SDL_GPUCommandBuffer* cmd, const glm::mat4 &shadowViewProjection)
+{
+    SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture,layer,true);
+
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
+    SDL_BindGPUGraphicsPipeline(geometryPass, depthPipeline_);
+
+    SDL_PushGPUVertexUniformData(cmd, 0, &shadowViewProjection, sizeof(glm::mat4));
+
+    drawWorldModelInstances(geometryPass, cmd,true);
+    drawEntityModels(geometryPass, cmd, true);
+
+    SDL_EndGPURenderPass(geometryPass);
+}
+
+void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUTextureSamplerBinding shadowMapBinding{shadowMapTextureDeletionQueue.back(),depthSampler_};
+    SDL_BindGPUFragmentSamplers(renderPass, 1, &shadowMapBinding, 1);
+
+    SDL_PushGPUFragmentUniformData(cmd,2,&sceneLightInfo_,sizeof(LightUBO));
+
+}
 void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)
 {
     if (particleSystem_)
@@ -315,15 +479,18 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
+    bindLightShadowInfo(geometryPass,cmd);
+
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
-    drawWorldModelInstances(geometryPass, cmd);
-    drawEntityModels(geometryPass, cmd);
+    drawWorldModelInstances(geometryPass, cmd,false);
+    drawEntityModels(geometryPass, cmd, false);
 
     drawSkinnedModels(geometryPass, cmd);
     drawParticles(geometryPass, cmd);
 
-    // drawWeapon(geometryPass, cmd);
+    //drawWeapon(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
 }
@@ -341,6 +508,8 @@ void NewRenderer::drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffe
 
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
+
+    bindLightShadowInfo(geometryPass,cmd);
 
     drawWeapon(geometryPass, cmd);
 
@@ -434,16 +603,21 @@ void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUComman
     skinnedRenderer_.draw(renderPass, cmd);
 }
 
-void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
+void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd,bool depth)
 {
     for (const auto& mInstance : Asset::modelInstances_) {
         if (!mInstance.drawInScenePass)
             continue;
-        drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
+        if (depth) {
+            drawModelDepth(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
+        } else {
+            drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
+        }
+
     }
 }
 
-void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
+void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd,bool depth)
 {
     for (const auto& entityCmd : entities_) {
         if (entityCmd.modelIndex < 0) {
@@ -455,7 +629,12 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommand
         ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(entityCmd.modelIndex)).modelId_;
         // TODO(graphics): pass entityCmd.tint into the per-mesh material UBO
         // so tinted entities (e.g. team colors, hit flashes) render correctly.
-        drawModel(modelId, entityCmd.worldTransform, renderPass, cmd);
+
+        if (depth) {
+            drawModelDepth(modelId, entityCmd.worldTransform, renderPass, cmd);
+        } else {
+            drawModel(modelId, entityCmd.worldTransform, renderPass, cmd);
+        }
     }
 }
 
@@ -499,6 +678,25 @@ void NewRenderer::drawModel(ModelIdInt modelId,
     }
 }
 
+void NewRenderer::drawModelDepth(ModelIdInt modelId,
+                                 const glm::mat4& modelTransform,
+                                 SDL_GPURenderPass* renderPass,
+                                 SDL_GPUCommandBuffer* cmd)
+{
+    Asset::Model& model = Asset::models_.at(modelId);
+    for (auto& element : model.modelElements_) {
+        //SDL_Log("drawModelDepth: modelId=%d elements=%zu", modelId, model.modelElements_.size());
+        glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
+        SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
+        Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
+        // SDL_Log("  vbuff=%p ibuff=%p indexCount=%u",
+        //     (void*)mesh.vBufferInfo_.gpuBuff,
+        //     (void*)mesh.iBufferInfo_.gpuBuff,
+        //     mesh.iBufferInfo_.bufferSize / (uint32_t)sizeof(Uint32));
+        drawMesh(renderPass, mesh);
+    }
+}
+
 void NewRenderer::drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const
 {
     SDL_GPUBufferBinding vertexBufferBinding{};
@@ -525,7 +723,7 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
         depthTarget_.texture = nullptr;
     }
 
-    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height));
+    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height),0,false);
 
     if (!depthTarget_.texture)
         return false;
@@ -750,7 +948,10 @@ void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
     // TODO(graphics): consume `pointLights_` inside the geometry / skinned
     // passes by pushing a light-array UBO to the fragment shader.  Cap at the
     // shader's array size and silently drop the rest.
-    pointLights_ = std::move(pointLights);
+    //pointLights_ = std::move(pointLights);
+    sceneLightInfo_.numPointLights = std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_POINT_LIGHTS));
+
+    memcpy(sceneLightInfo_.pointLights,pointLights.data(),sceneLightInfo_.numPointLights * sizeof(PointLight));
 }
 
 void NewRenderer::setEntityRenderList(std::vector<EntityRenderCmd>&& entityList)

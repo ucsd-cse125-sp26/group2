@@ -4284,8 +4284,8 @@ SDL_AppResult Game::iterate()
                 const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
                 dynLights.push_back(PointLight{
                     .position = lightStart + delta * t,
-                    .color = lightColor,
                     .intensity = 3.0f,
+                    .color = lightColor,
                     .range = 200.0f,
                 });
                 ++beamPointLights;

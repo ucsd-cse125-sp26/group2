@@ -10,8 +10,22 @@
 #include <cstddef>
 #include <vector>
 
+
+#define MAX_POINT_LIGHTS 4
+#define MAX_SHADOW_COUNT MAX_POINT_LIGHTS
+
 namespace Boilerplate
 {
+constexpr SDL_GPUColorTargetBlendState OVER_BLEND_MODE = {
+    .src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA,
+    .dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+    .color_blend_op = SDL_GPU_BLENDOP_ADD,
+
+    .src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE,
+    .dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+    .alpha_blend_op = SDL_GPU_BLENDOP_ADD,
+    .enable_blend = true,
+};
 /// @brief Descriptor for a single shader stage: file path, stage, and resource counts.
 struct ShaderInfo
 {
@@ -29,6 +43,22 @@ struct VertexInputLayout
     // Uint32 vertexPitch = 0;
     std::vector<SDL_GPUVertexBufferDescription> bufferDescriptions;
     std::vector<SDL_GPUVertexAttribute> attributes;
+};
+
+struct PipelineDescription
+{
+    const ShaderInfo* vertexShaderInfo = nullptr;
+    const ShaderInfo* fragmentShaderInfo = nullptr;
+
+    SDL_GPUShaderFormat shaderFormat;
+
+    const VertexInputLayout* vertexInputLayout = nullptr;
+    const SDL_GPUColorTargetDescription* colorTarget;
+
+    bool depthTest = false;
+    bool depthWrite = true;
+
+    SDL_GPUCullMode cullMode = SDL_GPU_CULLMODE_BACK;
 };
 
 /// @brief Describes a pending CPU-to-GPU buffer upload: target buffer, source data, and byte size.
@@ -68,7 +98,7 @@ SDL_GPUColorTargetInfo makeColorTargetLoad(SDL_GPUTexture* texture);
 /// @brief Create a depth/stencil render-target info that clears to depth 1.0.
 /// @param texture The depth texture.
 /// @return Populated SDL_GPUDepthStencilTargetInfo.
-SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture);
+SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture,Uint8 layer,bool store);
 
 /// @brief Create a texture-sampler binding pair for fragment shader use.
 /// @param texture The GPU texture.
@@ -126,6 +156,7 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 bool enableDepth = true,
                                                 bool overBlending = false);
 
+SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device, PipelineDescription pipelineDesc);
 /// @brief Allocate a GPU buffer of the given size and usage.
 /// @param device The GPU device.
 /// @param bufferSize Size in bytes.
@@ -156,6 +187,15 @@ void uploadBuffers(SDL_GPUDevice* device, SDL_GPUCommandBuffer* cmd, const std::
 /// @param device The GPU device.
 /// @param width Texture width in pixels.
 /// @param height Texture height in pixels.
+/// @param cube
+/// @param arraySize
+/// @return The created GPU texture, or nullptr on failure.
+SDL_GPUTexture* createEmptyTextureD32F(SDL_GPUDevice* device, Uint32 width, Uint32 height,bool cube, Uint32 arraySize);
+
+/// @brief Create a 2D RGBA8 texture and upload pixel data to it.
+/// @param device The GPU device.
+/// @param width Texture width in pixels.
+/// @param height Texture height in pixels.
 /// @param data Pointer to RGBA8 pixel data.
 /// @return The created GPU texture, or nullptr on failure.
 SDL_GPUTexture* createTextureRGBA8(SDL_GPUDevice* device, Uint32 width, Uint32 height, const void* data);
@@ -181,6 +221,11 @@ createSampledColorTarget(SDL_GPUDevice* device, Uint32 width, Uint32 height, SDL
 /// @param device The GPU device.
 /// @return The created GPU sampler.
 SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device);
+
+/// @brief Create a linear-filtering, comparison sampler (for shadow map depth comparison).
+/// @param device The GPU device.
+/// @return The created GPU sampler.
+SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device);
 
 /// @brief Create a linear-filtering, clamp-to-edge sampler.
 /// @param device The GPU device.

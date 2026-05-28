@@ -691,8 +691,11 @@ set(SHADER_NEW_OUT_DIR "${CMAKE_BINARY_DIR}/shaders-new")
 file(MAKE_DIRECTORY "${SHADER_NEW_OUT_DIR}")
 
 set(SHADER_NEW_SOURCES
+        geometry_depth.vert emtpy.frag
         skinned_geometry.vert debug.frag
         geometry.vert geometry.frag
+        geometry_shadowed.frag
+        debug_depth.vert debug_depth.frag
         hud.vert hud.frag
         fxaa.frag
 )
