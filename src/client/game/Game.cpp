@@ -2573,11 +2573,18 @@ SDL_AppResult Game::iterate()
                 });
             }
 
-            // Check ammo — don't spawn VFX if the magazine is empty.
+            // Grenade throw locks out fire VFX for its wind-up, exactly like reload.
+            bool grenadeThrowActive = false;
+            registry.view<LocalPlayer, GrenadeState>().each([&](const GrenadeState& grenades) {
+                const float elapsed = getGrenadeConfig(grenades.selected).throwCooldown - grenades.cooldown;
+                grenadeThrowActive = grenades.cooldown > 0.0f && elapsed >= 0.0f && elapsed < kGrenadeThrowAnimTime;
+            });
+
+            // Check ammo — don't spawn VFX if the magazine is empty or mid-reload/throw.
             bool hasAmmo = false;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
                 const GunInstance& gun = getEquippedGun(ws);
-                hasAmmo = gun.currentMagAmmo > 0 && !gun.isReloading;
+                hasAmmo = gun.currentMagAmmo > 0 && !gun.isReloading && !grenadeThrowActive;
                 if (gun.recoilHeat == 0.0f) {
                     localRecoilHeat_ = 0.0f;
                     recoilIdleTime_ = 0.0f;
