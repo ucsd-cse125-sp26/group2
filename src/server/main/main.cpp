@@ -322,6 +322,10 @@ int main(int argc, char* argv[])
         serverInfo.maxPlayers = static_cast<std::uint8_t>(std::clamp(config.maxPlayers, 2, 128));
         discoveryServer.updateInfo(serverInfo);
     });
+
+    // Discovery visibility is host-managed at runtime. Global discovery is
+    // gated in Server; LAN discovery owns a responder thread that must be
+    // started or stopped when the host changes the local-broadcast toggle.
     game.onDiscoverySettingsUpdated(
         [&discoveryServer, &server, &serverInfo, &lanDiscoveryRunning, &cfg](const DiscoverySettings& settings) {
             cfg.discovery.advertiseServer = settings.advertiseGlobal;

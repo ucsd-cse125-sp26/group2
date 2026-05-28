@@ -19,8 +19,8 @@ struct HostConfigState
     bool useSpecificPort;        ///< True when the user explicitly selected a port.
     bool useLegacyTcp;           ///< True to force the hosted server to legacy TCP transport.
     bool persistAfterClientExit; ///< UI-only persistence request; not wired yet.
-    bool advertiseGlobal;        ///< True to publish the hosted server to the global directory.
-    bool advertiseLan;           ///< True to respond to LAN discovery requests.
+    bool advertiseGlobal;        ///< Initial global-directory visibility for the hosted server.
+    bool advertiseLan;           ///< Initial LAN-discovery visibility for the hosted server.
     std::string serverName;      ///< Name advertised in LAN/global server browsers for this hosted session.
     int killsToWin;              ///< Match config: kill threshold to win, sent to the server on launch and update.
     int maxPlayers;              ///< Match config: maximum number of connected players accepted by the server.

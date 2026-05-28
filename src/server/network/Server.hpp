@@ -160,6 +160,7 @@ public:
     /// @return False if the client isn't currently connected.
     bool sendLobbyStateToClient(ClientId clientId, const std::vector<LobbyPlayer>& players);
 
+    /// @brief Unicast the current match settings to a single client.
     bool sendMatchConfigToClient(ClientId clientId, const MatchConfig& config);
 
     /// @brief Update the authoritative client admission cap.
@@ -414,7 +415,7 @@ private:
     Uint64 lastDirectoryHeartbeatMs_ = 0;
     std::uint32_t nextChatServerSeq_ = 0;
     std::atomic<int> maxPlayers_{128};
-    std::atomic<bool> advertiseServer_{true};
+    std::atomic<bool> advertiseServer_{true}; ///< Runtime global-directory heartbeat toggle.
     bool usingUdpSession_ = false;
     Uint16 listenPort_ = 0;
     std::unordered_map<std::uint64_t, ClientId> connIdToClient_; ///< UDP connection-id → ClientId lookup.

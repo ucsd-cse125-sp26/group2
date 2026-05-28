@@ -61,15 +61,28 @@ public:
     /// @brief Signal the loop to stop and release all resources.
     void shutdown();
 
+    /// @brief True if the given client currently owns host-only lobby/server controls.
     [[nodiscard]] bool isHost(ClientId clientId) const;
+
+    /// @brief Register a callback fired after the host updates match settings.
     void onMatchConfigUpdated(std::function<void(const MatchConfig&)> fn) { matchConfigUpdatedFn_ = std::move(fn); }
+
+    /// @brief Register a callback fired after the host updates discovery visibility.
     void onDiscoverySettingsUpdated(std::function<void(const DiscoverySettings&)> fn)
     {
         discoverySettingsUpdatedFn_ = std::move(fn);
     }
+
+    /// @brief Apply a complete match config to the authoritative match controller.
     bool setMatchConfig(const MatchConfig& config);
+
+    /// @brief Update only the kill threshold in the authoritative match config.
     bool setKillsToWin(int kills);
+
+    /// @brief Update only the maximum accepted player count in the authoritative match config.
     bool setMaxPlayers(int maxPlayers);
+
+    /// @brief Configure idle shutdown timeout in minutes; non-positive values disable it.
     bool setIdleShutdownMinutes(int minutes);
 
 private:
@@ -161,8 +174,9 @@ private:
     std::vector<AbilityType> matchSecondaryAbilities;
     LobbyManager lobbyManager;                      ///< Owns lobby roster and validates host-initiated match starts.
     MatchController matchController;                ///< Manages match flow and state.
-    std::function<void(const MatchConfig&)> matchConfigUpdatedFn_;
-    std::function<void(const DiscoverySettings&)> discoverySettingsUpdatedFn_;
+    std::function<void(const MatchConfig&)> matchConfigUpdatedFn_; ///< Mirrors match updates to networking/discovery.
+    std::function<void(const DiscoverySettings&)>
+        discoverySettingsUpdatedFn_;                               ///< Mirrors discovery visibility changes.
     bool lobbyStartCountdownActive = false; ///< True while lobby is counting down before entering match countdown.
     float lobbyStartCountdownTimer = 0.0f;  ///< Seconds remaining in the lobby staging countdown.
     ClientId lobbyStartRequester{-1};       ///< Host that requested the active lobby staging countdown.

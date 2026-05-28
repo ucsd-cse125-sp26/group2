@@ -158,7 +158,11 @@ public:
     /// @brief Send an updated match configuration to the server (host-only).
     bool sendMatchConfig(const MatchConfig& config);
 
-    /// @brief Send updated discovery advertisement settings to the server (host-only).
+    /// @brief Send updated discovery advertisement settings to the server.
+    ///
+    /// The server applies this only when the sender is the current lobby host.
+    /// The packet controls whether the server publishes to the global directory
+    /// and whether it responds to LAN discovery requests.
     bool sendDiscoverySettings(const DiscoverySettings& settings);
 
     /// @brief Request server shutdown. The server accepts this only from the current host.
