@@ -481,6 +481,18 @@ private:
     float cameraRecoilTargetDecay_ = 5.0f;  ///< Idle-recovery decay rate (1/s). Higher = faster snap-back.
     float cameraRecoilIdleThreshold_ = 0.18f; ///< Seconds off-trigger before target starts decaying.
 
+    // Recovery model — switch live between:
+    //   A) No recovery (CS-style). Aim stays where the recoil walked it; the
+    //      player owns 100% of the pull-down.
+    //   B) Compensated recovery (Apex-like). Auto-recovers after fire-off, BUT
+    //      while firing we measure the player's counter-mouse and subtract it
+    //      from the recovery debt — so the engine refunds only the un-paid
+    //      portion. Avoids the "double-compensation" crosshair-drop bug.
+    bool useRecoilCompensation_ = true;     ///< false = Approach A; true = Approach B.
+    float lastSnapPitchAfterCommit_ = 0.0f; ///< snap.pitch saved at end of last spring tick — diff against
+    float lastSnapYawAfterCommit_ = 0.0f;   ///< current to recover the player's mouse delta this frame.
+    bool haveLastSnap_ = false;             ///< Becomes true after the first frame the local player exists.
+
     // Visual reload state
     float reloadDownwardOffset_ = 0.0f; ///< Downward offset for the reload animation
 

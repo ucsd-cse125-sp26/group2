@@ -4275,24 +4275,68 @@ SDL_AppResult Game::iterate()
             // Critically-damped second-order spring chases `cameraRecoilTarget*`,
             // and the per-frame delta is COMMITTED to the local player's
             // InputSnapshot.pitch/yaw — so raycasts, tracers, bullet-holes, and
-            // the replicated aim all actually drift with the recoil. The spring
-            // is just the delivery shape; the offset is authoritative.
+            // the replicated aim all actually drift with the recoil.
             //
-            // Target accumulates per-shot during sustained fire and only decays
-            // toward 0 after `recoilIdleTime_` exceeds the idle threshold — that
-            // produces auto-recovery without fighting an active burst.
+            // Recovery model is selectable via `useRecoilCompensation_`:
+            //   A) false → target never decays. Aim stays where recoil walked it
+            //      (CS-style; player must pull down to correct).
+            //   B) true  → during active fire, the player's counter-mouse is
+            //      subtracted from the target (debt-tracked compensation); after
+            //      `recoilIdleTime_` exceeds the idle threshold, target decays
+            //      toward 0 and the spring drags the aim back through whatever
+            //      debt remained un-paid. This is the Apex-like model.
             {
                 const float dt = frameTime;
                 const float omega = cameraRecoilOmega_;
                 const float k = omega * omega;
                 const float c = 2.0f * omega;
 
-                if (recoilIdleTime_ > cameraRecoilIdleThreshold_) {
+                // 1) Read current snap and recover the player's mouse delta since
+                //    our last commit. Anything that moved snap.pitch/yaw between
+                //    end-of-last-frame and now that we did NOT do ourselves is by
+                //    definition the player's mouse input.
+                float currentSnapPitch = 0.0f, currentSnapYaw = 0.0f;
+                bool foundSnap = false;
+                registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
+                    currentSnapPitch = snap.pitch;
+                    currentSnapYaw = snap.yaw;
+                    foundSnap = true;
+                });
+
+                float mouseDeltaPitch = 0.0f, mouseDeltaYaw = 0.0f;
+                if (foundSnap && haveLastSnap_) {
+                    mouseDeltaPitch = currentSnapPitch - lastSnapPitchAfterCommit_;
+                    mouseDeltaYaw = currentSnapYaw - lastSnapYawAfterCommit_;
+                }
+
+                // 2) Approach B only — during active fire, subtract player's
+                //    counter-mouse from the target. Movement in the OPPOSITE
+                //    direction of the displacement reduces what's owed back.
+                //    Capped so it can only drive target toward zero, never past.
+                if (useRecoilCompensation_ && recoilIdleTime_ < cameraRecoilIdleThreshold_) {
+                    auto compensate = [](float& target, float playerDelta) {
+                        if (target == 0.0f || playerDelta == 0.0f)
+                            return;
+                        if ((target < 0.0f && playerDelta > 0.0f) ||
+                            (target > 0.0f && playerDelta < 0.0f)) {
+                            const float maxComp = std::min(std::abs(playerDelta), std::abs(target));
+                            target += (target < 0.0f) ? maxComp : -maxComp;
+                        }
+                    };
+                    compensate(cameraRecoilTargetPitch_, mouseDeltaPitch);
+                    compensate(cameraRecoilTargetYaw_, mouseDeltaYaw);
+                }
+
+                // 3) Approach B only — idle target decay (the recovery itself).
+                //    Approach A never decays; spring just asymptotes to the
+                //    final accumulated debt and the aim stays kicked.
+                if (useRecoilCompensation_ && recoilIdleTime_ > cameraRecoilIdleThreshold_) {
                     const float targetDecay = std::exp(-cameraRecoilTargetDecay_ * dt);
                     cameraRecoilTargetPitch_ *= targetDecay;
                     cameraRecoilTargetYaw_ *= targetDecay;
                 }
 
+                // 4) Spring step (always — drives `current → target`).
                 auto stepSpring = [&](float& x, float& v, float target) {
                     const float a = -k * (x - target) - c * v;
                     v += a * dt;
@@ -4301,24 +4345,23 @@ SDL_AppResult Game::iterate()
                 stepSpring(cameraRecoilPitch_, cameraRecoilPitchVel_, cameraRecoilTargetPitch_);
                 stepSpring(cameraRecoilYaw_, cameraRecoilYawVel_, cameraRecoilTargetYaw_);
 
-                // Commit the per-frame change in spring offset to the local
-                // player's actual aim. The spring is monotonic during a burst
-                // (deflecting aim) and reverses sign during recovery (bringing
-                // aim back to pre-burst). NOTE: snap convention is pitch- = up,
-                // and our per-shot push does `target -= pitchKick`, so deltas
-                // here will be negative going into a burst and positive on
-                // recovery — assigning straight into snap is correct.
+                // 5) Commit the per-frame change in spring offset to the local
+                //    player's actual aim, and save the post-commit snap value
+                //    so next frame's mouse-delta math is correct.
                 if (useSpringCameraRecoil_) {
                     const float dPitch = cameraRecoilPitch_ - committedRecoilPitch_;
                     const float dYaw = cameraRecoilYaw_ - committedRecoilYaw_;
-                    if (std::abs(dPitch) > 0.0f || std::abs(dYaw) > 0.0f) {
-                        registry.view<LocalPlayer, InputSnapshot>().each([&](InputSnapshot& snap) {
+                    registry.view<LocalPlayer, InputSnapshot>().each([&](InputSnapshot& snap) {
+                        if (std::abs(dPitch) > 0.0f || std::abs(dYaw) > 0.0f) {
                             snap.pitch += dPitch;
                             snap.yaw += dYaw;
                             snap.pitch =
                                 std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
-                        });
-                    }
+                        }
+                        lastSnapPitchAfterCommit_ = snap.pitch;
+                        lastSnapYawAfterCommit_ = snap.yaw;
+                        haveLastSnap_ = true;
+                    });
                     committedRecoilPitch_ = cameraRecoilPitch_;
                     committedRecoilYaw_ = cameraRecoilYaw_;
                 }
@@ -4728,6 +4771,15 @@ SDL_AppResult Game::iterate()
 
             ImGui::SeparatorText("Camera Recoil (Apex spring — commits to aim)");
             ImGui::Checkbox("Spring path (un-check = legacy instant snap-pitch)", &useSpringCameraRecoil_);
+            {
+                static const char* k_modes[] = {
+                    "A: No recovery (CS-style; pull-down is yours)",
+                    "B: Compensated recovery (Apex-like; debt-tracked)",
+                };
+                int modeIdx = useRecoilCompensation_ ? 1 : 0;
+                if (ImGui::Combo("Recovery mode", &modeIdx, k_modes, IM_ARRAYSIZE(k_modes)))
+                    useRecoilCompensation_ = (modeIdx == 1);
+            }
             ImGui::DragFloat("Spring omega (rad/s)", &cameraRecoilOmega_, 0.5f, 4.0f, 80.0f, "%.1f");
             ImGui::DragFloat("Recovery decay (1/s)", &cameraRecoilTargetDecay_, 0.25f, 0.5f, 30.0f, "%.2f");
             ImGui::DragFloat("Idle threshold (s)", &cameraRecoilIdleThreshold_, 0.01f, 0.0f, 1.5f, "%.2f");
