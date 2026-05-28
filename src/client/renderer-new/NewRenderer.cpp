@@ -333,7 +333,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
     //constexpr uint32_t shadowSize = 2048;
     // constexpr uint32_t shadowSize = 1024;
-     constexpr uint32_t shadowSize = 512;
+     constexpr uint32_t shadowSize = 1024;
     constexpr Uint8 numCubeFaces = 6;
 
     static glm::vec3 cubeFaceTargets[numCubeFaces];
