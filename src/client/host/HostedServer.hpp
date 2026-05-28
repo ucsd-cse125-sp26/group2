@@ -19,6 +19,11 @@ struct HostConfigState
     bool useSpecificPort;        ///< True when the user explicitly selected a port.
     bool useLegacyTcp;           ///< True to force the hosted server to legacy TCP transport.
     bool persistAfterClientExit; ///< UI-only persistence request; not wired yet.
+    bool advertiseGlobal;        ///< Initial global-directory visibility for the hosted server.
+    bool advertiseLan;           ///< Initial LAN-discovery visibility for the hosted server.
+    std::string serverName;      ///< Name advertised in LAN/global server browsers for this hosted session.
+    int killsToWin;              ///< Match config: kill threshold to win, sent to the server on launch and update.
+    int maxPlayers;              ///< Match config: maximum number of connected players accepted by the server.
 };
 
 /// @brief Reserved metadata for an active hosted session.
@@ -35,17 +40,23 @@ public:
     /// @return True once the child server reports its bound port.
     bool start(const HostConfigState& config, std::string& outError);
 
-    /// @brief Stop the hosted server unless it has been detached for persistence.
+    /// @brief Stop the locally owned hosted server process.
     void shutdown();
 
-    /// @brief True if the child server process is still running.
+    /// @brief True if the app still owns a child server process.
     bool isRunning();
 
     /// @brief Actual server port reported by the child process, or 0 when not running.
     uint16_t port();
 
+    /// @brief True when this client has launched a hosted session and still knows its port.
+    bool hasSession() const;
+
+    /// @brief Forget hosted-session metadata after a confirmed local or remote shutdown.
+    void clearSession();
+
 private:
-    /// @brief Detach the child process so it can continue after the client exits.
+    /// @brief Drop local ownership of a persistent server after successful launch.
     void detachForPersistence();
 #if defined(_WIN32)
     void* childProcess = nullptr; ///< Native Windows process handle for the hosted server.

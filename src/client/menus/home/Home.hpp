@@ -25,6 +25,7 @@ struct JoinRequest
     std::string serverIp;        ///< Hostname or IP address of the target server.
     uint16_t serverPort;         ///< TCP port of the target server.
     uint32_t globalServerId = 0; ///< Directory server id, or 0 for manual join.
+    std::string serverName;      ///< Display name shown in the lobby after joining.
 };
 
 /// @brief IScreen implementation for the main menu; hosts the server join form.

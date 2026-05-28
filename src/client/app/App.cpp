@@ -40,6 +40,8 @@ const char* connectErrorLogName(ConnectError error)
         return "connect timed out";
     case ConnectError::ConnectFailed:
         return "connect failed";
+    case ConnectError::LobbyFull:
+        return "lobby full";
     }
 
     return "unknown";
@@ -54,6 +56,8 @@ const char* joinErrorMessage(ConnectError error)
     case ConnectError::ResolveTimedOut:
     case ConnectError::ConnectTimedOut:
         return "Connection timed out";
+    case ConnectError::LobbyFull:
+        return "Lobby full";
     default:
         return "Failed to connect to server";
     }
@@ -103,6 +107,10 @@ bool App::init()
         hostConfigState.port = networkConfig.serverNetwork.port;
         hostConfigState.useSpecificPort = false;
         hostConfigState.useLegacyTcp = false;
+        hostConfigState.advertiseGlobal = networkConfig.discovery.advertiseServer;
+        hostConfigState.advertiseLan = networkConfig.discovery.lanBroadcastEnabled;
+        hostConfigState.serverName = networkConfig.discovery.serverName;
+        hostConfigState.maxPlayers = networkConfig.discovery.maxPlayers;
     }
 
     // Pull user-specific settings once; App owns the live copy while screens borrow it.
@@ -239,6 +247,7 @@ SDL_AppResult App::iterate()
                 home->setJoinError(joinErrorMessage(connectError));
             } else {
                 SDL_Log("Successfully connected to server at %s:%d", serverIp.c_str(), serverPort);
+                currentServerName = joinRequest->serverName.empty() ? serverIp : joinRequest->serverName;
                 transitionTo(Screen::Lobby);
             }
         }
@@ -280,22 +289,30 @@ SDL_AppResult App::iterate()
                 hostedServer.shutdown();
             } else {
                 SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
+                currentServerName = config.serverName;
             }
         }
 
         if (hostConfig->consumeShutdownRequest()) {
-            client.shutdown();
-            if (hostedServer.isRunning()) {
+            if (client.isConnected()) {
+                if (!client.sendServerShutdown()) {
+                    hostConfig->setLaunchError("Failed to request server shutdown");
+                } else {
+                    hostedServer.clearSession();
+                }
+            } else if (hostedServer.isRunning()) {
                 hostedServer.shutdown();
+                hostedServer.clearSession();
             }
         }
 
-        if (hostConfig->consumeGoToLobbyRequest() && hostedServer.isRunning()) {
+        if (hostConfig->consumeGoToLobbyRequest() && (hostedServer.isRunning() || client.isConnected())) {
             transitionTo(Screen::Lobby);
             break;
         }
 
         if (hostConfig->consumeBackToHomeRequest()) {
+            client.shutdown();
             transitionTo(Screen::Home);
         }
         break;
@@ -464,6 +481,7 @@ AppContext App::screenContext()
         .developerConfig = developerConfig,
         .userSettings = userSettings,
         .userSettingsPath = userSettingsPath,
+        .currentServerName = currentServerName,
     };
 }
 

@@ -8,26 +8,27 @@
 
 #include <array>
 
-namespace {
+namespace
+{
 
 // Peacekeeper pattern: 1 centre + inner pentagon (×0.5) + outer pentagon (×1.0).
 // Both rings share the same 5 angles (72° spacing, top first). Order MUST
 // match the server's `k_offsets` in WeaponSystem.cpp exactly so each rendered
 // dot corresponds to the actual ray that was fired.
 constexpr std::array<std::pair<float, float>, 11> k_pelletPositions{{
-    { 0.0000f,  0.0000f}, // 0: centre
+    {0.0000f, 0.0000f}, // 0: centre
     // Inner pentagon (×0.5)
-    { 0.0000f,  0.5000f}, // 1: top
-    {-0.4755f,  0.1545f}, // 2: upper-left
+    {0.0000f, 0.5000f},   // 1: top
+    {-0.4755f, 0.1545f},  // 2: upper-left
     {-0.2939f, -0.4045f}, // 3: lower-left
-    { 0.2939f, -0.4045f}, // 4: lower-right
-    { 0.4755f,  0.1545f}, // 5: upper-right
+    {0.2939f, -0.4045f},  // 4: lower-right
+    {0.4755f, 0.1545f},   // 5: upper-right
     // Outer pentagon (×1.0)
-    { 0.0000f,  1.0000f}, // 6: top
-    {-0.9511f,  0.3090f}, // 7: upper-left
+    {0.0000f, 1.0000f},   // 6: top
+    {-0.9511f, 0.3090f},  // 7: upper-left
     {-0.5878f, -0.8090f}, // 8: lower-left
-    { 0.5878f, -0.8090f}, // 9: lower-right
-    { 0.9511f,  0.3090f}, //10: upper-right
+    {0.5878f, -0.8090f},  // 9: lower-right
+    {0.9511f, 0.3090f},   // 10: upper-right
 }};
 
 constexpr HudColor k_pelletMiss{0.92f, 0.92f, 0.92f, 1.0f}; // white

@@ -5,6 +5,8 @@
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "network/DiscoverySettings.hpp"
+#include "network/MatchConfig.hpp"
 
 #include <cstdint>
 #include <string>
@@ -44,11 +46,13 @@ struct VoiceFramePayload
 class Event
 {
 public:
-    ClientId clientId;                 ///< Originating client identifier.
+    ClientId clientId;                        ///< Originating client identifier.
     EventType type;
-    InputSnapshot movementIntent = {}; ///< Used when `type == Input`.
-    ShotIntentPayload shotIntent = {}; ///< Used when `type == ShotIntent` (PR-27).
-    TextChatPayload textChat = {};     ///< Used when `type == TextChat`.
-    VoiceFramePayload voiceFrame = {}; ///< Used when `type == VoiceFrame`.
-    bool physicsDiagRecording = false; ///< Used when `type == PhysicsDiagRecording`.
+    InputSnapshot movementIntent = {};        ///< Used when `type == Input`.
+    ShotIntentPayload shotIntent = {};        ///< Used when `type == ShotIntent` (PR-27).
+    TextChatPayload textChat = {};            ///< Used when `type == TextChat`.
+    VoiceFramePayload voiceFrame = {};        ///< Used when `type == VoiceFrame`.
+    MatchConfig matchConfig = {};             ///< Used when `type == MatchConfigUpdated`.
+    DiscoverySettings discoverySettings = {}; ///< Used when `type == DiscoverySettingsUpdated`.
+    bool physicsDiagRecording = false;        ///< Used when `type == PhysicsDiagRecording`.
 };

@@ -1197,7 +1197,7 @@ void DebugUI::buildWeaponUI(const Registry& registry)
             ImGui::EndCombo();
         }
     };
-    slotCombo("Primary",   WeaponSlot::PRIMARY,   pendingSetPrimaryWeapon_);
+    slotCombo("Primary", WeaponSlot::PRIMARY, pendingSetPrimaryWeapon_);
     slotCombo("Secondary", WeaponSlot::SECONDARY, pendingSetSecondaryWeapon_);
 
     // Flag checked by Game::iterate() to refill ammo (registry is const here).

@@ -1088,6 +1088,7 @@ add_executable(group2
         src/client/menus/host/ui/HostConfigUI.cpp
         src/client/util/LocalAddress.hpp
         src/client/util/LocalAddress.cpp
+        src/network/MatchConfig.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

@@ -56,8 +56,8 @@ struct RagdollPbdJoint
     entt::entity bodyA{entt::null}; ///< Parent.
     entt::entity bodyB{entt::null}; ///< Child.
 
-    glm::vec3 localAnchorA{0.0f}; ///< Joint origin in parent local space.
-    glm::vec3 localAnchorB{0.0f}; ///< Joint origin in child local space.
+    glm::vec3 localAnchorA{0.0f};   ///< Joint origin in parent local space.
+    glm::vec3 localAnchorB{0.0f};   ///< Joint origin in child local space.
 
     Kind kind = Kind::Point;
 

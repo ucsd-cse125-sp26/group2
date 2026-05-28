@@ -11,11 +11,10 @@
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
 
-#include <glm/glm.hpp>
-
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <glm/glm.hpp>
 #include <iostream>
 #include <string_view>
 
@@ -243,8 +242,7 @@ bool testRagdollNeverDetachesUnderKick()
         physics::clampVelocities(registry);
 
         for (auto&& [_, j] : registry.view<physics::RagdollPbdJoint>().each()) {
-            const float err = glm::length(worldAnchor(j.bodyA, j.localAnchorA) -
-                                          worldAnchor(j.bodyB, j.localAnchorB));
+            const float err = glm::length(worldAnchor(j.bodyA, j.localAnchorA) - worldAnchor(j.bodyB, j.localAnchorB));
             maxAnchorErr = std::max(maxAnchorErr, err);
         }
     }
@@ -303,8 +301,8 @@ bool testAngularLimitsHold()
     const float relAngle = 2.0f * std::acos(w);
 
     if (relAngle > k_maxRelativeAngle) {
-        std::cerr << "FAILED: head-torso relative angle " << relAngle << " rad exceeds limit "
-                  << k_maxRelativeAngle << '\n';
+        std::cerr << "FAILED: head-torso relative angle " << relAngle << " rad exceeds limit " << k_maxRelativeAngle
+                  << '\n';
         systems::destroyRagdoll(registry, player);
         return false;
     }

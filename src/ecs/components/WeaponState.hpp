@@ -39,11 +39,11 @@ struct GunInstance
     int totalAmmo = 0;
     int currentMagAmmo = 0;
     float fireCooldown = 0.f;
-    float chargeTime = 0.f;     ///< Accumulated charge time (charge weapons only).
-    bool isReloading = false;   ///< True while reload is in progress
-    float reloadTime = 0.f;     ///< Time remaining to complete a reload
-    float recoilHeat = 0.f;     ///< Recoil heat (decays when not firing).
-    float recoilIdleTime = 0.f; ///< Time off trigger before decay starts.
+    float chargeTime = 0.f;              ///< Accumulated charge time (charge weapons only).
+    bool isReloading = false;            ///< True while reload is in progress
+    float reloadTime = 0.f;              ///< Time remaining to complete a reload
+    float recoilHeat = 0.f;              ///< Recoil heat (decays when not firing).
+    float recoilIdleTime = 0.f;          ///< Time off trigger before decay starts.
     bool firedSinceTriggerPress = false; ///< Semi-auto gate: blocks re-fire until trigger released.
 };
 

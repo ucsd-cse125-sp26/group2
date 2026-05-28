@@ -18,10 +18,7 @@ void runJumpPads(Registry& registry, float /*dt*/)
     auto padView = registry.view<JumpPad, Position, CollisionShape>();
     padView.each([&](const JumpPad& pad, const Position& padPos, const CollisionShape& padShape) {
         auto players = registry.view<Player, Position, CollisionShape, Velocity>();
-        players.each([&](entt::entity /*player*/,
-                         const Position& pos,
-                         const CollisionShape& shape,
-                         Velocity& vel) {
+        players.each([&](entt::entity /*player*/, const Position& pos, const CollisionShape& shape, Velocity& vel) {
             if (!overlapsAABB(padPos.value, padShape.halfExtents, pos.value, shape.halfExtents))
                 return;
 

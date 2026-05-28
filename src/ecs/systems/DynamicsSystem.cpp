@@ -3,8 +3,6 @@
 
 #include "ecs/systems/DynamicsSystem.hpp"
 
-#include "ecs/physics/RagdollPbd.hpp"
-
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/Orientation.hpp"
 #include "ecs/components/Position.hpp"
@@ -13,6 +11,7 @@
 #include "ecs/physics/ContactCache.hpp"
 #include "ecs/physics/Joints.hpp"
 #include "ecs/physics/PhysicsConstants.hpp"
+#include "ecs/physics/RagdollPbd.hpp"
 #include "ecs/physics/Sleep.hpp"
 #include "ecs/physics/Solver.hpp"
 #include "ecs/physics/SweptCollision.hpp"

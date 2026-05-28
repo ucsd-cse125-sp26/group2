@@ -234,8 +234,7 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
          .recoilKickRad = 0.05f,
          .rightHandHolds = {{
              // Locomotion: hand-tuned.
-             {.offset = {-12.69f, -8.23f, 22.32f},
-              .rotation = glm::quat(0.4410f, 0.5464f, 0.4894f, 0.5171f)},
+             {.offset = {-12.69f, -8.23f, 22.32f}, .rotation = glm::quat(0.4410f, 0.5464f, 0.4894f, 0.5171f)},
              k_crouchAnchor,
              k_airborneAnchor,
              k_slideAnchor,

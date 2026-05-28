@@ -18,7 +18,11 @@ bool Lobby::init(AppContext& ctx)
     renderer = &ctx.renderer;
     window = &ctx.window;
     client = &ctx.client;
-    isHosting = ctx.hostedServer.isRunning();
+    isHosting = ctx.hostedServer.hasSession();
+    serverName = std::string(ctx.currentServerName);
+    if (serverName.empty() && isHosting) {
+        serverName = ctx.hostConfigState.serverName;
+    }
     hostPort = ctx.hostedServer.port();
     hostLanIp = isHosting ? local_address::firstLanIPv4() : std::string{};
 
@@ -93,9 +97,18 @@ bool Lobby::init(AppContext& ctx)
             startMatchState = packet;
     });
 
+    client->onMatchConfig([this](const MatchConfig& config) {
+        SDL_Log("Lobby: match settings updated: killsToWin=%d maxPlayers=%d", config.killsToWin, config.maxPlayers);
+        matchConfig = config;
+    });
+
     if (const auto latestLobbyState = client->getLatestLobbyState()) {
         players = latestLobbyState->first;
         localClientId = latestLobbyState->second;
+    }
+
+    if (const auto latestMatchConfig = client->getLatestMatchConfig()) {
+        matchConfig = latestMatchConfig;
     }
 
     return true;
@@ -132,6 +145,8 @@ SDL_AppResult Lobby::iterate()
         .canStartMatch = canHostStartMatch() && !startCountdownActive,
         .startCountdownActive = startCountdownActive,
         .startCountdownRemaining = startCountdownRemaining,
+        .matchConfig = matchConfig,
+        .serverName = serverName,
         .isHosting = isHosting,
         .hostLanIp = hostLanIp,
         .hostPort = hostPort,
@@ -166,6 +181,7 @@ void Lobby::quit()
         client->onLobbyState({});
         client->onLobbyUpdate({});
         client->onMatchStateUpdate({});
+        client->onMatchConfig({});
     }
 }
 

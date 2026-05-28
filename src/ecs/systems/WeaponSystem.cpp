@@ -745,8 +745,7 @@ inline void handleFire(Registry& registry,
         // Phase 6 lag-compensated hitscan (see beam path for details).
         // PR-5: ray-filtered rewind. Rewind uses the central aim direction; all
         // pellets in a shotgun blast share the same rewound state.
-        const auto rewindGuard =
-            systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
+        const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, physics::k_hitscanRange);
 
         // Per-pellet resolver: runs the raycast, applies damage, emits the
         // tracer + impact events. Used once for normal hitscan and N times for
@@ -768,10 +767,9 @@ inline void handleFire(Registry& registry,
 
             float dealtDamage = 0.f;
             if (hit.entity != entt::null && registry.valid(hit.entity)) {
-                const float multiplier =
-                    defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
-                dealtDamage = applyDamage(
-                    config.damage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+                const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
+                dealtDamage =
+                    applyDamage(config.damage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
                 if (hit.region == BodyRegion::Head && combatLogEnabled()) {
                     SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",
                             static_cast<int>(shooter),
@@ -838,19 +836,19 @@ inline void handleFire(Registry& registry,
             // ShotgunPelletWidget's k_pelletPositions so widget colours line
             // up with the actual ray that was fired.
             static constexpr std::array<std::pair<float, float>, k_pelletCount> k_offsets{{
-                { 0.0000f,  0.0000f}, // 0: centre
+                {0.0000f, 0.0000f}, // 0: centre
                 // Inner pentagon (×0.5)
-                { 0.0000f,  0.5000f}, // 1: top
-                {-0.4755f,  0.1545f}, // 2: upper-left
+                {0.0000f, 0.5000f},   // 1: top
+                {-0.4755f, 0.1545f},  // 2: upper-left
                 {-0.2939f, -0.4045f}, // 3: lower-left
-                { 0.2939f, -0.4045f}, // 4: lower-right
-                { 0.4755f,  0.1545f}, // 5: upper-right
+                {0.2939f, -0.4045f},  // 4: lower-right
+                {0.4755f, 0.1545f},   // 5: upper-right
                 // Outer pentagon (×1.0)
-                { 0.0000f,  1.0000f}, // 6: top
-                {-0.9511f,  0.3090f}, // 7: upper-left
+                {0.0000f, 1.0000f},   // 6: top
+                {-0.9511f, 0.3090f},  // 7: upper-left
                 {-0.5878f, -0.8090f}, // 8: lower-left
-                { 0.5878f, -0.8090f}, // 9: lower-right
-                { 0.9511f,  0.3090f}, //10: upper-right
+                {0.5878f, -0.8090f},  // 9: lower-right
+                {0.9511f, 0.3090f},   // 10: upper-right
             }};
             const glm::vec3 worldUp{0.0f, 1.0f, 0.0f};
             // Avoid degenerate cross when looking nearly straight up/down.
@@ -861,8 +859,7 @@ inline void handleFire(Registry& registry,
             const float tanSpread = std::tan(k_spreadRad);
             for (int i = 0; i < k_pelletCount; ++i) {
                 const auto [ox, oy] = k_offsets[i];
-                const glm::vec3 pelletDir =
-                    glm::normalize(direction + tanSpread * (ox * rightAxis + oy * upAxis));
+                const glm::vec3 pelletDir = glm::normalize(direction + tanSpread * (ox * rightAxis + oy * upAxis));
                 resolvePellet(pelletDir, /*logCenter=*/i == 0);
             }
         } else {
@@ -963,8 +960,7 @@ void runWeapon(Registry& registry,
             g.recoilIdleTime = 0.f;
         };
         if (input.debugSetPrimaryWeapon >= 0) {
-            setSlotWeapon(getSlot(weapon, WeaponSlot::PRIMARY),
-                          static_cast<WeaponType>(input.debugSetPrimaryWeapon));
+            setSlotWeapon(getSlot(weapon, WeaponSlot::PRIMARY), static_cast<WeaponType>(input.debugSetPrimaryWeapon));
             input.debugSetPrimaryWeapon = -1;
         }
         if (input.debugSetSecondaryWeapon >= 0) {

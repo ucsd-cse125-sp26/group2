@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ecs/registry/Registry.hpp"
+#include "network/MatchConfig.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/Server.hpp"
 
@@ -31,6 +32,11 @@ public:
     /// @brief Return the winner's client ID, or -1 if no winner yet.
     int getWinnerId();
 
+    bool setMatchConfig(const MatchConfig& cfg);
+    bool setKillsToWin(int killsToWin);
+    bool setMaxPlayers(int maxPlayers);
+    [[nodiscard]] MatchConfig getMatchConfig() const;
+
 private:
     MatchPhase currentPhase = MatchPhase::LOBBY;       ///< Current phase of the match.
     float countdownTimer = 0.0f;                       ///< Seconds remaining in the current timed phase.
@@ -39,7 +45,8 @@ private:
 
     static constexpr float k_countdownDuration = 5.0f; ///< Seconds for the pre-match countdown.
     static constexpr float k_finishedDuration = 5.0f;  ///< Seconds to display results before reset.
-    static constexpr int k_killsToWin = 10;            ///< Kill threshold to win the match.
+
+    MatchConfig config; ///< Configuration for current match (e.g. kill threshold to win).
 
     // PR-4 (server-perf): match-state replicate-on-change.
     //
@@ -62,4 +69,8 @@ private:
     /// observable has changed since the last send.
     /// @param server  Network server for broadcasting.
     void broadcastMatchState(Server& server);
+
+    bool validateKillsToWin(int killsToWin);
+    bool validateMaxPlayers(int maxPlayers);
+    void broadcastMatchConfig(Server& server);
 };

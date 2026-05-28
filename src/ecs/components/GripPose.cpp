@@ -4,6 +4,7 @@
 #include "ecs/components/GripPose.hpp"
 
 #include <SDL3/SDL_log.h>
+
 #include <array>
 #include <cstdio>
 #include <filesystem>
@@ -74,19 +75,13 @@ void writeFingerSection(std::ofstream& f,
     for (std::size_t j = 0; j < kGripPoseBonesPerFinger; ++j) {
         const glm::vec2& a = angles[GripPose::index(fingerIdx, j)];
         char buf[96];
-        std::snprintf(buf,
-                      sizeof(buf),
-                      "  [%.2f, %.2f],\n",
-                      static_cast<double>(a.x),
-                      static_cast<double>(a.y));
+        std::snprintf(buf, sizeof(buf), "  [%.2f, %.2f],\n", static_cast<double>(a.x), static_cast<double>(a.y));
         f << buf;
     }
     f << "]\n\n";
 }
 
-void writeHandSection(std::ofstream& f,
-                      const char* handKey,
-                      const std::array<glm::vec2, kGripPoseJointCount>& angles)
+void writeHandSection(std::ofstream& f, const char* handKey, const std::array<glm::vec2, kGripPoseJointCount>& angles)
 {
     for (std::size_t fingerIdx = 0; fingerIdx < kGripPoseFingerCount; ++fingerIdx)
         writeFingerSection(f, handKey, k_fingerSectionNames[fingerIdx], angles, fingerIdx);

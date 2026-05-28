@@ -131,32 +131,48 @@ SDL_AppResult Home::iterate()
         } else {
             pendingJoinRequest = JoinRequest{.serverIp = joinMenuState.serverIp,
                                              .serverPort = static_cast<uint16_t>(joinMenuState.serverPort),
-                                             .globalServerId = 0};
+                                             .globalServerId = 0,
+                                             .serverName = joinMenuState.serverIp};
         }
     }
     if (result.globalServerIndex >= 0 && result.globalServerIndex < static_cast<int>(servers.size())) {
         const auto& server = servers[static_cast<std::size_t>(result.globalServerIndex)];
-        joinError.clear();
-        if (const auto* localMirror = findLocalMirror(server, localServers)) {
-            const std::string routeHost = localRouteHost(*localMirror);
-            SDL_Log("Home: global server '%s' is visible locally at %s:%u; using %s:%u",
-                    server.name.c_str(),
-                    localMirror->hostIp.c_str(),
-                    localMirror->gamePort,
-                    routeHost.c_str(),
-                    localMirror->gamePort);
-            pendingJoinRequest =
-                JoinRequest{.serverIp = routeHost, .serverPort = localMirror->gamePort, .globalServerId = 0};
+        if (server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers) {
+            joinError = "Lobby full";
         } else {
-            const std::string serverIp = server.udpHost.empty() ? server.host : server.udpHost;
-            const uint16_t serverPort = server.udpPort != 0 ? server.udpPort : server.gamePort;
-            pendingJoinRequest =
-                JoinRequest{.serverIp = serverIp, .serverPort = serverPort, .globalServerId = server.id};
+            joinError.clear();
+            if (const auto* localMirror = findLocalMirror(server, localServers)) {
+                const std::string routeHost = localRouteHost(*localMirror);
+                SDL_Log("Home: global server '%s' is visible locally at %s:%u; using %s:%u",
+                        server.name.c_str(),
+                        localMirror->hostIp.c_str(),
+                        localMirror->gamePort,
+                        routeHost.c_str(),
+                        localMirror->gamePort);
+                pendingJoinRequest = JoinRequest{.serverIp = routeHost,
+                                                 .serverPort = localMirror->gamePort,
+                                                 .globalServerId = 0,
+                                                 .serverName = server.name};
+            } else {
+                const std::string serverIp = server.udpHost.empty() ? server.host : server.udpHost;
+                const uint16_t serverPort = server.udpPort != 0 ? server.udpPort : server.gamePort;
+                pendingJoinRequest = JoinRequest{.serverIp = serverIp,
+                                                 .serverPort = serverPort,
+                                                 .globalServerId = server.id,
+                                                 .serverName = server.name};
+            }
         }
     } else if (result.localServerIndex >= 0 && result.localServerIndex < static_cast<int>(localServers.size())) {
         const auto& server = localServers[static_cast<std::size_t>(result.localServerIndex)];
-        joinError.clear();
-        pendingJoinRequest = JoinRequest{.serverIp = server.hostIp, .serverPort = server.gamePort, .globalServerId = 0};
+        if (server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers) {
+            joinError = "Lobby full";
+        } else {
+            joinError.clear();
+            pendingJoinRequest = JoinRequest{.serverIp = server.hostIp,
+                                             .serverPort = server.gamePort,
+                                             .globalServerId = 0,
+                                             .serverName = server.serverName};
+        }
     }
 
     ImGui::Render();

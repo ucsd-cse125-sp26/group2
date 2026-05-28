@@ -36,9 +36,11 @@ snapshot-hz = 128
 # screen, and relay fallback uses the same UDP service.
 enabled = true
 advertise-server = true
+lan-broadcast-enabled = true
 directory-host = "157.245.233.91"
 directory-udp-port = 10081
 server-name = "Palantir"
+# Default authoritative player cap for locally hosted servers.
 max-players = 8
 refresh-seconds = 5
 connect-punch-timeout-ms = 900

@@ -142,7 +142,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .recoilRampShots = 1.0f,
             .recoilRecovery = 30.0f,
             .recoilPatternScale = 0.0025f, // ~14.3° total vertical at full mag (100 units).
-        }, // Rifle
+        },                                 // Rifle
         WeaponConfig{
             .fireCooldown = 1.0f,
             .magazineSize = 4,
