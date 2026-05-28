@@ -15,10 +15,12 @@ enum class WeaponType : uint8_t
     RailGun,   ///< Hitscan energy weapon (beam + lightning arcs)
     EnergyGun, ///< Fast hitscan energy burst
     Shotgun,   ///< Peacekeeper-style pump: 9-pellet star spread, hitscan
-    HEGrenade, ///< Bouncy grenade with 3s fuse, lethal explosion
+    HEGrenade, ///< Bouncy grenade with 3s fuse, lethal explosion + big knockback
     Molotov,   ///< Impact-detonate, leaves a fire field (damage over time)
-    Impulse,   ///< Sticky 1s fuse, big knockback, no damage (movement tool)
+    Sticky,    ///< Sticks to first surface or player; guaranteed kill when stuck to a player
 };
+
+inline constexpr std::size_t kRenderableWeaponTypeCount = static_cast<std::size_t>(WeaponType::Shotgun) + 1;
 
 /// @brief Identifier for one of the player's weapon slots.
 ///

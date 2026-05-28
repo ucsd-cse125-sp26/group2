@@ -422,17 +422,24 @@ inline void captureShotDebug(Registry& registry,
 /// @brief Spawn a grenade projectile from the player's eye position.
 ///
 /// Computes a throw direction by rotating the eye direction upward by the
-/// configured pitch offset (so a perfectly horizontal aim still arcs).
+/// configured (small) pitch offset, then adds the thrower's velocity so a
+/// grenade thrown on the move inherits the player's momentum (Halo-style):
+/// moving forward extends the throw, backpedaling shortens it.
 /// Copies all flight-relevant fields from the grenade's GrenadeConfig into
 /// the new Projectile entity so CollisionSystem can dispatch on them.
-static void spawnGrenade(
-    Registry& registry, entt::entity shooter, WeaponType type, glm::vec3 muzzle, glm::vec3 eyeDir, glm::vec3 eyeRight)
+static void spawnGrenade(Registry& registry,
+                         entt::entity shooter,
+                         WeaponType type,
+                         glm::vec3 muzzle,
+                         glm::vec3 eyeDir,
+                         glm::vec3 eyeRight,
+                         glm::vec3 throwerVel)
 {
     const GrenadeConfig& cfg = getGrenadeConfig(type);
 
-    // Rotate eyeDir upward around eyeRight by `throwPitchOffset` rad.
-    // Negative angle: pitch-up reduces world Y rotation when right points to the player's right.
-    const glm::vec3 throwDir = glm::normalize(glm::angleAxis(-cfg.throwPitchOffset, eyeRight) * eyeDir);
+    // Rotate eyeDir upward around eyeRight by `throwPitchOffset` rad so the throw
+    // arcs slightly above the crosshair. Positive angle about eyeRight pitches up.
+    const glm::vec3 throwDir = glm::normalize(glm::angleAxis(cfg.throwPitchOffset, eyeRight) * eyeDir);
 
     const entt::entity proj = registry.create();
     registry.emplace<Projectile>(proj,
@@ -442,7 +449,7 @@ static void spawnGrenade(
                                      .owner = shooter,
                                      .explosive = false, // grenades route via fuse / impact, not the rocket path
                                      .currentLifeTime = 0.0f,
-                                     // Sticky grenades (Impulse) start with no fuse — CollisionSystem arms it on first
+                                     // Sticky grenades start with no fuse — CollisionSystem arms it on first
                                      // surface hit. Non-sticky grenades (HE w/ fuseTime=3.0; Molotov w/ fuseTime=-1 for
                                      // impact-detonate) use the config value directly.
                                      .fuseTimer = cfg.sticky ? -1.0f : cfg.fuseTime,
@@ -451,7 +458,7 @@ static void spawnGrenade(
                                      .tint = cfg.tint,
                                  });
     registry.emplace<Position>(proj, Position{.value = muzzle});
-    registry.emplace<Velocity>(proj, Velocity{.value = throwDir * cfg.throwSpeed});
+    registry.emplace<Velocity>(proj, Velocity{.value = throwDir * cfg.throwSpeed + throwerVel});
     registry.emplace<CollisionShape>(proj, CollisionShape{.halfExtents = {5.0f, 5.0f, 5.0f}});
 }
 
@@ -490,7 +497,10 @@ inline void handleGrenadeInput(Registry& registry,
         eyeRight = eyeRight * (1.0f / std::sqrt(eyeRightLen2));
     }
 
-    spawnGrenade(registry, shooter, type, muzzle, direction, eyeRight);
+    const Velocity* throwerVel = registry.try_get<Velocity>(shooter);
+    const glm::vec3 inheritVel = (throwerVel != nullptr) ? throwerVel->value : glm::vec3{0.0f};
+
+    spawnGrenade(registry, shooter, type, muzzle, direction, eyeRight, inheritVel);
     grenades.cooldown = getGrenadeConfig(type).throwCooldown;
     --grenadeAmmo(grenades, type);
 }
@@ -550,6 +560,7 @@ inline void handleFire(Registry& registry,
                        const CollisionShape& shape,
                        WeaponState& weapon,
                        bool gravityFlipped,
+                       bool grenadeThrowActive,
                        float dt,
                        std::vector<NetParticleEvent>& outParticles,
                        std::vector<NetKillEvent>& killEvents,
@@ -558,11 +569,12 @@ inline void handleFire(Registry& registry,
     GunInstance& gun = getEquippedGun(weapon);
     const WeaponConfig& config = getWeaponConfig(gun.type);
 
-    if (gun.isReloading) {
+    // Reloading and the grenade-throw wind-up both lock out firing.
+    if (gun.isReloading || grenadeThrowActive) {
         gun.recoilHeat = 0.0f;
         gun.recoilIdleTime = 0.0f;
         if (auto* beam = registry.try_get<BeamState>(shooter)) {
-            beam->active = false; // turn off beam visuals during reload
+            beam->active = false; // turn off beam visuals during reload / throw
         }
         return;
     }
@@ -913,6 +925,12 @@ void runWeapon(Registry& registry,
 
         handleScope(registry, shooter, input, weapon, dt);
 
+        // Firing is locked out during the throw wind-up (first kGrenadeThrowAnimTime
+        // seconds of the throw cooldown), mirroring the client viewmodel dip.
+        const float throwElapsed = getGrenadeConfig(grenades.selected).throwCooldown - grenades.cooldown;
+        const bool grenadeThrowActive =
+            grenades.cooldown > 0.0f && throwElapsed >= 0.0f && throwElapsed < kGrenadeThrowAnimTime;
+
         handleFire(registry,
                    shooter,
                    input,
@@ -920,6 +938,7 @@ void runWeapon(Registry& registry,
                    shape,
                    weapon,
                    vis.gravityFlipped,
+                   grenadeThrowActive,
                    dt,
                    outParticles,
                    killEvents,

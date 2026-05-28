@@ -84,7 +84,7 @@ void drawMolotovIcon(HudContext& ctx, float x, float y, float size, HudColor col
     ctx.triangle(x + 8.f * u, y + 0.5f * u, x + 11.f * u, y + 5.f * u, x + 6.f * u, y + 5.f * u, color);
 }
 
-void drawImpulseIcon(HudContext& ctx, float x, float y, float size, HudColor color)
+void drawStickyIcon(HudContext& ctx, float x, float y, float size, HudColor color)
 {
     using namespace voidfall::icons;
     const float cx = x + size * 0.5f;
@@ -97,8 +97,8 @@ void drawGrenadeTypeIcon(HudContext& ctx, const std::string& name, float x, floa
 {
     if (name == "MOLOTOV") {
         drawMolotovIcon(ctx, x, y, size, color);
-    } else if (name == "IMPULSE") {
-        drawImpulseIcon(ctx, x, y, size, color);
+    } else if (name == "STICKY") {
+        drawStickyIcon(ctx, x, y, size, color);
     } else {
         voidfall::icons::grenade(ctx, x, y, size, color);
     }
