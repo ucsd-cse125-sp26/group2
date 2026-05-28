@@ -125,18 +125,18 @@ struct DamageProfile
 {
     // clang-format off
     std::array<float, static_cast<size_t>(BodyRegion::Count)> multipliers = {{
-        4.00f,  // Head
-        2.00f,  // Neck
+        2.00f,  // Head
+        1.80f,  // Neck
         1.00f,  // UpperTorso
         1.00f,  // LowerTorso
-        0.90f,  // LeftUpperArm
-        0.90f,  // LeftLowerArm
-        0.90f,  // RightUpperArm
-        0.90f,  // RightLowerArm
-        0.75f,  // LeftUpperLeg
-        0.75f,  // LeftLowerLeg
-        0.75f,  // RightUpperLeg
-        0.75f,  // RightLowerLeg
+        1.00f,  // LeftUpperArm
+        1.00f,  // LeftLowerArm
+        1.00f,  // RightUpperArm
+        1.00f,  // RightLowerArm
+        1.00f,  // LeftUpperLeg
+        0.8f,  // LeftLowerLeg
+        0.8f,  // RightUpperLeg
+        0.8f,  // RightLowerLeg
     }};
     // clang-format on
 };

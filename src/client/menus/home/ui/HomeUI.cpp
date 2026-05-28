@@ -26,6 +26,10 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
         if (ImGui::Button("Join")) {
             result.connectClicked = true;
         }
+        ImGui::SameLine();
+        if (ImGui::Button("Host")) {
+            result.hostClicked = true;
+        }
         if (!errorMessage.empty()) {
             ImGui::Spacing();
             ImGui::TextColored(
@@ -51,9 +55,12 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImGui::Text("%u/%u", server.currentPlayers, server.maxPlayers);
                 ImGui::TableSetColumnIndex(3);
                 ImGui::PushID(i);
+                const bool lobbyFull = server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers;
+                ImGui::BeginDisabled(lobbyFull);
                 if (ImGui::SmallButton("Join")) {
                     result.localServerIndex = i;
                 }
+                ImGui::EndDisabled();
                 ImGui::PopID();
             }
 
@@ -85,7 +92,9 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImGui::TableSetColumnIndex(0);
                 ImGui::TextUnformatted(server.name.c_str());
                 ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%s:%u", server.host.c_str(), server.gamePort);
+                ImGui::Text("%s:%u",
+                            server.udpHost.empty() ? server.host.c_str() : server.udpHost.c_str(),
+                            server.udpPort != 0 ? server.udpPort : server.gamePort);
                 ImGui::TableSetColumnIndex(2);
                 ImGui::Text("%u/%u", server.currentPlayers, server.maxPlayers);
                 ImGui::TableSetColumnIndex(3);
@@ -94,9 +103,12 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImGui::Text("%llums", static_cast<unsigned long long>(server.lastSeenMs));
                 ImGui::TableSetColumnIndex(5);
                 ImGui::PushID(i);
+                const bool lobbyFull = server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers;
+                ImGui::BeginDisabled(lobbyFull);
                 if (ImGui::SmallButton("Join")) {
                     result.globalServerIndex = i;
                 }
+                ImGui::EndDisabled();
                 ImGui::PopID();
             }
 

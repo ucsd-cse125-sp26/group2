@@ -49,23 +49,16 @@ inline bool queueAbilityChoice(AbilityState& state)
         return false;
     }
 
-    if (state.level < maxLevel) {
-        state.level += 1;
-        if (state.level == 1) {
-            state.pendingLevel1 = true;
-        } else {
-            state.pendingLevel2 = true;
-            state.nextReselectSlot = AbilitySlot::Primary;
-        }
-        return true;
+    if (state.level >= maxLevel) {
+        state.level = maxLevel;
+        return false;
     }
 
-    if (state.nextReselectSlot == AbilitySlot::Primary) {
+    state.level += 1;
+    if (state.level == 1) {
         state.pendingLevel1 = true;
-        state.nextReselectSlot = AbilitySlot::Secondary;
     } else {
         state.pendingLevel2 = true;
-        state.nextReselectSlot = AbilitySlot::Primary;
     }
 
     return true;
@@ -87,7 +80,7 @@ void grantAbilityProgress(AbilityState& state, float amount)
     state.accumDamage += amount;
     while (state.accumDamage >= dmgThreshold) {
         if (!queueAbilityChoice(state)) {
-            state.accumDamage = dmgThreshold;
+            state.accumDamage = state.level >= maxLevel ? 0.0f : dmgThreshold;
             return;
         }
         state.accumDamage -= dmgThreshold;

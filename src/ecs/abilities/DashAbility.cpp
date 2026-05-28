@@ -80,7 +80,6 @@ void DashAbility::activate(entt::entity player, Registry& registry)
     vis.grappleActive = false;
     vis.moveMode = MoveMode::OnFoot;
     vis.exitingWall = false;
-    vis.exitingClimb = false;
 
     setAbilityCooldown(abilState, type(), cooldown());
 }

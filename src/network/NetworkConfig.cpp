@@ -3,6 +3,8 @@
 
 #include "NetworkConfig.hpp"
 
+#include "ServerName.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <toml++/toml.hpp>
@@ -52,6 +54,8 @@ NetworkConfig loadNetworkConfig(const char* path)
         cfg.transport.allowLegacyTcpFallback = *v;
     if (auto v = transport["force-relay"].value<bool>())
         cfg.transport.forceRelay = *v;
+    if (auto v = transport["no-relay"].value<bool>())
+        cfg.transport.noRelay = *v;
     if (auto v = transport["enable-udp-sidecar"].value<bool>())
         cfg.transport.enableUdpSidecar = *v;
     if (auto v = transport["inputs-over-udp"].value<bool>())
@@ -68,6 +72,10 @@ NetworkConfig loadNetworkConfig(const char* path)
         cfg.discovery.enabled = *v;
     if (auto v = discovery["advertise-server"].value<bool>())
         cfg.discovery.advertiseServer = *v;
+    if (auto v = discovery["lan-broadcast-enabled"].value<bool>())
+        cfg.discovery.lanBroadcastEnabled = *v;
+    if (auto v = discovery["lan-broadcast-port"].value<uint16_t>())
+        cfg.discovery.lanBroadcastPort = *v;
     if (auto v = discovery["directory-host"].value<std::string>())
         cfg.discovery.directoryHost = *v;
     if (auto v = discovery["directory-tcp-port"].value<uint16_t>())
@@ -75,9 +83,9 @@ NetworkConfig loadNetworkConfig(const char* path)
     if (auto v = discovery["directory-udp-port"].value<uint16_t>())
         cfg.discovery.directoryUdpPort = *v;
     if (auto v = discovery["server-name"].value<std::string>())
-        cfg.discovery.serverName = *v;
+        cfg.discovery.serverName = server_name::sanitize(*v);
     if (auto v = discovery["max-players"].value<int>())
-        cfg.discovery.maxPlayers = static_cast<uint8_t>(std::clamp(*v, 0, 255));
+        cfg.discovery.maxPlayers = static_cast<uint8_t>(std::clamp(*v, 2, 128));
     if (auto v = discovery["refresh-seconds"].value<int>())
         cfg.discovery.refreshSeconds = std::clamp(*v, 1, 60);
     if (auto v = discovery["connect-punch-timeout-ms"].value<int>())

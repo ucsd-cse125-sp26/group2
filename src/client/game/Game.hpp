@@ -8,14 +8,24 @@
 #include "animation/AnimationTesterUI.hpp"
 #include "animation/CharacterRig.hpp"
 #include "animation/SkinningBackend.hpp"
+#include "app/AppContext.hpp"
+#include "debug/ClientPerfRecorder.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
 #include "ecs/AssetRegistry.hpp"
+#include "ecs/components/GripPose.hpp"
 #include "ecs/components/Hitbox.hpp"
+#include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/PlayerSimState.hpp"
+#include "ecs/components/PlayerVisState.hpp"
+#include "ecs/components/Position.hpp"
+#include "ecs/components/PreviousPosition.hpp"
+#include "ecs/components/Velocity.hpp"
 #include "ecs/components/ViewmodelConfig.hpp"
 #include "ecs/physics/MapLoader.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "hud/Hud.hpp"
+#include "menus/pause/PauseMenu.hpp"
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/RegistrySerialization.hpp"
@@ -34,6 +44,7 @@
 #include <cstdint>
 #include <deque>
 #include <entt/entt.hpp>
+#include <filesystem>
 #include <glm/glm.hpp>
 #include <memory>
 #include <optional>
@@ -50,11 +61,11 @@ class Game : public IScreen
 {
 public:
     /// @brief Create the Game-owned ImGui context before App initialises the renderer backend.
-    bool initDebugUI(SDL_Window* windowPtr);
+    bool initDebugUI(const AppContext& ctx);
 
     /// @brief Initialise all subsystems and spawn the local player entity.
     /// @return False on any fatal initialisation error.
-    bool init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr);
+    bool init(AppContext& ctx);
 
     /// @brief Forward an SDL event to ImGui and handle application-level keys.
     /// @param event  The SDL event to process.
@@ -99,6 +110,12 @@ public:
     /// @brief True once the server has returned the match phase to the lobby.
     bool shouldReturnToLobby() const;
 
+    /// @brief True if the user requested leaving the match for the main menu, then clear that request.
+    bool consumeReturnToMainMenu();
+
+    /// @brief True if the main-menu return was caused by the server connection closing, then clear that reason.
+    bool consumeServerShutdownNotice();
+
     /// @brief Shut down all subsystems in reverse-init order.
     void quit() override;
 
@@ -113,6 +130,8 @@ public:
 
     /// @brief Reset Renderable visibility for players transitioning through respawn.
     void refreshRemoteRespawnRenderables();
+
+    /// @brief Assign or update Renderable components for replicated powerup entities.
     void refreshRemotePowerupRenderables();
 
     /// @brief Assign Renderable components to dropped-weapon entities (mirrors spawner visuals).
@@ -125,11 +144,53 @@ private:
         std::uint32_t snapshotTick, const std::uint8_t* bytes, Uint32 size, Uint64 captureNs, std::uint32_t& ackedTick);
     /// @brief Emplace player-control components onto the mapped local entity and record it.
     void handleLocalPlayerReady(entt::entity local);
+
+    struct PredictedPlayerState
+    {
+        std::uint32_t tick = 0;
+        Position position{};
+        PreviousPosition previousPosition{};
+        Velocity velocity{};
+        PlayerVisState vis{};
+        PlayerSimState sim{};
+        InputSnapshot input{};
+        bool valid = false;
+    };
+
+    struct ReconciliationDecision
+    {
+        bool skip = false;
+        bool missingHistory = false;
+        float positionError = 0.0f;
+        float velocityError = 0.0f;
+    };
+
+    void clearPredictedStateHistory() noexcept;
+    void storePredictedPlayerState(std::uint32_t tick);
+    [[nodiscard]] std::optional<PredictedPlayerState> captureLocalPredictedState() const;
+    [[nodiscard]] const PredictedPlayerState* predictedStateForTick(std::uint32_t tick) const noexcept;
+    void restoreLocalPredictedState(const PredictedPlayerState& state);
+    [[nodiscard]] ReconciliationDecision
+    evaluateReconciliationSkip(const PredictedPlayerState& authoritative,
+                               const PredictedPlayerState* predictedAtAck,
+                               const std::optional<PredictedPlayerState>& currentBeforeSnapshot) const noexcept;
+
+    /// @brief Enter chat input mode and release normal gameplay input capture.
     void openChat();
+
+    /// @brief Leave chat input mode and restore normal gameplay input capture.
     void closeChat();
+
+    /// @brief Send the current chat draft to the server and close the chat box.
     void submitChat();
+
+    /// @brief Queue a replicated chat message for HUD display.
     void appendChatMessage(ClientId sender, std::string_view message);
+
+    /// @brief Queue a locally-authored chat echo while waiting for server replication.
     void appendLocalChatMessage(std::string_view message);
+
+    /// @brief Clear held gameplay actions so typing chat cannot leak into movement or weapons.
     void clearGameplayInputForChat();
 
     static constexpr int k_physicsHz = 128;                                      ///< Target physics tick rate.
@@ -150,6 +211,8 @@ private:
     NewRenderer* renderer = nullptr;                               ///< Borrowed renderer owned by App.
     Registry registry;                                             ///< The shared ECS registry.
     Client* client = nullptr;                                      ///< Borrowed UDP network client owned by App.
+    UserSettings* userSettings = nullptr;                          ///< Borrowed user settings owned by App.
+    std::string_view userSettingsPath_;                            ///< Borrowed save path for user settings.
     std::optional<registry_serialization::Loader> snapshotLoader_; ///< Incremental loader; created on first snapshot.
     std::optional<entt::entity>
         mappedLocalPlayerEntity_;  ///< Local-registry entity for this client's player, once assigned.
@@ -186,6 +249,8 @@ private:
     /// runReconciliation can look up the input that was sent for any
     /// recent tick and feed it back into runMovement during replay.
     InputRingBuffer inputRing_;
+
+    std::array<PredictedPlayerState, InputRingBuffer::k_capacity> predictedStateHistory_{};
     bool mouseCaptured = true; ///< True when relative mouse mode is active.
 
     /// @brief Currently-bound gamepad, or nullptr if none is plugged in.
@@ -232,6 +297,7 @@ private:
 
     // Runtime-tunable loop settings (exposed via ImGui)
     float mouseSensitivity = 0.0007f;      ///< Radians per pixel of mouse movement.
+    float horizontalFovDegrees = 90.0f;    ///< Player-facing horizontal camera field of view in degrees.
     bool renderSeparateFromPhysics = true; ///< Render every iterate() with interpolation (true)
                                            ///  vs only after a physics tick (false).
     bool inputSyncedWithPhysics = true;    ///< Sample mouse once per physics tick (true)
@@ -263,8 +329,11 @@ private:
 
     // Legacy model index aliases (for code that still uses raw indices).
     // TODO: migrate all call sites to assets_.modelIndex("name") and remove these.
-    int weaponModelIndices_[4] = {-1, -1, -1, -1};
-    int weaponAssetIds_[4] = {-1, -1, -1, -1};
+    int weaponModelIndices_[kRenderableWeaponTypeCount] = {-1, -1, -1, -1, -1};
+    int weaponAssetIds_[kRenderableWeaponTypeCount] = {-1, -1, -1, -1, -1};
+    int viewmodelLeftHandModelIdx_ = -1;
+    int viewmodelRightHandModelIdx_ = -1;
+    int handMountDebugMarkerModelIdx_ = -1;
 
     int rocketProjectileModelIdx_ = -1;
 
@@ -296,6 +365,22 @@ private:
     bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
     SfxSystem::SourceHandle beamLoopHandle_ = SfxSystem::kInvalidSource;
     std::unordered_map<entt::entity, std::array<float, 5>> footstepPhases_;
+    std::unordered_map<entt::entity, float> footstepCooldowns_;
+
+    // Movement / ability transition tracking for SFX.
+    struct PlayerSfxState
+    {
+        bool initialized = false;
+        bool grounded = false;
+        bool isDead = false;
+        int moveMode = 0;
+        bool gravityFlipped = false;
+        bool grappleActive = false;
+        float primaryCooldown = 0.0f;
+        float secondaryCooldown = 0.0f;
+        SfxSystem::SourceHandle slideLoopHandle = SfxSystem::kInvalidSource;
+    };
+    std::unordered_map<entt::entity, PlayerSfxState> playerSfxState_;
 
     // Hitmarker
     float hitmarkerTimer_ = 0.0f;       ///< Remaining display time (fades out over this).
@@ -317,6 +402,16 @@ private:
     int accumTotal_ = 0;                    ///< Running damage total.
     float accumResetTimer_ = 0.f;           ///< Timer to reset accumulator after inactivity.
     uint8_t accumLastHitType_ = 0;          ///< 0=health(white), 1=shield(blue), 2=headshot(gold).
+
+    // Shotgun pellet accumulator — groups the 9 NetParticleEvents emitted per
+    // shotgun shot (by the server's WeaponSystem) into a single completed blast
+    // for the HUD ShotgunPelletWidget. The widget is fed via
+    // `HudGameState.latestShotgunBlast`, which is just a copy of
+    // `lastShotgunBlast_` updated each frame with elapsed time.
+    HudShotgunBlast shotgunPelletAccum_{}; ///< In-flight accumulator (resets when 9 pellets received).
+    int shotgunPelletAccumCount_ = 0;      ///< Pellets received for the current in-flight blast.
+    float shotgunPelletLastTimeSec_ = 0.f; ///< Game-time of the last pellet (for stale-reset).
+    HudShotgunBlast lastShotgunBlast_{};   ///< Most recently completed blast (staged for HUD).
 
     // Vignette state: track previous frame health/armor for delta detection.
     float prevHealth_ = 100.f;
@@ -376,29 +471,170 @@ private:
     float recoilPushBack_ = 0.0f; ///< Current recoil backward offset (Quake units).
     float recoilRoll_ = 0.0f;     ///< Current recoil roll offset (degrees).
 
+    // Apex-style spring-damped camera recoil (actually deflects aim — bullets drift).
+    // Each frame the spring integrates toward `target`, then the per-frame delta is
+    // committed to `InputSnapshot.pitch`/`yaw` on the local player so raycasts,
+    // tracers, bullet-holes, and the replicated aim all follow the recoil. Target
+    // accumulates per shot during sustained fire and only decays back toward 0
+    // after `recoilIdleTime_` exceeds the idle threshold — that's what produces
+    // the auto-recovery feel without fighting active firing.
+    bool useSpringCameraRecoil_ = true;         ///< Toggle Apex-spring path vs legacy instant snap-pitch write.
+    float cameraRecoilPitch_ = 0.0f;            ///< Spring current offset (radians; negative = looking up).
+    float cameraRecoilYaw_ = 0.0f;
+    float cameraRecoilPitchVel_ = 0.0f;         ///< Spring velocity (rad/s).
+    float cameraRecoilYawVel_ = 0.0f;
+    float cameraRecoilTargetPitch_ = 0.0f;      ///< Spring target; accumulates per shot, decays only when idle.
+    float cameraRecoilTargetYaw_ = 0.0f;
+    float committedRecoilPitch_ = 0.0f;         ///< Portion of `cameraRecoilPitch_` already added to snap.pitch.
+    float committedRecoilYaw_ = 0.0f;           ///< Each frame we commit `(current - committed)` and update.
+    float recoilPatternScaleMultiplier_ = 2.0f; ///< Live multiplier on WeaponConfig.recoilPatternScale.
+                                                ///< 1.0 = nominal; 2.0 = double recoil. Tune in debug UI.
+    float cameraRecoilOmega_ = 35.0f;           ///< Spring angular frequency (rad/s). Higher = snappier kick.
+    float cameraRecoilTargetDecay_ = 5.0f;      ///< Idle-recovery decay rate (1/s). Higher = faster snap-back.
+    float cameraRecoilIdleThreshold_ = 0.18f;   ///< Seconds off-trigger before target starts decaying.
+
+    // Recovery model — switch live between:
+    //   A) No recovery (CS-style). Aim stays where the recoil walked it; the
+    //      player owns 100% of the pull-down.
+    //   B) Compensated recovery (Apex-like). Auto-recovers after fire-off, BUT
+    //      while firing we measure the player's counter-mouse and subtract it
+    //      from the recovery debt — so the engine refunds only the un-paid
+    //      portion. Avoids the "double-compensation" crosshair-drop bug.
+    bool useRecoilCompensation_ = true;     ///< false = Approach A; true = Approach B.
+    float lastSnapPitchAfterCommit_ = 0.0f; ///< snap.pitch saved at end of last spring tick — diff against
+    float lastSnapYawAfterCommit_ = 0.0f;   ///< current to recover the player's mouse delta this frame.
+    bool haveLastSnap_ = false;             ///< Becomes true after the first frame the local player exists.
+
+    // Credit accumulator (Approach B). Each frame, the player's counter-mouse is
+    // banked into a signed credit (capped + slowly-decaying). The credit is then
+    // consumed against target — pre-payment of future kicks is preserved, and
+    // continued pull after fire-off still cancels recovery debt. Without this
+    // (cap-at-current-target naive comp), excess mouse input was wasted and the
+    // recovery refund overcompensated whatever debt remained.
+    float compensationCreditPitch_ = 0.0f;
+    float compensationCreditYaw_ = 0.0f;
+    float compensationCreditCap_ = 0.10f;  ///< Max banked credit (rad). ~5.7° per axis.
+    float compensationCreditDecay_ = 1.0f; ///< Credit decay rate (1/s); stale credit fades.
+
+    // Visual reload state
+    float reloadDownwardOffset_ = 0.0f;       ///< Downward offset for the reload animation
+    float grenadeThrowDownwardOffset_ = 0.0f; ///< Downward offset for the grenade-throw animation
+
     // Local weapon fire cooldown (mirrors server's per-weapon cooldown for VFX)
     float localFireCooldown_ = 0.0f; ///< Countdown timer; fire VFX only when <= 0.
+    float localRecoilHeat_ = 0.0f;
+    float recoilIdleTime_ = 0.0f;
 
-    int pendingScrollSwitch_ = 0;    ///< +1 = next slot, -1 = previous slot, consumed each frame.
+    int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = previous slot, consumed each frame.
 
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
-    ThirdPersonWeaponParams tpWeaponParams_[4]; ///< Runtime-tunable copy; initialised from defaults.
-    int tpTuneWeaponIdx_ = 0;                   ///< Which weapon type is being tuned.
-    bool showTPWeaponUI_ = false;               ///< Show the 3P Weapon Tweaker window.
+    ThirdPersonWeaponParams
+        tpWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from defaults.
+    int tpTuneWeaponIdx_ = 0;                        ///< Which weapon type is being tuned.
+    int tpAnchorTuneStanceIdx_ = 0;                  ///< Which HoldStance the right-hand anchor sliders are editing.
+    float tpAnchorRotStepDeg_ = 5.0f; ///< Delta-rotation step (degrees) for the gimbal-free anchor rotation buttons.
+    float tpAnchorWorldRotStepDeg_ = 5.0f; ///< Delta-rotation step (degrees) for the WORLD-space rotation buttons.
+    bool tpAnchorShowDebugMarker_ = true; ///< Render the red-cube anchor wish-point marker when the 3P tweaker is open.
+    bool tpEnableJointConstraints_ =
+        false; ///< Debug toggle: pass enableJointConstraints into the arm IK targets. Default OFF — current
+               ///< shoulder/elbow/wrist clamps don't contribute usefully and fight the anchor authoring; flip on
+               ///< per-session if testing extreme poses.
+    bool tpEnableReachFade_ = true;   ///< Debug toggle: pass enableReachFade into the arm IK targets. Off = no fade-out
+                                      ///< when target is past arm reach.
+    bool tpFreezeAnimations_ = false; ///< Debug toggle: freeze every animator's playback so world-space anchor sliders
+                                      ///< don't drift from idle bob.
+    bool showTPWeaponUI_ = false;     ///< Show the 3P Weapon Tweaker window.
+
+    // Hand mount tuning for third-person player IK / weapon grips.
+    WeaponHandMountParams
+        weaponHandMountParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from defaults.
+    WeaponHandMountParams
+        authoredWeaponHandMountParams_[kRenderableWeaponTypeCount]; ///< Defaults loaded from authored weapon assets.
+    int handMountTuneWeaponIdx_ = 0;                                ///< Which weapon type is being tuned.
+    bool showHandMountUI_ = false;                                  ///< Show the Hand Mount Tweaker window.
+
+    // First-person arm mount tuning (separate from third-person grips).
+    FirstPersonHandMountParams
+        fpHandMountParams_[kRenderableWeaponTypeCount];         ///< Runtime-tunable copy; initialised from defaults.
+    FirstPersonHandMountParams
+        authoredFPHandMountParams_[kRenderableWeaponTypeCount]; ///< Defaults loaded from authored weapon assets.
+    int fpHandMountTuneWeaponIdx_ = 0;                          ///< Which weapon type is being tuned.
+    bool showFPHandMountUI_ = false;                            ///< Show the FP Arm Tweaker window.
+
+    enum class HandMountDebugSpace : std::uint8_t
+    {
+        None,
+        ThirdPerson,
+        FirstPerson,
+    };
+
+    enum class HandMountDebugPoint : std::uint8_t
+    {
+        Shoulder,
+        Elbow,
+        Palm,
+        Finger0,
+        Finger1,
+        Finger2,
+        Finger3,
+        Finger4,
+    };
+
+    struct HandMountDebugTarget
+    {
+        HandMountDebugSpace space = HandMountDebugSpace::None;
+        int weaponIdx = 0;
+        bool left = false;
+        HandMountDebugPoint point = HandMountDebugPoint::Palm;
+    };
+
+    HandMountDebugTarget handMountDebugTarget_{};
 
     // Weapon spawner model tuning (per weapon type, live-adjustable via ImGui)
-    WeaponSpawnerModelParams spawnerWeaponParams_[4]; ///< Runtime-tunable copy; initialised from spawner defaults.
-    int spawnerTuneWeaponIdx_ = 0;                    ///< Which weapon type is being tuned.
-    bool showWeaponSpawnerModelUI_ = false;           ///< Show the Weapon Spawner Model Tweaker window.
+    WeaponSpawnerModelParams
+        spawnerWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from spawner defaults.
+    int spawnerTuneWeaponIdx_ = 0;                        ///< Which weapon type is being tuned.
+    bool showWeaponSpawnerModelUI_ = false;               ///< Show the Weapon Spawner Model Tweaker window.
 
     // Animation subsystem — shared rig + clip library + skinning backend.
     // CharacterAnimators (one per animated entity) hold non-owning refs.
-    CharacterRig charRig_;              ///< Shared skinned rig (skeleton + bind pose + weights).
-    AnimationLibrary animLibrary_;      ///< Collection of ozz clips on the shared rig.
-    CpuLbsSkinningBackend skinBackend_; ///< Phase-1 CPU linear-blend-skinning backend.
-    AnimationTesterState animUI_;       ///< Persistent state for the Animation Tester panel.
-    HitboxRig clientHitboxRig_;         ///< Hitbox definitions for client-side debug visualization.
-    float kRigScale_ = 1.0f;            ///< Per-renderable scale for animated characters (auto-calculated, tunable).
+    CharacterRig charRig_;       ///< Shared skinned rig (skeleton + bind pose + weights).
+    int rightHandJointIdx_ = -1; ///< Cached "mixamorig:RightHand" joint index (-1 = not present). Used to parent the
+                                 ///< third-person weapon mesh to the right-hand bone after IK.
+    int spine2JointIdx_ = -1;    ///< Cached "mixamorig:Spine2" joint index. Anchors the chest-relative right-hand IK
+                                 ///< target so the gun is held in front of the chest instead of hanging at the side.
+    std::array<WeaponGripPose, kRenderableWeaponTypeCount>
+        weaponGripPoses_{};      ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from
+                                 ///< assets/weapons/<name>.grip.toml at startup. Joint data is per-joint (pitch, yaw)
+    ///< degrees so the editor can drive sliders directly against the runtime data; the animator
+    ///< builds a local-space quat per joint on the fly via fingerLocalQuat.
+    /// Per-entity weapon-swap crossfade state (Phase F polish). When an entity's
+    /// equipped weapon changes, we reset `swapElapsedSec` to 0 and ramp the
+    /// `*GripWeight` from 0 → 1 over `kGripSwapDurationSec` so the hands briefly
+    /// release the grip and re-grip the new weapon. `lastType` tracks the last
+    /// observed weapon so we can detect the transition next frame.
+    struct GripSwapState
+    {
+        WeaponType lastType = WeaponType::Rifle;
+        float swapElapsedSec = 1.0f; ///< Initialised to "already done" so freshly-seen entities start at full grip.
+    };
+    std::unordered_map<entt::entity, GripSwapState> gripSwapState_{};
+    std::array<std::string, kRenderableWeaponTypeCount>
+        weaponGripPosePaths_{};  ///< Source TOML path for each weapon's grip pose; populated at init and reused for
+                                 ///< Phase E hot-reload + the per-finger authoring UI's save button.
+    std::array<std::filesystem::file_time_type, kRenderableWeaponTypeCount>
+        weaponGripPoseMTimes_{}; ///< Last-observed mtime; reload triggers when the file mtime changes (Phase E hot
+                                 ///< reload).
+    float gripPoseReloadAccumulator_ =
+        0.0f; ///< Seconds since last hot-reload mtime poll; throttle to ~4 Hz to keep filesystem stats cheap.
+    bool showGripPoseUI_ = false;          ///< Show the per-finger Grip Pose Tweaker window (Phase E authoring tool).
+    int gripPoseTuneWeaponIdx_ = 0;        ///< Which weapon's grip pose is being authored in the tweaker UI.
+    float aimAssistParityAccumSec_ = 0.0f; ///< Seconds since the last aim-assist parity check log line (Phase F).
+    AnimationLibrary animLibrary_;         ///< Collection of ozz clips on the shared rig.
+    CpuLbsSkinningBackend skinBackend_;    ///< Phase-1 CPU linear-blend-skinning backend.
+    AnimationTesterState animUI_;          ///< Persistent state for the Animation Tester panel.
+    HitboxRig clientHitboxRig_;            ///< Hitbox definitions for client-side debug visualization.
+    float kRigScale_ = 1.0f;               ///< Per-renderable scale for animated characters (auto-calculated, tunable).
     float kRigVerticalOffset_ =
         -90.0f;                ///< Per-renderable Y translation for animated characters (auto-calculated, tunable).
     float rigMeshMinY_ = 0.0f; ///< Minimum Y of the bind-pose mesh vertices (model space).
@@ -431,31 +667,12 @@ private:
     static constexpr float k_benchWarmupSeconds = 2.0f; ///< Skip the first N seconds (pipeline warmup).
     std::vector<float> benchFrameTimesMs_;              ///< Per-frame ms after warmup; reservation in init().
 
-    /// Per-frame phase-time breakdown.  Captured every frame in bench mode,
-    /// then the slowest 10 frames' breakdowns are dumped at exit so we can
-    /// attribute p1/p5 spikes to specific subsystems (e.g. "the spike was a
-    /// drawFrame stall waiting for the swapchain" vs "an animation-update
-    /// burst hit several chars at once").
-    struct FrameSectionMs
-    {
-        float total = 0.0f;
-        float input = 0.0f;
-        float networkPoll = 0.0f;
-        float physics = 0.0f;
-        float animation = 0.0f;        ///< ozz pose + skin matrix + hitbox.
-        float skinPaletteBuild = 0.0f; ///< Frustum cull + palette + instance build.
-        float entityCmds = 0.0f;       ///< Renderable + 3p weapon list build.
-        float particles = 0.0f;
-        float imgui = 0.0f;
-        float drawFrame = 0.0f; ///< Renderer drawFrame (CPU + GPU acquire).
-        // Sub-breakdown of drawFrame, populated from Renderer::lastAcquire/Record/SubmitMs.
-        // The "acquire" ms specifically captures swapchain back-pressure stalls — when
-        // the GPU hasn't released a previous swap image, the CPU thread blocks here.
-        float drawAcquire = 0.0f;
-        float drawRecord = 0.0f;
-        float drawSubmit = 0.0f;
-    };
-    std::vector<FrameSectionMs> benchFrameStats_;
+    /// Per-frame phase-time breakdown. Captured every frame in bench mode and
+    /// by GROUP2_CLIENT_PERF=1 play-session recordings.
+    std::vector<ClientPerfFrame> benchFrameStats_;
+    ClientPerfRecorder perfRecorder_;
+    float perfSnapshotApplyMs_ = 0.0f;
+    std::uint32_t perfSnapshotApplyCount_ = 0;
 
     /// @brief Attach a fresh `AnimatedCharacter` component to an entity.
     ///
@@ -465,11 +682,27 @@ private:
     /// (logs a warning and leaves the entity un-animated).
     void attachAnimatedCharacter(entt::entity e);
 
+    /// @brief Dispatcher subscriber: when ANY player fires a shot, push a
+    /// per-weapon-class additive pitch impulse onto that player's spine. The
+    /// kick decays inside `CharacterAnimator::runSamplingAndSkinning` so the
+    /// upper body rises and settles back to the sampled aim pose over ~250 ms.
+    /// Wired to the same `WeaponFiredEvent` channel SfxSystem listens on, so
+    /// the same event drives both audio and visuals.
+    void onWeaponFired(const struct WeaponFiredEvent& evt);
+
     // Match State
     MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
-    bool returnToLobbyRequested = false; ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
+    bool returnToLobbyRequested = false;         ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
+    bool returnToMainMenuRequested_ = false;     ///< Latched true when the pause menu or disconnect requests leaving.
+    bool serverShutdownNoticeRequested_ = false; ///< Latched true when leaving because the server connection closed.
 
     // Kill Feed State
     std::vector<KillFeedEvent> killFeed; ///< Recent kill events for on-screen kill feed (newest first).
+
+    PauseMenu pauseMenu; ///< In-game pause menu (opened with ESC, blocks input to the game when active).
+
+    // Bullet tracer muzzle
+    glm::vec3 cachedMuzzleWorld_{0.0f};
+    bool cachedMuzzleValid_ = false;
 };

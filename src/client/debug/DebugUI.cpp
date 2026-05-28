@@ -86,15 +86,27 @@ const char* weaponTypeName(WeaponType type)
         return "RailGun";
     case WeaponType::EnergyGun:
         return "EnergyGun";
+    case WeaponType::Shotgun:
+        return "Shotgun";
     case WeaponType::HEGrenade:
         return "HEGrenade";
     case WeaponType::Molotov:
         return "Molotov";
-    case WeaponType::Impulse:
-        return "Impulse";
+    case WeaponType::Sticky:
+        return "Sticky";
     }
     return "Unknown";
 }
+
+/// @brief Slot-eligible weapon types for the Weapon HUD slot selectors.
+/// Grenade types (HE/Molotov/Sticky) are excluded — they live in their own slot system.
+constexpr std::array<WeaponType, 5> k_kSlotWeaponChoices{{
+    WeaponType::Rifle,
+    WeaponType::Rocket,
+    WeaponType::RailGun,
+    WeaponType::EnergyGun,
+    WeaponType::Shotgun,
+}};
 
 } // namespace
 
@@ -129,6 +141,15 @@ void DebugUI::toggleDebugMenu()
     showDebugMenu = !showDebugMenu;
 }
 
+bool DebugUI::consumePhysicsCsvRecordingRequest(bool& enabled) noexcept
+{
+    if (!pendingPhysicsCsvRecordingRequest_)
+        return false;
+    pendingPhysicsCsvRecordingRequest_ = false;
+    enabled = pendingPhysicsCsvRecordingEnabled_;
+    return true;
+}
+
 void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels)
 {
     if (!showDebugMenu)
@@ -159,6 +180,17 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
     ImGui::Checkbox("Particle System", &showParticleWindow_);
 
     ImGui::SeparatorText("Physics");
+    const bool csvRecording = physics::diag::isEnabled();
+    if (ImGui::Button(csvRecording ? "Stop Physics CSV Recording" : "Start Physics CSV Recording")) {
+        pendingPhysicsCsvRecordingEnabled_ = !csvRecording;
+        pendingPhysicsCsvRecordingRequest_ = true;
+        if (pendingPhysicsCsvRecordingEnabled_)
+            physics::diag::startRecording();
+        else
+            physics::diag::stopRecording();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", csvRecording ? "recording" : "stopped");
     ImGui::Checkbox("Hitbox Debug", &showHitboxWindow);
     ImGui::Checkbox("Collision Debug", &showCollisionWindow);
     ImGui::Checkbox("Contact Debug", &showContactDebugWindow);
@@ -444,10 +476,10 @@ void DebugUI::buildInspectorContents(const Registry& registry,
             // PlayerState
             if (showPlayerState && registry.all_of<PlayerVisState>(entity)) {
                 const auto& c = registry.get<PlayerVisState>(entity);
-                static const char* k_modeNames[] = {"OnFoot", "Sliding", "WallRun", "Climbing", "LedgeGrab"};
+                static const char* k_modeNames[] = {"OnFoot", "Sliding", "WallRun"};
                 const int k_modeIdx = static_cast<int>(c.moveMode);
                 ImGui::Text("PlayerState   mode:%s  grounded:%-3s  crouching:%-3s  sprint:%-3s",
-                            (k_modeIdx >= 0 && k_modeIdx < 5) ? k_modeNames[k_modeIdx] : "?",
+                            (k_modeIdx >= 0 && k_modeIdx < 3) ? k_modeNames[k_modeIdx] : "?",
                             c.grounded ? "YES" : "NO",
                             c.crouching ? "YES" : "NO",
                             c.sprinting ? "YES" : "NO");
@@ -1139,6 +1171,34 @@ void DebugUI::buildWeaponUI(const Registry& registry)
     ImGui::SeparatorText("Weapon");
     ImGui::Text("Current: %s", currentGunName);
     ImGui::Text("Ammo:    %d / %d", gun.currentMagAmmo, gun.totalAmmo);
+
+    // Slot selectors — pulse the pending-set flag, consumed by Game::iterate()
+    // which writes onto InputSnapshot.debugSetXxxWeapon for the server to act on.
+    auto slotCombo = [&](const char* label, WeaponSlot slot, std::int8_t& pendingOut) {
+        const GunInstance& slotGun = getSlot(weapon, slot);
+        int currentIdx = 0;
+        for (std::size_t i = 0; i < k_kSlotWeaponChoices.size(); ++i) {
+            if (k_kSlotWeaponChoices[i] == slotGun.type) {
+                currentIdx = static_cast<int>(i);
+                break;
+            }
+        }
+        const char* preview = weaponTypeName(k_kSlotWeaponChoices[static_cast<std::size_t>(currentIdx)]);
+        if (ImGui::BeginCombo(label, preview)) {
+            for (std::size_t i = 0; i < k_kSlotWeaponChoices.size(); ++i) {
+                const WeaponType opt = k_kSlotWeaponChoices[i];
+                const bool selected = (static_cast<int>(i) == currentIdx);
+                if (ImGui::Selectable(weaponTypeName(opt), selected)) {
+                    pendingOut = static_cast<std::int8_t>(opt);
+                }
+                if (selected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+    };
+    slotCombo("Primary", WeaponSlot::PRIMARY, pendingSetPrimaryWeapon_);
+    slotCombo("Secondary", WeaponSlot::SECONDARY, pendingSetSecondaryWeapon_);
 
     // Flag checked by Game::iterate() to refill ammo (registry is const here).
     if (ImGui::Button("Refill All Ammo"))
@@ -1934,12 +1994,20 @@ void DebugUI::buildContactDebugUI(const glm::mat4& viewProj, float screenWidth, 
 
             ImGui::Separator();
             ImGui::TextWrapped(
-                "Phase telemetry: per-tick player physics state → phase-diag-*.csv in working dir. "
+                "Phase telemetry: per-tick player physics state -> *-phase-diag-*.csv in working dir. "
                 "Look for the SuspectedPhase column = 1 to find phase-through moments. "
                 "Open the CSV in any spreadsheet; sort by SuspectedPhase, DeepPenetration, or BumpExhausted.");
-            bool phaseDiag = physics::diag::isEnabled();
-            if (ImGui::Checkbox("Record phase telemetry (writes CSV)", &phaseDiag))
-                physics::diag::setEnabled(phaseDiag);
+            const bool phaseDiag = physics::diag::isEnabled();
+            if (ImGui::Button(phaseDiag ? "Stop Physics CSV Recording" : "Start Physics CSV Recording")) {
+                pendingPhysicsCsvRecordingEnabled_ = !phaseDiag;
+                pendingPhysicsCsvRecordingRequest_ = true;
+                if (pendingPhysicsCsvRecordingEnabled_)
+                    physics::diag::startRecording();
+                else
+                    physics::diag::stopRecording();
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", phaseDiag ? "recording" : "stopped");
 
             const auto k_contacts = physics::debug::contacts();
 

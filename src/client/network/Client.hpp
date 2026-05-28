@@ -7,6 +7,8 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/ChatProtocol.hpp"
+#include "network/DiscoverySettings.hpp"
+#include "network/MatchConfig.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
 #include "network/NetKillEvent.hpp"
@@ -58,6 +60,7 @@ enum class ConnectError
     CreateClientFailed,
     ConnectTimedOut,
     ConnectFailed,
+    LobbyFull,
 };
 
 /// @brief TCP stream client — sends input to the server and receives state updates.
@@ -88,6 +91,7 @@ public:
     using LobbyUpdateCallback = std::function<void(const LobbyUpdateEvent& update)>;
     /// @brief Fired once on join with the full lobby snapshot and this client's assigned ID.
     using LobbyStateCallback = std::function<void(const std::vector<LobbyPlayer>& players, ClientId localId)>;
+    using MatchConfigCallback = std::function<void(const MatchConfig& config)>;
 
     /// @brief Create the TCP socket and connect to the server.
     /// @param addr      Hostname or IP address of the server.
@@ -105,6 +109,9 @@ public:
 
     /// @brief Close the socket and release the resolved address.
     void shutdown();
+
+    /// @brief True while a server connection is currently owned by this client.
+    bool isConnected();
 
     /// @brief Send a raw message to the server.
     /// @param data  Pointer to the payload bytes.
@@ -136,6 +143,9 @@ public:
     /// @brief Send an all-chat message to the authoritative server.
     bool sendChatMessage(std::string_view message);
 
+    /// @brief Ask the server to start/stop authoritative physics CSV recording.
+    bool sendPhysicsDiagRecording(bool enabled);
+
     /// @brief Send one Opus-encoded voice frame. Voice rides unreliable sequenced UDP.
     bool sendVoiceFrame(std::uint16_t sequence, std::uint8_t frameMs, std::span<const std::uint8_t> opus);
 
@@ -144,6 +154,19 @@ public:
 
     /// @brief Send a START_MATCH packet to the server (host-only).
     bool sendStartMatch();
+
+    /// @brief Send an updated match configuration to the server (host-only).
+    bool sendMatchConfig(const MatchConfig& config);
+
+    /// @brief Send updated discovery advertisement settings to the server.
+    ///
+    /// The server applies this only when the sender is the current lobby host.
+    /// The packet controls whether the server publishes to the global directory
+    /// and whether it responds to LAN discovery requests.
+    bool sendDiscoverySettings(const DiscoverySettings& settings);
+
+    /// @brief Request server shutdown. The server accepts this only from the current host.
+    bool sendServerShutdown();
 
     /// @brief Send a PING packet to the server for RTT measurement.
     void sendPing();
@@ -175,6 +198,10 @@ public:
     {
         lobbyStateFn_ = std::move(fn);
     } ///< Register the full lobby-snapshot callback, fired once on join.
+    void onMatchConfig(MatchConfigCallback fn)
+    {
+        matchConfigFn_ = std::move(fn);
+    } ///< Register the match-config update callback.
 
     /// @brief Receive and process one pending message.
     /// @return True if a message was received, false if the queue is empty.
@@ -185,6 +212,9 @@ public:
 
     /// @brief Return the latest match state packet received from the server, if any.
     std::optional<MatchStatePacket> getLatestMatchState() const { return latestMatchState_; }
+
+    /// @brief Return the latest match configuration received from the server, if any.
+    std::optional<MatchConfig> getLatestMatchConfig() const { return latestMatchConfig_; }
 
     /// @brief Return the latest lobby roster received from the server, if any.
     std::optional<std::pair<std::vector<LobbyPlayer>, ClientId>> getLatestLobbyState() const;
@@ -375,9 +405,11 @@ private:
     ShotDebugCallback shotDebugFn_;                ///< PR-20: called for each SHOT_DEBUG_REPORT from server.
     LobbyUpdateCallback lobbyUpdateFn_;            ///< Called for each lobby update received from server.
     LobbyStateCallback lobbyStateFn_;              ///< Called once on join with the full lobby snapshot.
+    MatchConfigCallback matchConfigFn_;            ///< Called whenever a MATCH_CONFIG packet is received.
     std::optional<entt::entity> localPlayerEntity; ///< The local player's entity, once assigned by the server.
     std::optional<MatchStatePacket>
         latestMatchState_;                         ///< Most-recent MATCH_STATE packet; populated by dispatchMessage.
+    std::optional<MatchConfig> latestMatchConfig_; ///< Most-recent MATCH_CONFIG packet; populated by dispatchMessage.
     std::optional<std::vector<LobbyPlayer>> latestLobbyPlayers_; ///< Most-recent lobby roster received from the server.
     std::optional<ClientId> latestLobbyLocalId_; ///< This client's ID as reported in the LOBBY_STATE packet.
 
@@ -412,6 +444,8 @@ private:
     // Bandwidth tracking — accumulated between updateStats() calls.
     uint64_t bytesSentWindow = 0;
     uint64_t bytesRecvWindow = 0;
+    uint64_t udpSessionLastBytesSent_ = 0;
+    uint64_t udpSessionLastBytesRecv_ = 0;
     uint32_t registryUpdatesWindow = 0;
     float statsAccumulator = 0.0f;
 

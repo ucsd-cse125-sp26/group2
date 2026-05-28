@@ -72,8 +72,15 @@ struct TransportConfig
     bool allowLegacyTcpFallback = true;
 
     /// @brief Prefer the relay route even when direct is available.
-    /// Useful for forced-relay testing.
+    /// Useful for forced-relay testing. Ignored when noRelay is true.
     bool forceRelay = false;
+
+    /// @brief Disable directory relay routing for gameplay sessions.
+    ///
+    /// When true, global joins still request punch assist, but the client
+    /// only connects to the server's public UDP endpoint. Set false to allow
+    /// relay fallback through the directory service.
+    bool noRelay = true;
 
     /// @brief Stage 3d-1: bind a UDP datagram socket alongside the TCP
     /// socket. Currently no traffic flows through it; later stages move
@@ -113,15 +120,17 @@ struct TransportConfig
 struct GlobalDiscoveryConfig
 {
     bool enabled = true;                           ///< Client browser and server publishing toggle.
-    bool advertiseServer = true;                   ///< Server auto-publishes itself to the directory.
+    bool advertiseServer = true;                   ///< Initial server publishing state for the global directory.
+    bool lanBroadcastEnabled = true;               ///< Initial server response state for LAN discovery requests.
+    uint16_t lanBroadcastPort = 2311;
     std::string directoryHost = "cse125.ucsd.edu"; ///< Central directory host.
     uint16_t directoryTcpPort = 10080;             ///< Legacy directory TCP API port.
     uint16_t directoryUdpPort = 10081;             ///< UDP directory/relay port.
     std::string serverName = "Group 2 Server";     ///< Name advertised by local servers.
-    uint8_t maxPlayers = 8;                        ///< Display-only capacity advertised by servers.
-    int refreshSeconds = 5;                        ///< Client browser refresh cadence.
-    int connectPunchTimeoutMs = 900;               ///< UDP punch-assist window before a direct join attempt.
-    int relayFallbackDelayMs = 450; ///< Start relay if direct route has not validated within this window.
+    uint8_t maxPlayers = 8;          ///< Default capacity advertised by servers and enforced on hosted sessions.
+    int refreshSeconds = 5;          ///< Client browser refresh cadence.
+    int connectPunchTimeoutMs = 900; ///< UDP punch-assist window before a direct join attempt.
+    int relayFallbackDelayMs = 450;  ///< Start relay if direct route has not validated within this window.
 };
 
 /// @brief Runtime network connection parameters.

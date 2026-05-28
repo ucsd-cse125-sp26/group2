@@ -23,7 +23,7 @@ void testDefaultManifestResolvesEvents()
     assert(commands[0].priority > 2.0f);
 }
 
-void testBlendNodeUsesRtpc()
+void testFootstepEventUsesConcreteRandom()
 {
     audio::AudioRuntime runtime;
     runtime.loadDefaultManifest();
@@ -32,10 +32,10 @@ void testBlendNodeUsesRtpc()
     runtime.setRtpc(object, audio::rtpcId("movement.intensity"), 0.75f);
 
     const auto commands = runtime.postEvent("footstep", object);
-    assert(commands.size() == 2);
-    assert(commands[0].sfx == SfxId::FootstepLight);
-    assert(commands[1].sfx == SfxId::FootstepHeavy);
-    assert(commands[1].gain > commands[0].gain);
+    assert(commands.size() == 1);
+    assert(static_cast<int>(commands[0].sfx) >= static_cast<int>(SfxId::ConcreteFootstep01));
+    assert(static_cast<int>(commands[0].sfx) <= static_cast<int>(SfxId::ConcreteFootstep17));
+    assert(commands[0].positional);
 }
 
 void testTomlManifestLoadsSwitchRandomAndStop()
@@ -150,7 +150,7 @@ int main()
 {
     static_assert(audio::stableHash("weapon.rifle.fire") == audio::stableHash("weapon.rifle.fire"));
     testDefaultManifestResolvesEvents();
-    testBlendNodeUsesRtpc();
+    testFootstepEventUsesConcreteRandom();
     testTomlManifestLoadsSwitchRandomAndStop();
     return 0;
 }

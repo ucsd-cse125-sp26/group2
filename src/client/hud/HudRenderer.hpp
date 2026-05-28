@@ -74,6 +74,7 @@ private:
 
     // Pipeline
     SDL_GPUGraphicsPipeline* pipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* erasePipeline_ = nullptr;
 
     // Samplers (bound to fragment set 1)
     SDL_GPUTexture* sdfAtlasTex_ = nullptr;   ///< Non-owning: from SdfAtlas.

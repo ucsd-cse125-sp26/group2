@@ -31,6 +31,19 @@ void HudContext::endFrame()
         flushClipSpan();
 }
 
+void HudContext::tintVertices(std::size_t startVertex, HudColor tint)
+{
+    if (startVertex >= vertices_.size())
+        return;
+
+    for (std::size_t i = startVertex; i < vertices_.size(); ++i) {
+        vertices_[i].color[0] *= tint.r;
+        vertices_[i].color[1] *= tint.g;
+        vertices_[i].color[2] *= tint.b;
+        vertices_[i].color[3] *= tint.a;
+    }
+}
+
 // ── Internal helpers ────────────────────────────────────────────────────────
 
 void HudContext::emitQuad(float x,
@@ -307,6 +320,43 @@ void HudContext::text(const char* str, float x, float y, float size, HudColor co
     }
 }
 
+void HudContext::knockoutText(const char* str, float x, float y, float size, HudAlign align)
+{
+    if (!sdfAtlas_ || !str || !*str)
+        return;
+
+    const float scale = size / static_cast<float>(SdfAtlas::k_renderPx);
+    float totalWidth = 0.f;
+    if (align != HudAlign::Left)
+        totalWidth = measureText(str, size);
+
+    float startX = x;
+    if (align == HudAlign::Center)
+        startX = x - totalWidth * 0.5f;
+    else if (align == HudAlign::Right)
+        startX = x - totalWidth;
+
+    float cursorX = std::round(startX);
+    const float baselineY = std::round(y + size);
+
+    for (const char* p = str; *p; ++p) {
+        const uint32_t cp = static_cast<uint8_t>(*p);
+        const GlyphInfo* gi = sdfAtlas_->glyph(cp);
+        if (!gi)
+            continue;
+
+        const float gw = gi->width * scale;
+        const float gh = gi->height * scale;
+        if (gw > 0.f && gh > 0.f) {
+            const float gx = std::round(cursorX + gi->bearing.x * scale);
+            const float gy = std::round(baselineY - gi->bearing.y * scale);
+            emitQuad(gx, gy, gw, gh, gi->uvMin.x, gi->uvMin.y, gi->uvMax.x, gi->uvMax.y, HudColor::white(), 6.f);
+        }
+
+        cursorX += gi->advance * scale;
+    }
+}
+
 float HudContext::measureText(const char* str, float size) const
 {
     if (!sdfAtlas_ || !str || !*str)
@@ -358,6 +408,13 @@ void HudContext::vignette(float screenW, float screenH, HudColor color)
 {
     // Full-screen quad with texMode=4 (radial edge gradient in fragment shader).
     emitQuad(0.f, 0.f, screenW, screenH, 0.f, 0.f, 1.f, 1.f, color, 4.f);
+}
+
+void HudContext::scopeMask(float screenW, float screenH, float radiusPx, HudColor color)
+{
+    // Full-screen quad with texMode=5. shapeData carries viewport size and the
+    // cut-out radius so the fragment shader can compute a true pixel circle.
+    emitQuad(0.f, 0.f, screenW, screenH, 0.f, 0.f, 1.f, 1.f, color, 5.f, screenW, screenH, radiusPx);
 }
 
 // ── Clipping ────────────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
 /// @file PickupNotification.hpp
 /// @brief Right-side slide-in messages for items just picked up.
 ///
-/// Distinct from `PickupPrompt` (which says "press F to pick up X").  This
-/// widget surfaces the *result* of pickups — "+30 PULSE·MAG", "+1 SHIELD·CELL"
+/// Distinct from `PickupPrompt` (which shows the configured pickup binding).
+/// This widget surfaces the *result* of pickups — "+30 PULSE·MAG", "+1 SHIELD·CELL"
 /// — as transient slide-in pills along the right edge.
 
 #pragma once

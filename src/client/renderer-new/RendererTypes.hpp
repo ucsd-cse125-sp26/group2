@@ -18,14 +18,6 @@
 
 // ─── Existing types ──────────────────────────────────────────────────────────
 
-/// @brief Anti-aliasing mode selection — exposed to ImGui.
-enum class AAMode : int
-{
-    Off = 0,      ///< No anti-aliasing.
-    SMAA_1x = 1,  ///< Spatial SMAA only, zero ghosting.
-    SMAA_T2x = 2, ///< 2-sample temporal + spatial SMAA (recommended).
-};
-
 /// @brief Live toggles for every render system — exposed to ImGui.
 ///
 /// All default to true (everything on).  The renderer checks these each
@@ -82,15 +74,32 @@ struct PointLight
     float range = 5000.0f;     ///< Attenuation range (world units); falloff = 1 - (d²/r²).
 };
 
+/// @brief Extra first-person models drawn in the weapon pass, after the gun.
+struct ViewmodelAttachment
+{
+    int32_t modelIndex = -1;   ///< Renderer-side model handle.
+    glm::mat4 transform{1.0f}; ///< World transform, already camera/viewmodel-relative.
+    bool visible = false;      ///< False = skip drawing this attachment.
+};
+
+/// @brief First-person hand attachments driven by weapon-authored mount points.
+struct ViewmodelHands
+{
+    ViewmodelAttachment left;
+    ViewmodelAttachment right;
+};
+
 /// @brief First-person weapon viewmodel descriptor sent per frame.
 ///
 /// Game.cpp computes the viewmodel transform from camera state + sway/recoil
 /// each frame and hands it off via `setWeaponViewmodel()`.
 struct WeaponViewmodel
 {
-    int32_t modelIndex = -1;   ///< Renderer-side model handle.
-    glm::mat4 transform{1.0f}; ///< Transform in viewmodel space (relative to camera).
-    bool visible = false;      ///< False = skip drawing this frame (e.g. weapon hidden).
+    int32_t modelIndex = -1;          ///< Renderer-side model handle.
+    glm::mat4 transform{1.0f};        ///< Transform in viewmodel space (relative to camera).
+    ViewmodelHands hands{};           ///< Optional first-person hands attached to weapon grip mounts.
+    ViewmodelAttachment debugPoint{}; ///< Optional red debug marker for live mount tweaking.
+    bool visible = false;             ///< False = skip drawing this frame (e.g. weapon hidden).
 };
 
 // ─── Skinned-character types (NEW) ───────────────────────────────────────────

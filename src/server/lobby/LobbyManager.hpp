@@ -33,10 +33,13 @@ public:
 
     /// @brief Validate a host-initiated match start request.
     ///
-    /// Rejects if sender is not the host, any non-host player is unready,
-    /// or no non-host players are connected.
+    /// Rejects if sender is not the host or any connected non-host player is unready.
+    /// Host-only lobbies are valid.
     /// @return True if the match may proceed.
     bool hostStartMatch(ClientId sender);
+
+    /// @brief True if @p id is the current lobby host.
+    [[nodiscard]] bool isHost(ClientId id) const { return id == hostId; }
 
     /// @brief Clear all ready flags and broadcast Unready events; resends full lobby state to every client.
     void resetReadyStatuses();

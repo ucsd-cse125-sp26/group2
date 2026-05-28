@@ -3,10 +3,10 @@
 
 #include "Hud.hpp"
 
+#include "config/InputBindings.hpp"
 #include "particles/sdf/SdfAtlas.hpp"
 #include "widgets/AbilitySelectionWidget.hpp"
 #include "widgets/AmmoCounter.hpp"
-#include "widgets/BuyMenu.hpp"
 #include "widgets/ChatWidget.hpp"
 #include "widgets/CrosshairWidget.hpp"
 #include "widgets/DamageAccumWidget.hpp"
@@ -14,17 +14,17 @@
 #include "widgets/DamageNumberWidget.hpp"
 #include "widgets/EnemyWorldHealthBar.hpp"
 #include "widgets/EquipmentSlots.hpp"
-#include "widgets/GravityIndicator.hpp"
 #include "widgets/GrenadeRadialWidget.hpp"
+#include "widgets/GrenadeSlotsWidget.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
-#include "widgets/KdaCounter.hpp"
 #include "widgets/KillFeed.hpp"
-#include "widgets/MatchHeader.hpp"
 #include "widgets/Minimap.hpp"
 #include "widgets/PickupNotification.hpp"
 #include "widgets/PickupPrompt.hpp"
+#include "widgets/RailgunScopeWidget.hpp"
 #include "widgets/Scoreboard.hpp"
+#include "widgets/ShotgunPelletWidget.hpp"
 #include "widgets/VignetteWidget.hpp"
 
 bool Hud::init(SDL_GPUDevice* device,
@@ -59,27 +59,16 @@ void Hud::resize(uint32_t newW, uint32_t newH)
     renderer_.resize(newW, newH);
 }
 
-void Hud::processEvent(const SDL_Event* event)
+void Hud::processEvent(const SDL_Event* event, const InputBindings* bindings)
 {
-    if (event->type == SDL_EVENT_KEY_DOWN) {
-        if (event->key.key == SDLK_TAB) {
-            for (auto& w : widgets_) {
-                if (auto* sb = dynamic_cast<Scoreboard*>(w.get()))
-                    sb->setOpen(true);
-            }
-        }
-        if (event->key.key == SDLK_B) {
-            for (auto& w : widgets_) {
-                if (auto* bm = dynamic_cast<BuyMenu*>(w.get()))
-                    bm->toggle(true);
-            }
-        }
-    } else if (event->type == SDL_EVENT_KEY_UP) {
-        if (event->key.key == SDLK_TAB) {
-            for (auto& w : widgets_) {
-                if (auto* sb = dynamic_cast<Scoreboard*>(w.get()))
-                    sb->setOpen(false);
-            }
+    if (!event || !bindings)
+        return;
+
+    bool down = false;
+    if (bindings->eventMatches(Action::Scoreboard, *event, down)) {
+        for (auto& w : widgets_) {
+            if (auto* sb = dynamic_cast<Scoreboard*>(w.get()))
+                sb->setOpen(down);
         }
     }
 }
@@ -101,11 +90,22 @@ void Hud::render()
     context_.beginFrame();
 
     for (auto& w : widgets_) {
-        if (!w->visible)
+        const bool forceVisible =
+            debugRenderInactiveWidgets_ && dynamic_cast<const RailgunScopeWidget*>(w.get()) == nullptr;
+        if (!w->visible && !forceVisible)
             continue;
+
+        const bool originalVisible = w->visible;
+        if (forceVisible)
+            w->visible = true;
+
         float drawX = 0.f, drawY = 0.f;
         resolveAnchor(*w, drawX, drawY);
+        const std::size_t widgetStartVertex = context_.vertices().size();
         w->draw(context_, drawX, drawY);
+        context_.tintVertices(widgetStartVertex, w->tint);
+
+        w->visible = originalVisible;
     }
 
     // Flush any remaining unflushed vertices (e.g. minimap drawn after last clip pop).
@@ -173,6 +173,8 @@ void Hud::resolveAnchor(const HudWidget& w, float& outX, float& outY) const
 void Hud::createWidgets()
 {
     // Widgets added in draw order (back to front).
+    widgets_.push_back(std::make_unique<RailgunScopeWidget>());
+
     // Vignette goes first (full-screen overlay behind everything else).
     widgets_.push_back(std::make_unique<VignetteWidget>());
 
@@ -184,6 +186,7 @@ void Hud::createWidgets()
     // Center reticle + hit-confirm + accumulated-damage stack.
     widgets_.push_back(std::make_unique<CrosshairWidget>());
     widgets_.push_back(std::make_unique<HitMarkerWidget>());
+    widgets_.push_back(std::make_unique<ShotgunPelletWidget>());
     widgets_.push_back(std::make_unique<DamageAccumWidget>());
 
     // Directional damage arcs around the reticle.
@@ -191,12 +194,7 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<AbilitySelectionWidget>());
     widgets_.push_back(std::make_unique<GrenadeRadialWidget>());
 
-    // Top center: match header.  (Compass strip removed — gravity flips
-    // make a heading readout meaningless and players found it useless.)
-    widgets_.push_back(std::make_unique<MatchHeader>());
-
-    // Top right: KDA counter + killfeed (KDA renders first, KillFeed sits below).
-    widgets_.push_back(std::make_unique<KdaCounter>());
+    // Top right: killfeed.
     widgets_.push_back(std::make_unique<KillFeed>());
     widgets_.push_back(std::make_unique<PickupNotification>());
 
@@ -204,16 +202,14 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<Minimap>());
 
     // Bottom-row chrome.
-    widgets_.push_back(std::make_unique<HealthArmorBar>());   // Vitals (bottom-left)
-    widgets_.push_back(std::make_unique<EquipmentSlots>());   // bottom-center
-    widgets_.push_back(std::make_unique<AmmoCounter>());      // weapon panel (bottom-right)
-    widgets_.push_back(std::make_unique<GravityIndicator>()); // sits above weapon panel
-    widgets_.push_back(std::make_unique<ChatWidget>());       // chat should sit above gameplay chrome
+    widgets_.push_back(std::make_unique<HealthArmorBar>()); // Vitals (bottom-left)
+    widgets_.push_back(std::make_unique<EquipmentSlots>()); // bottom-center
+    widgets_.push_back(std::make_unique<GrenadeSlotsWidget>());
+    widgets_.push_back(std::make_unique<AmmoCounter>());    // weapon panel (bottom-right)
+    widgets_.push_back(std::make_unique<ChatWidget>());     // chat should sit above gameplay chrome
 
     // Modal panels (only visible when toggled).
-    // TeamStatusBar is intentionally omitted in the Voidfall design — its
-    // top-center band would clash with the new MatchHeader + Compass layout.
+    // TeamStatusBar is intentionally omitted in the Voidfall design.
     widgets_.push_back(std::make_unique<Scoreboard>());
-    widgets_.push_back(std::make_unique<BuyMenu>());
     widgets_.push_back(std::make_unique<PickupPrompt>());
 }

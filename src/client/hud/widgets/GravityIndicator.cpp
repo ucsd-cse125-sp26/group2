@@ -13,8 +13,8 @@
 GravityIndicator::GravityIndicator()
 {
     anchor = HudAnchor::BottomRight;
-    offsetX = -24.f;
-    offsetY = -200.f; // sits above the weapon panel
+    offsetX = -80.f;
+    offsetY = -220.f; // sits above the weapon panel
 }
 
 void GravityIndicator::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)

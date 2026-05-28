@@ -123,12 +123,6 @@ bool LobbyManager::hostStartMatch(ClientId sender)
         }
     }
 
-    if (nonHostCount == 0) {
-        SDL_Log("LobbyManager: rejecting START_MATCH from host %u because no non-host players are connected",
-                sender.value);
-        return false;
-    }
-
     SDL_Log("LobbyManager: accepting START_MATCH from host %u with %d ready non-host player(s)",
             sender.value,
             nonHostCount);

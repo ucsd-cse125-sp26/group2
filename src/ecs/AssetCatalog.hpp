@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ecs/AssetRegistry.hpp"
+#include "ecs/components/WeaponState.hpp"
 
 #include <array>
 #include <glm/vec3.hpp>
@@ -30,22 +31,7 @@ inline const AssetDefinition kMapAsset{
     .loadScale = 39.3701f,
 };
 
-// Porsche removed — its 75-mesh hierarchy floods the collision debug UI.
-inline const std::array<AssetDefinition, 2> kPropAssets{{
-    {.name = "pallet",
-     .filename = "metallic_pallet_factory_store.glb",
-     .role = AssetRole::Prop,
-     .loadTranslation = {0.0f, 0.0f, 600.0f},
-     .loadScale = 0.25f,
-     .flipUVs = true,
-     .decomposeCollision = true},
-    {.name = "bottle",
-     .filename = "bottle_a.glb",
-     .role = AssetRole::Prop,
-     .loadTranslation = {100.0f, 0.0f, 400.0f},
-     .loadScale = 20.0f,
-     .decomposeCollision = true},
-}};
+inline const std::array<AssetDefinition, 0> kPropAssets{};
 
 inline const AssetDefinition kRocketProjectile{
     .name = "rocket_projectile",
@@ -55,7 +41,7 @@ inline const AssetDefinition kRocketProjectile{
     .flipUVs = true,
 };
 
-inline const std::array<AssetDefinition, 4> kWeaponAssets{{
+inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAssets{{
     {.name = "weapon_rifle",
      .filename = "assault_rifle.glb",
      .role = AssetRole::Entity,
@@ -74,6 +60,12 @@ inline const std::array<AssetDefinition, 4> kWeaponAssets{{
      .renderRotationDegrees = {0.0f, 0.0f, 0.0f}},
     {.name = "weapon_energy",
      .filename = "energy_gun.glb",
+     .role = AssetRole::Entity,
+     .flipUVs = true,
+     .renderScale = {20.0f, 20.0f, 20.0f},
+     .renderRotationDegrees = {0.0f, 0.0f, 0.0f}},
+    {.name = "weapon_shotgun",
+     .filename = "energy_gun.glb", // reuses energy gun mesh until a dedicated shotgun model is authored.
      .role = AssetRole::Entity,
      .flipUVs = true,
      .renderScale = {20.0f, 20.0f, 20.0f},

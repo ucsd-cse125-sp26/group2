@@ -11,11 +11,15 @@
 #include "Asset.hpp"
 #include "AssetLoader.hpp"
 #include "Boilerplate.hpp"
+#include "particles/ParticleSystem.hpp"
 
+#include <algorithm>
 #include <backends/imgui_impl_sdlgpu3.h>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <glm/ext/matrix_transform.hpp>
+#include <glm/trigonometric.hpp>
 #include <imgui.h>
 #include <iostream>
 #include <unordered_map>
@@ -35,6 +39,13 @@ float ticksToMs(Uint64 elapsed, Uint64 freq)
 /// TODO(graphics): consume these inside `drawModel` when building the
 /// material UBO — currently captured but unused.
 std::unordered_map<int32_t, glm::vec4> g_emissiveOverrides;
+
+float verticalFovDegreesFromHorizontal(float horizontalFovDegrees, float aspect)
+{
+    const float safeAspect = aspect > 0.0f ? aspect : 1.0f;
+    const float horizontalRadians = glm::radians(horizontalFovDegrees);
+    return glm::degrees(2.0f * std::atan(std::tan(horizontalRadians * 0.5f) / safeAspect));
+}
 } // namespace
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
@@ -92,6 +103,12 @@ bool NewRenderer::init(SDL_Window* window)
         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
         return false;
     }
+
+    if (!createFxaaPipeline()) {
+        SDL_Log("NewRenderer: failed to create FXAA pipeline: %s", SDL_GetError());
+        return false;
+    }
+
     sampler_ = Boilerplate::createLinearRepeatSampler(device_);
     if (!sampler_) {
         SDL_Log("NewRenderer: failed to create sampler: %s", SDL_GetError());
@@ -105,17 +122,14 @@ bool NewRenderer::init(SDL_Window* window)
     }
 
     depthSampler_ = Boilerplate::createLinearComparisonSampler(device_);
-    // SDL_GPUSamplerCreateInfo debugSamplerInfo{};
-    //     debugSamplerInfo.min_filter = SDL_GPU_FILTER_NEAREST;
-    //     debugSamplerInfo.mag_filter = SDL_GPU_FILTER_NEAREST;
-    //     debugSamplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-    //     debugSamplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-    //     debugSamplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-    //     debugSamplerInfo.enable_compare = false;  // no comparison
-    //     depthSampler_ = SDL_CreateGPUSampler(device_, &debugSamplerInfo);
-
     if (!depthSampler_) {
-        SDL_Log("NewRenderer: failed to create hud sampler: %s", SDL_GetError());
+        SDL_Log("NewRenderer: failed to create depth sampler: %s", SDL_GetError());
+        return false;
+    }
+
+    fxaaSampler_ = Boilerplate::createLinearClampSampler(device_);
+    if (!fxaaSampler_) {
+        SDL_Log("NewRenderer: failed to create FXAA sampler: %s", SDL_GetError());
         return false;
     }
 
@@ -152,6 +166,26 @@ bool NewRenderer::createHudPipeline()
         device_, colorTarget_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, true);
 
     return hudPipeline_ != nullptr;
+}
+
+bool NewRenderer::createFxaaPipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/hud.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/fxaa.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = 1;
+    fragmentShader.uniformBufferCount = 1;
+
+    const Boilerplate::VertexInputLayout vertexLayout{};
+
+    fxaaPipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, colorTarget_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, false);
+
+    return fxaaPipeline_ != nullptr;
 }
 
 bool NewRenderer::createGeometryPipeline()
@@ -280,8 +314,8 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         return;
     }
 
-    if (!ensureDepthTextureSize(width, height)) {
-        SDL_Log("NewRenderer::drawFrame: ensureDepthTextureSize failed");
+    if (!ensureDepthTextureSize(width, height) || !ensureSceneTextureSize(width, height)) {
+        SDL_Log("NewRenderer::drawFrame: failed to size render targets");
         SDL_CancelGPUCommandBuffer(cmd);
         return;
     }
@@ -368,10 +402,11 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
-    // SDL_PushGPUFragmentUniformData(cmd,3,&sceneLightInfo_,sizeof(LightUBO));
 
-    drawGeometryPass(swapchain, cmd);
-    drawWeaponPass(swapchain, cmd);
+    drawGeometryPass(sceneColor_, cmd);
+    drawWeaponPass(sceneColor_, cmd);
+    drawFxaaPass(sceneColor_, swapchain, cmd);
+    drawHudPass(swapchain, cmd);
     drawUIPass(swapchain, cmd);
 
     const Uint64 t2 = SDL_GetPerformanceCounter();
@@ -402,6 +437,11 @@ void NewRenderer::setMainCamera(glm::vec3 eye, float yaw, float pitch, float rol
     camera_.setEye(eye);
     camera_.setTarget(pitch, yaw, roll);
     camera_.setAspect(static_cast<float>(width), static_cast<float>(height));
+    const float aspect = height == 0 ? 1.0f : static_cast<float>(width) / static_cast<float>(height);
+    // Apply scope zoom by dividing the horizontal FOV. Standard game-engine
+    // convention for an "Nx scope" — at 1.5x, a 90° FOV narrows to 60°.
+    const float zoomedHorizFov = mainHorizontalFovDegrees / std::max(scopeZoom, 0.01f);
+    camera_.setFov(verticalFovDegreesFromHorizontal(zoomedHorizFov, aspect));
     camera_.computeViewProjectionMatrix();
 }
 
@@ -409,21 +449,13 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,Uint8 layer
 {
     SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture,layer,true);
 
-    SDL_Log("layer=%d texture=%p", (int)layer, (void*)depthTexture);
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
-    SDL_Log("pass=%p error=%s", (void*)geometryPass, SDL_GetError());
-
-    // SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
     SDL_BindGPUGraphicsPipeline(geometryPass, depthPipeline_);
 
     SDL_PushGPUVertexUniformData(cmd, 0, &shadowViewProjection, sizeof(glm::mat4));
 
     drawWorldModelInstances(geometryPass, cmd,true);
     drawEntityModels(geometryPass, cmd, true);
-
-    //drawSkinnedModels(geometryPass, cmd);
-
-    // drawWeapon(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
 }
@@ -436,10 +468,13 @@ void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass,SDL_GPUComma
     SDL_PushGPUFragmentUniformData(cmd,2,&sceneLightInfo_,sizeof(LightUBO));
 
 }
-void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
+void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(swapchain);
-    // Boilerplate::makeColorTargetLoad(swapchain, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
+    if (particleSystem_)
+        particleSystem_->uploadToGpu(cmd); // Must be before render pass
+
+    SDL_GPUColorTargetInfo colorTarget =
+        Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
 
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
@@ -453,15 +488,16 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuff
     drawEntityModels(geometryPass, cmd, false);
 
     drawSkinnedModels(geometryPass, cmd);
+    drawParticles(geometryPass, cmd);
 
     //drawWeapon(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
 }
 
-void NewRenderer::drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
+void NewRenderer::drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(swapchain);
+    SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(sceneColor);
 
     SDL_GPUDepthStencilTargetInfo depthInfo = depthTarget_; // copy
     depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;               // override to clear
@@ -480,6 +516,56 @@ void NewRenderer::drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer
     SDL_EndGPURenderPass(geometryPass);
 }
 
+void NewRenderer::drawFxaaPass(SDL_GPUTexture* sceneColor, SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTarget =
+        Boilerplate::makeColorTargetClear(swapchain, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f});
+
+    SDL_GPURenderPass* fxaaPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
+    SDL_BindGPUGraphicsPipeline(fxaaPass, fxaaPipeline_);
+
+    SDL_GPUTextureSamplerBinding sceneBinding = Boilerplate::makeTextureSamplerBinding(sceneColor, fxaaSampler_);
+    SDL_BindGPUFragmentSamplers(fxaaPass, 0, &sceneBinding, 1);
+
+    const glm::vec4 params{
+        sceneWidth_ > 0 ? 1.0f / static_cast<float>(sceneWidth_) : 0.0f,
+        sceneHeight_ > 0 ? 1.0f / static_cast<float>(sceneHeight_) : 0.0f,
+        1.0f,
+        0.0f,
+    };
+    SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
+
+    SDL_DrawGPUPrimitives(fxaaPass, 6, 1, 0, 0);
+    SDL_EndGPURenderPass(fxaaPass);
+}
+
+void NewRenderer::drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const
+{
+    // if (toggles.particles && particleSystem) {
+    if (particleSystem_) {
+        struct alignas(16) ParticleUniforms
+        {
+            glm::mat4 view;
+            glm::mat4 proj;
+            glm::vec3 camPos;
+            float _p0;
+            glm::vec3 camRight;
+            float _p1;
+            glm::vec3 camUp;
+            float _p2;
+        };
+        ParticleUniforms pu{};
+        pu.view = camera_.getViewMatrix();
+        pu.proj = camera_.getProjectionMatrix();
+        pu.camPos = camera_.getEye();
+        pu.camRight = camera_.getRight();
+        pu.camUp = camera_.getUp();
+        SDL_PushGPUVertexUniformData(cmd, 0, &pu, sizeof(pu));
+        particleSystem_->setScreenSize(static_cast<float>(depthWidth_), static_cast<float>(depthHeight_));
+        particleSystem_->render(renderPass, cmd);
+    }
+}
+
 void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
     if (!weapon_.visible)
@@ -496,6 +582,20 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
     }
 
     drawModel(weaponModelId, weapon_.transform, renderPass, cmd);
+
+    auto drawAttachment = [&](const ViewmodelAttachment& attachment) {
+        if (!attachment.visible)
+            return;
+        if (attachment.modelIndex < 0 || static_cast<size_t>(attachment.modelIndex) >= Asset::modelInstances_.size())
+            return;
+        const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(attachment.modelIndex)).modelId_;
+        if (!Asset::models_.contains(modelId))
+            return;
+        drawModel(modelId, attachment.transform, renderPass, cmd);
+    };
+    drawAttachment(weapon_.hands.right);
+    drawAttachment(weapon_.hands.left);
+    drawAttachment(weapon_.debugPoint);
 }
 
 void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
@@ -633,6 +733,25 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
     return true;
 }
 
+bool NewRenderer::ensureSceneTextureSize(Uint32 width, Uint32 height)
+{
+    if (sceneColor_ && sceneWidth_ == width && sceneHeight_ == height)
+        return true;
+
+    if (sceneColor_) {
+        SDL_ReleaseGPUTexture(device_, sceneColor_);
+        sceneColor_ = nullptr;
+    }
+
+    sceneColor_ = Boilerplate::createSampledColorTarget(device_, width, height, colorTarget_);
+    if (!sceneColor_)
+        return false;
+
+    sceneWidth_ = width;
+    sceneHeight_ = height;
+    return true;
+}
+
 void NewRenderer::drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd)
 {
     ImDrawData* drawData = ImGui::GetDrawData();
@@ -644,13 +763,23 @@ void NewRenderer::drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cm
     SDL_GPURenderPass* uiPass = SDL_BeginGPURenderPass(cmd, &uiColorTarget, 1, nullptr);
     SDL_BindGPUGraphicsPipeline(uiPass, hudPipeline_);
 
-    if (hudTexture_ != nullptr)
-        drawHud(uiPass);
-
     if (drawData && imguiEnabled)
         ImGui_ImplSDLGPU3_RenderDrawData(drawData, cmd, uiPass);
 
     SDL_EndGPURenderPass(uiPass);
+}
+
+void NewRenderer::drawHudPass(SDL_GPUTexture* target, SDL_GPUCommandBuffer* cmd)
+{
+    if (hudTexture_ == nullptr)
+        return;
+
+    SDL_GPUColorTargetInfo hudColorTarget = Boilerplate::makeColorTargetLoad(target);
+
+    SDL_GPURenderPass* hudPass = SDL_BeginGPURenderPass(cmd, &hudColorTarget, 1, nullptr);
+    SDL_BindGPUGraphicsPipeline(hudPass, hudPipeline_);
+    drawHud(hudPass);
+    SDL_EndGPURenderPass(hudPass);
 }
 
 void NewRenderer::drawHud(SDL_GPURenderPass* renderPass)
@@ -673,6 +802,8 @@ void NewRenderer::quit()
 
         if (depthTarget_.texture)
             SDL_ReleaseGPUTexture(device_, depthTarget_.texture);
+        if (sceneColor_)
+            SDL_ReleaseGPUTexture(device_, sceneColor_);
 
         for (auto& meshPair : Asset::meshes_) {
             Asset::Mesh& mesh = meshPair.second;
@@ -692,10 +823,14 @@ void NewRenderer::quit()
             SDL_ReleaseGPUGraphicsPipeline(device_, geometryPipeline_);
         if (hudPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, hudPipeline_);
+        if (fxaaPipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(device_, fxaaPipeline_);
         if (sampler_)
             SDL_ReleaseGPUSampler(device_, sampler_);
         if (hudSampler_)
             SDL_ReleaseGPUSampler(device_, hudSampler_);
+        if (fxaaSampler_)
+            SDL_ReleaseGPUSampler(device_, fxaaSampler_);
         if (texture_)
             SDL_ReleaseGPUTexture(device_, texture_);
 
@@ -710,11 +845,16 @@ void NewRenderer::quit()
 
     geometryPipeline_ = nullptr;
     hudPipeline_ = nullptr;
+    fxaaPipeline_ = nullptr;
     depthTarget_.texture = nullptr;
+    sceneColor_ = nullptr;
     texture_ = nullptr;
     sampler_ = nullptr;
     hudTexture_ = nullptr;
     hudSampler_ = nullptr;
+    fxaaSampler_ = nullptr;
+    sceneWidth_ = 0;
+    sceneHeight_ = 0;
     depthWidth_ = 0;
     depthHeight_ = 0;
 }

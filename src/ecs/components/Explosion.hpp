@@ -18,4 +18,5 @@ struct Explosion
     float maxKnockback = 0.0f;             ///< Peak knockback velocity (u/s) at d=0. 0 disables knockback.
     float knockbackFalloffExponent = 1.0f; ///< Knockback curve exponent (same form as damage falloff).
     entt::entity owner = entt::null;       ///< Entity that caused the explosion (for kill credit).
+    entt::entity directKillTarget = entt::null; ///< If set, guaranteed lethal damage to this entity (stuck grenade).
 };

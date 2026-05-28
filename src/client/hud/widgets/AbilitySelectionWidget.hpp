@@ -5,16 +5,18 @@
 
 #include "hud/HudWidget.hpp"
 
+#include <string>
+
 struct AbilitySelectionWidget : HudWidget
 {
     float panelWidth = 520.f;
     float choiceWidth = 244.f;
-    float choiceHeight = 86.f;
+    float choiceHeight = 90.f;
     float choiceGap = 12.f;
-    float headerFontSize = 12.f;
-    float nameFontSize = 18.f;
-    float bodyFontSize = 10.f;
-    float keyFontSize = 10.f;
+    float headerFontSize = 20.f;
+    float nameFontSize = 20.f;
+    float bodyFontSize = 18.f;
+    float keyFontSize = 18.f;
 
     AbilitySelectionWidget();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
@@ -22,4 +24,5 @@ struct AbilitySelectionWidget : HudWidget
 
 private:
     HudAbilitySelectionState state_;
+    std::string abilityMenuLabel_ = "Left Alt";
 };

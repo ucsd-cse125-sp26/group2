@@ -42,11 +42,9 @@ struct SfxRuntimeStats
 /// update(), because the server's handleDeath() immediately calls handleRespawn()
 /// in the same tick so IsDead never survives to a registry sync.
 ///
-/// On macOS, the system opens a specific physical audio device rather than
-/// SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK to avoid a race condition in SDL3's
-/// CoreAudio backend that causes a SIGSEGV when the default output changes
-/// (e.g. plugging/unplugging headphones).  Device hot-swap is handled
-/// manually via SDL_EVENT_AUDIO_DEVICE_REMOVED / ADDED events.
+/// On macOS, device hot-swap (e.g. plugging/unplugging headphones) is handled
+/// via SDL_EVENT_AUDIO_DEVICE_REMOVED / ADDED events which trigger a graceful
+/// reopen of the default playback device.
 class SfxSystem
 {
 public:
@@ -103,6 +101,9 @@ public:
     bool reloadAudioManifest();
     SourceHandle
     postAudioEvent(std::string_view eventName, audio::AudioObjectId object = audio::kGlobalObject, float gain = 1.0f);
+    SourceHandle postLocalAudioEvent(std::string_view eventName,
+                                     audio::AudioObjectId object = audio::kGlobalObject,
+                                     float gain = 1.0f);
     void submitVoiceFrame(ClientId speaker,
                           std::uint16_t sequence,
                           std::span<const float> monoPcm48k,
@@ -127,10 +128,12 @@ public:
     [[nodiscard]] const audio::AudioRuntime& audioRuntime() const noexcept { return audioRuntime_; }
     [[nodiscard]] const audio::AudioRuntimeStats& audioStats() const noexcept { return audioRuntime_.stats(); }
     [[nodiscard]] const SfxRuntimeStats& sfxStats() const noexcept { return sfxStats_; }
+    [[nodiscard]] std::uint32_t activeSourceCount() const noexcept;
+    [[nodiscard]] std::uint32_t activeVoiceSourceCount() const noexcept;
 
 private:
     SDL_AudioDeviceID device_ = 0;           ///< Logical playback device (0 = not initialised).
-    SDL_AudioDeviceID physicalDeviceId_ = 0; ///< Physical device ID we opened (for event matching).
+    SDL_AudioDeviceID physicalDeviceId_ = 0; ///< Logical device ID we opened (for event matching).
     SDL_AudioStream* mixStream_ = nullptr;   ///< Single SDL stream that receives our mixed stereo output.
     SDL_AudioSpec mixerSpec_{};
 
@@ -190,11 +193,10 @@ private:
     float prevArmor_ = 100.0f;
     int prevDeaths_ = 0;
     int prevKills_ = 0;
-    float healingSoundCooldown_ = 0.0f;           ///< Throttle the looping heal tick sound.
-    bool stateInitialized_ = false;               ///< Skip sounds on the very first update().
+    float healingSoundCooldown_ = 0.0f; ///< Throttle the looping heal tick sound.
+    bool stateInitialized_ = false;     ///< Skip sounds on the very first update().
 
-    bool pendingReopen_ = false;                  ///< Set by handleEvent(), processed at the start of update().
-    SDL_AudioDeviceID pendingReopenDeviceId_ = 0; ///< Which physical device to switch to (0 = first available).
+    bool pendingReopen_ = false;        ///< Set by handleEvent(), processed at the start of update().
 
     /// @brief Decode a single MP3 from assets/sounds/ and store it as clip[id].
     bool loadClip(SfxId id, const char* filename, SfxCategory cat, float gain, float cooldownSecs);

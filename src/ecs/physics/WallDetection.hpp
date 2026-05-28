@@ -1,5 +1,5 @@
 /// @file WallDetection.hpp
-/// @brief Wall, climb, and ledge detection against static world collision.
+/// @brief Wall detection against static world collision.
 
 #pragma once
 
@@ -10,10 +10,10 @@
 #include <cstdint>
 #include <glm/vec3.hpp>
 
-/// @brief Wall / climb / ledge detection.
+/// @brief Wall detection.
 ///
 /// Used by the movement system each tick to detect nearby surfaces
-/// for wallrunning, climbing, and ledge grabbing.
+/// for wallrunning.
 namespace physics
 {
 
@@ -34,18 +34,13 @@ struct WallDetectionResult
     TriRegion leftRegion{TriRegion::Face};  ///< Closest triangle feature for wallrun seam traversal.
     TriRegion rightRegion{TriRegion::Face}; ///< Closest triangle feature for wallrun seam traversal.
 
-    // Front wall (climbing)
+    // Front wall diagnostics.
     bool wallFront{false};                  ///< True if a wall was detected in front.
     glm::vec3 frontNormal{0.0f};            ///< Surface normal of the front wall.
     glm::vec3 frontPoint{0.0f};             ///< World-space contact point on the front wall.
-    uint32_t frontMeshIndex{UINT32_MAX};    ///< Static trimesh index for stable climb attachment, if applicable.
-    uint32_t frontTriId{UINT32_MAX};        ///< Triangle id for stable climb attachment, if applicable.
-    TriRegion frontRegion{TriRegion::Face}; ///< Closest triangle feature for climb seam traversal.
-
-    // Ledge (top of front wall)
-    bool ledgeDetected{false};   ///< True if a ledge was detected above the front wall.
-    glm::vec3 ledgePoint{0.0f};  ///< World-space point on the ledge surface.
-    glm::vec3 ledgeNormal{0.0f}; ///< Wall normal at the ledge.
+    uint32_t frontMeshIndex{UINT32_MAX};    ///< Static trimesh index for the front-wall diagnostic, if applicable.
+    uint32_t frontTriId{UINT32_MAX};        ///< Triangle id for the front-wall diagnostic, if applicable.
+    TriRegion frontRegion{TriRegion::Face}; ///< Closest triangle feature for the front-wall diagnostic.
 
     // Ground distance
     float groundDistance{1e10f}; ///< Distance to ground below the player (u).
@@ -64,7 +59,7 @@ struct WallAttachmentResult
 
 /// @brief Detect walls to the left, right, and front of the player.
 ///
-/// Also probes downward to measure ground distance (used for wallrun/climb min height).
+/// Also probes downward to measure ground distance (used for wallrun min-height gates).
 ///
 /// @param pos            Player AABB centre position.
 /// @param yaw            Player facing direction (radians).
@@ -85,7 +80,12 @@ WallDetectionResult detectWalls(glm::vec3 pos,
                                 float checkDist,
                                 float sphereRadius,
                                 glm::vec3 prevWallNormal = glm::vec3(0.0f),
-                                bool gravityFlipped = false);
+                                bool gravityFlipped = false,
+                                bool includeGroundDistance = true);
+
+/// @brief Probe only the downward ground distance used by wallrun entry gates.
+float probeWallrunGroundDistance(
+    glm::vec3 pos, glm::vec3 halfExtents, const WorldGeometry& world, float sphereRadius, bool gravityFlipped = false);
 
 /// @brief Find the best triangle-mesh wallrun attachment, with optional
 /// lookahead along the current travel direction.

@@ -5,6 +5,7 @@
 #include "SDL3/SDL_init.h"
 #include "SDL3/SDL_timer.h"
 #include "ui/LobbyUI.hpp"
+#include "util/LocalAddress.hpp"
 
 #include <algorithm>
 #include <backends/imgui_impl_sdl3.h>
@@ -12,13 +13,18 @@
 #include <glm/vec3.hpp>
 #include <imgui.h>
 
-bool Lobby::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* clientPtr)
+bool Lobby::init(AppContext& ctx)
 {
-    renderer = rendererPtr;
-    window = windowPtr;
-    client = clientPtr;
-    if (!renderer || !window)
-        return false;
+    renderer = &ctx.renderer;
+    window = &ctx.window;
+    client = &ctx.client;
+    isHosting = ctx.hostedServer.hasSession();
+    serverName = std::string(ctx.currentServerName);
+    if (serverName.empty() && isHosting) {
+        serverName = ctx.hostConfigState.serverName;
+    }
+    hostPort = ctx.hostedServer.port();
+    hostLanIp = isHosting ? local_address::firstLanIPv4() : std::string{};
 
     client->onLobbyState([this](const std::vector<LobbyPlayer>& snapshot, ClientId localId) {
         players = snapshot;
@@ -91,9 +97,18 @@ bool Lobby::init(NewRenderer* rendererPtr, SDL_Window* windowPtr, Client* client
             startMatchState = packet;
     });
 
+    client->onMatchConfig([this](const MatchConfig& config) {
+        SDL_Log("Lobby: match settings updated: killsToWin=%d maxPlayers=%d", config.killsToWin, config.maxPlayers);
+        matchConfig = config;
+    });
+
     if (const auto latestLobbyState = client->getLatestLobbyState()) {
         players = latestLobbyState->first;
         localClientId = latestLobbyState->second;
+    }
+
+    if (const auto latestMatchConfig = client->getLatestMatchConfig()) {
+        matchConfig = latestMatchConfig;
     }
 
     return true;
@@ -109,13 +124,16 @@ SDL_AppResult Lobby::event(SDL_Event* event)
 
 SDL_AppResult Lobby::iterate()
 {
+    if (!client->poll()) {
+        SDL_Log("Lobby: lost connection to server; returning to main menu");
+        returnToMenu = true;
+        serverShutdownNotice = true;
+        return SDL_APP_CONTINUE;
+    }
+
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-
-    if (!client->poll()) {
-        return SDL_APP_SUCCESS;
-    }
 
     updateStartCountdown();
 
@@ -127,6 +145,11 @@ SDL_AppResult Lobby::iterate()
         .canStartMatch = canHostStartMatch() && !startCountdownActive,
         .startCountdownActive = startCountdownActive,
         .startCountdownRemaining = startCountdownRemaining,
+        .matchConfig = matchConfig,
+        .serverName = serverName,
+        .isHosting = isHosting,
+        .hostLanIp = hostLanIp,
+        .hostPort = hostPort,
     };
 
     const auto result = lobby_ui::buildPlayerList(config);
@@ -140,6 +163,9 @@ SDL_AppResult Lobby::iterate()
 
     if (result.returnToMenuClicked) {
         returnToMenu = true;
+    }
+    if (result.returnToHostConfigClicked) {
+        returnToHostConfig = true;
     }
 
     ImGui::Render();
@@ -155,6 +181,7 @@ void Lobby::quit()
         client->onLobbyState({});
         client->onLobbyUpdate({});
         client->onMatchStateUpdate({});
+        client->onMatchConfig({});
     }
 }
 
@@ -175,17 +202,15 @@ std::optional<MatchStatePacket> Lobby::consumeStartMatchState()
 
 bool Lobby::canHostStartMatch() const
 {
-    bool sawNonHost = false;
     for (const auto& player : players) {
         if (player.isHost)
             continue;
 
-        sawNonHost = true;
         if (!player.ready)
             return false;
     }
 
-    return sawNonHost;
+    return true;
 }
 
 void Lobby::updateStartCountdown()
@@ -214,5 +239,23 @@ bool Lobby::consumeReturnToMenu()
         return false;
 
     returnToMenu = false;
+    return true;
+}
+
+bool Lobby::consumeReturnToHostConfig()
+{
+    if (!returnToHostConfig)
+        return false;
+
+    returnToHostConfig = false;
+    return true;
+}
+
+bool Lobby::consumeServerShutdownNotice()
+{
+    if (!serverShutdownNotice)
+        return false;
+
+    serverShutdownNotice = false;
     return true;
 }

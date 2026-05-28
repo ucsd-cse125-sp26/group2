@@ -7,9 +7,11 @@
 #include "CharacterRig.hpp"
 #include "SkinningBackend.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
+#include "ecs/components/GripPose.hpp"
 
 #include <array>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <memory>
 #include <vector>
 
@@ -19,14 +21,19 @@
 /// `MoveMode` from PlayerVisState (avoids a header dependency here).
 struct AnimationInputs
 {
-    glm::vec3 velocityWorld{0.0f}; ///< World-space velocity (u/s).
-    float yawRad = 0.0f;           ///< Player yaw (radians).
-    float pitchRad = 0.0f;         ///< Player pitch (radians, positive = looking down).
-    bool grounded = false;         ///< Touching the ground this tick.
-    bool sprinting = false;        ///< Sprint key currently held.
-    bool crouching = false;        ///< Crouch currently held (phase 1: note-only).
-    int moveMode = 0;              ///< MoveMode value: 0=OnFoot, 1=Sliding, 2=WallRunning, 3=Climbing, 4=LedgeGrabbing.
-    int wallRunSide = 0;           ///< WallSide value: 0=None, 1=Left, 2=Right.
+    glm::vec3 velocityWorld{0.0f};    ///< World-space velocity (u/s).
+    float yawRad = 0.0f;              ///< Player yaw (radians).
+    float pitchRad = 0.0f;            ///< Player pitch (radians, positive = looking down).
+    float spineBendMultiplier = 1.0f; ///< Per-weapon-class scaler on Phase F spine bend (1.0 = full).
+    float hipLeanMultiplier = 0.0f;   ///< Per-weapon-class hip-lean magnitude (radians of pelvis pitch per radian of
+                                      ///< camera pitch, opposite sign).
+    float dtSec =
+        0.0f; ///< Frame delta time (s). Used by the breathing oscillator and recoil decay in `runSamplingAndSkinning`.
+    bool grounded = false;  ///< Touching the ground this tick.
+    bool sprinting = false; ///< Sprint key currently held.
+    bool crouching = false; ///< Crouch currently held (phase 1: note-only).
+    int moveMode = 0;       ///< MoveMode value: 0=OnFoot, 1=Sliding, 2=WallRunning.
+    int wallRunSide = 0;    ///< WallSide value: 0=None, 1=Left, 2=Right.
 };
 
 /// Number of sampler slots available for the per-frame blend.
@@ -46,6 +53,56 @@ struct ClipSampler
     float playbackSpeed = 1.0f; ///< Multiplier applied to clip duration when advancing.
     float weight = 0.0f;        ///< Blend weight; slots with weight 0 are skipped.
     bool active = false;        ///< False = slot unused this frame.
+};
+
+/// @brief Number of fingers per hand. Used as the iteration count for grip-pose
+/// blending in CharacterAnimator. The IK finger targets that previously lived
+/// here were removed in Phase E — finger contact is fully GripPose-driven now.
+static constexpr size_t kHandFingerIkCount = 5;
+
+/// @brief Model-space IK target for one player hand.
+///
+/// Phase E removed the per-finger IK target arrays (fingerPositionsModel /
+/// fingerEnabled) — finger pose is now driven by the authored GripPose blend
+/// in HandIkTargets, not by per-frame iterative finger IK.
+struct ArmIkTarget
+{
+    glm::vec3 positionModel{0.0f};
+    glm::vec3 elbowPositionModel{0.0f};
+    glm::quat orientationModel{1.0f, 0.0f, 0.0f, 0.0f};
+    bool enabled = false;
+    bool elbowEnabled = false;
+    bool orientationEnabled = false;
+    /// Debug toggle: when false, the analytical solver skips the shoulder
+    /// swing/twist cone, the elbow hinge clamp, and the wrist twist clamp.
+    /// Default OFF — current clamps don't contribute useful pose-quality
+    /// improvements and tend to fight anchor authoring. Will be revisited
+    /// once the constraint geometry is tuned to the rig.
+    bool enableJointConstraints = false;
+    /// Debug toggle: when false, the IK rotation magnitudes are NOT slerped
+    /// toward identity when the target is past `upperLen + foreLen`. The arm
+    /// will reach as far as physically possible without fading out. Helpful
+    /// when tuning anchors that sit near the edge of reach.
+    bool enableReachFade = true;
+};
+
+/// @brief Optional per-frame IK targets for both hands.
+///
+/// Carries arm-IK targets (positionModel, elbowPositionModel, ...) and
+/// per-hand grip poses (Phase C+ of the AAA IK overhaul). When a grip-pose
+/// pointer is non-null, CharacterAnimator blends the animated finger
+/// local-space rotations toward the authored pose by the matching
+/// `*GripWeight` (1.0 = fully gripped, 0.0 = ignore pose). Grip blending
+/// is applied AFTER arm IK so the finger pose is anchored at the wrist
+/// position determined by the arm.
+struct HandIkTargets
+{
+    ArmIkTarget left;
+    ArmIkTarget right;
+    const GripPose* leftGripPose = nullptr;
+    const GripPose* rightGripPose = nullptr;
+    float leftGripWeight = 0.0f;
+    float rightGripWeight = 0.0f;
 };
 
 /// @brief Per-entity animator.
@@ -116,8 +173,69 @@ public:
     /// @brief Playback-speed multiplier applied in debug-override mode.
     void setDebugPlaybackSpeed(float mul) noexcept;
 
+    /// @brief Move the arm chains so hands reach weapon-authored grip targets.
+    ///
+    /// Targets are in rig model space and should be applied after sampling for
+    /// the frame, before copying joint/skinning matrices into renderer buffers.
+    /// Convenience wrapper around `applyArmIk` + `applyGripPose` + `updateSkinMatrices`.
+    void applyHandIkTargets(const HandIkTargets& targets);
+
+    /// @brief Apply two-bone arm IK + optional wrist orientation to one arm.
+    ///
+    /// Mutates `jointModelMatrices()` in place. The caller is responsible for
+    /// calling `updateSkinMatrices()` once after all per-frame IK + grip
+    /// operations have run, so the LBS palette reflects the final pose.
+    ///
+    /// Splitting per-arm lets the right hand be IK'd first (placing the
+    /// weapon, which is parented to it) and the left-hand target then be
+    /// derived from the resulting weapon world transform — so the support
+    /// hand actually grabs the gun where it is, not where some precomputed
+    /// player-relative offset thinks it should be.
+    void applyArmIk(bool isLeft, const ArmIkTarget& target);
+
+    /// @brief Blend an authored GripPose into the animated finger rotations
+    /// for one hand. Same semantics as the grip-pose half of
+    /// `applyHandIkTargets`, but per-hand.
+    void applyGripPose(bool isLeft, const GripPose& pose, float weight);
+
+    /// @brief Recompute `skinMatrices()` = jointModelMats * inverseBindMats.
+    ///
+    /// Call once after `applyArmIk` / `applyGripPose` calls have settled the
+    /// per-bone model matrices for the frame. The LBS skinning palette and
+    /// hitbox-tracking code both read these matrices.
+    void updateSkinMatrices();
+
+    /// @brief Phase F additive recoil kick.
+    ///
+    /// Pushes an instantaneous upward pitch impulse onto the spine that decays
+    /// exponentially over ~250 ms (impl detail). Called once per fired shot
+    /// from the client's weapon system; the animator integrates the decay each
+    /// frame inside `runSamplingAndSkinning`.
+    ///
+    /// `strengthRad` is the peak additional pitch in radians, typically
+    /// 0.05–0.15 (≈3–8 degrees) for a rifle and larger for heavier weapons.
+    void applyRecoilImpulse(float strengthRad);
+
     /// @brief Number of joints in the underlying rig.
     [[nodiscard]] int numJoints() const noexcept;
+
+    /// @brief Current high-level animator mode, mapped to the values used by
+    /// `HoldStance` in ViewmodelConfig.hpp. Used by Game.cpp to pick the right
+    /// per-stance weapon anchor each frame (crouched-hold vs standing-hold
+    /// etc.). Returns the underlying int of CharacterAnimator's private Mode
+    /// enum — callers should treat 0..N as opaque and translate via the
+    /// codebase's MapAnimModeToHoldStance helper.
+    [[nodiscard]] int currentModeValue() const noexcept;
+
+    /// @brief Freeze animation playback. While frozen, `update()` and
+    /// `renderFromServer()` skip the state-machine + sampler-time updates,
+    /// but still run the ozz sample → blend → LocalToModel pipeline using
+    /// the last-known sampler state. This keeps the IK pass's base pose
+    /// reproducible and stable — needed so the world-space anchor sliders
+    /// don't drift from the idle bob while authoring. The procedural
+    /// overlays (spine bend etc.) keep responding to live `inputs` so the
+    /// gun still tracks aim pitch when the user pans the camera.
+    void setFrozen(bool frozen) noexcept;
 
     /// @brief Model-space joint matrices with all procedural transforms applied
     ///        (head pitch, wallrun mirror) but WITHOUT inverse-bind-matrix multiplication.
@@ -145,6 +263,13 @@ private:
     /// `update()`).  Consumes `inputs` only for head-pitch and
     /// wallrun-mirror post-processing.
     void runSamplingAndSkinning(const AnimationInputs& inputs);
+
+    /// @brief Shared implementation behind `applyHandIkTargets`,
+    /// `applyArmIk`, and `applyGripPose`. When `finalize` is true the
+    /// skin-matrix palette is recomputed at the end — used by the all-in-one
+    /// public entry point. When false, the caller is responsible for invoking
+    /// `updateSkinMatrices()` once after staging multiple per-arm operations.
+    void applyHandIkTargetsImpl(const HandIkTargets& targets, bool finalize);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

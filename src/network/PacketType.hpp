@@ -71,7 +71,14 @@ enum class PacketType : uint8_t
     TEXT_CHAT,      ///< Client <-> Server: bounded UTF-8 all-chat message.
     VOICE_FRAME,    ///< Client <-> Server: Opus voice frame for proximity chat.
     VOICE_STATE,    ///< Client <-> Server: push-to-talk state hint for HUD indicators.
+    PHYSICS_DIAG_RECORDING,         ///< Client -> Server: start/stop authoritative physics CSV recording.
 
     LOCAL_SERVER_DISCOVERY_REQUEST, ///< client broadcasts to server, which responds with response below
     LOCAL_SERVER_DISCOVERY_RESPONSE,
+
+    UPDATE_MATCH_CONFIG,       ///< Client -> Server: update match config (e.g. kill threshold to win).
+    MATCH_CONFIG,              ///< Server -> All clients: broadcast match config on change and on join.
+    UPDATE_DISCOVERY_SETTINGS, ///< Client -> Server: host updates global/LAN advertisement toggles.
+
+    REQUEST_SERVER_SHUTDOWN,   ///< Client -> Server: current host requests authoritative server shutdown.
 };

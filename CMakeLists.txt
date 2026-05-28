@@ -84,11 +84,48 @@ endif()
 
 # ---- Dependencies ----
 
+set(GROUP2_DEPENDENCIES_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/dependencies.json")
+file(READ "${GROUP2_DEPENDENCIES_FILE}" GROUP2_DEPENDENCIES_JSON)
+
+function(group2_dependency_git name out_repository out_tag)
+    string(JSON _repository ERROR_VARIABLE _repository_error
+           GET "${GROUP2_DEPENDENCIES_JSON}" "${name}" repository)
+    if(_repository_error)
+        message(FATAL_ERROR
+            "Missing repository for dependency '${name}' in ${GROUP2_DEPENDENCIES_FILE}: "
+            "${_repository_error}")
+    endif()
+
+    string(JSON _tag ERROR_VARIABLE _tag_error
+           GET "${GROUP2_DEPENDENCIES_JSON}" "${name}" tag)
+    if(_tag_error)
+        message(FATAL_ERROR
+            "Missing tag for dependency '${name}' in ${GROUP2_DEPENDENCIES_FILE}: "
+            "${_tag_error}")
+    endif()
+
+    set(${out_repository} "${_repository}" PARENT_SCOPE)
+    set(${out_tag} "${_tag}" PARENT_SCOPE)
+endfunction()
+
+function(group2_dependency_url name out_url)
+    string(JSON _url ERROR_VARIABLE _url_error
+           GET "${GROUP2_DEPENDENCIES_JSON}" "${name}" url)
+    if(_url_error)
+        message(FATAL_ERROR
+            "Missing URL for dependency '${name}' in ${GROUP2_DEPENDENCIES_FILE}: "
+            "${_url_error}")
+    endif()
+
+    set(${out_url} "${_url}" PARENT_SCOPE)
+endfunction()
+
 # SDL3 — window, input, GPU pipeline (Vulkan/Metal/DX12) + OpenGL context
+group2_dependency_git(SDL3 SDL3_REPOSITORY SDL3_TAG)
 FetchContent_Declare(
     SDL3
-    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-    GIT_TAG        release-3.4.4
+    GIT_REPOSITORY "${SDL3_REPOSITORY}"
+    GIT_TAG        "${SDL3_TAG}"
     GIT_SHALLOW    TRUE
 )
 # Build SDL3 as a static library so no DLL shipping is needed at runtime.
@@ -102,11 +139,11 @@ FetchContent_MakeAvailable(SDL3)
 # SDL3_net — networking library for SDL3
 block()
     set(BUILD_SHARED_LIBS OFF)
+    group2_dependency_git(SDL3_net SDL3_NET_REPOSITORY SDL3_NET_TAG)
     FetchContent_Declare(
         SDL3_net
-        GIT_REPOSITORY https://github.com/cedricdvd/SDL_net.git
-        GIT_TAG        main
-        GIT_SHALLOW    TRUE
+        GIT_REPOSITORY "${SDL3_NET_REPOSITORY}"
+        GIT_TAG        "${SDL3_NET_TAG}"
     )
     FetchContent_MakeAvailable(SDL3_net)
 endblock()
@@ -144,10 +181,11 @@ if(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE)
         set(SPIRV_CROSS_ENABLE_CPP          OFF CACHE BOOL "" FORCE)
         set(SPIRV_CROSS_ENABLE_UTIL         ON  CACHE BOOL "" FORCE)
         set(SPIRV_CROSS_SKIP_INSTALL        ON  CACHE BOOL "" FORCE)
+        group2_dependency_git(SPIRV-Cross SPIRV_CROSS_REPOSITORY SPIRV_CROSS_TAG)
         FetchContent_Declare(
             SPIRV-Cross
-            GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
-            GIT_TAG        vulkan-sdk-1.4.309.0
+            GIT_REPOSITORY "${SPIRV_CROSS_REPOSITORY}"
+            GIT_TAG        "${SPIRV_CROSS_TAG}"
             GIT_SHALLOW    TRUE
         )
         FetchContent_MakeAvailable(SPIRV-Cross)
@@ -184,9 +222,10 @@ if(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE)
     # can find dxcompiler.dll/.lib/dxcapi.h without building LLVM ourselves.
     # On other platforms we disable DXC entirely (we only need MSL on macOS).
     if(WIN32)
+        group2_dependency_url(dxc_binaries DXC_BINARIES_URL)
         FetchContent_Declare(
             dxc_binaries
-            URL https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2407/dxc_2024_07_31.zip
+            URL "${DXC_BINARIES_URL}"
             DOWNLOAD_EXTRACT_TIMESTAMP TRUE
         )
         FetchContent_MakeAvailable(dxc_binaries)
@@ -215,10 +254,11 @@ if(SHADERCROSS_PLATFORM_NEEDS_TRANSPILE)
         set(SDLSHADERCROSS_INSTALL          OFF CACHE BOOL "" FORCE)
         set(SDLSHADERCROSS_TESTS            OFF CACHE BOOL "" FORCE)
         set(SDLSHADERCROSS_WERROR           OFF CACHE BOOL "" FORCE)
+        group2_dependency_git(SDL_shadercross SDL_SHADERCROSS_REPOSITORY SDL_SHADERCROSS_TAG)
         FetchContent_Declare(
             SDL_shadercross
-            GIT_REPOSITORY https://github.com/libsdl-org/SDL_shadercross.git
-            GIT_TAG        main
+            GIT_REPOSITORY "${SDL_SHADERCROSS_REPOSITORY}"
+            GIT_TAG        "${SDL_SHADERCROSS_TAG}"
             GIT_SHALLOW    TRUE
         )
         FetchContent_MakeAvailable(SDL_shadercross)
@@ -244,29 +284,32 @@ block()
     set(ENABLE_SPVREMAPPER        OFF CACHE BOOL "" FORCE)
     set(ENABLE_CTEST              OFF CACHE BOOL "" FORCE)
     set(SKIP_GLSLANG_INSTALL      ON  CACHE BOOL "" FORCE)
+    group2_dependency_git(glslang GLSLANG_REPOSITORY GLSLANG_TAG)
     FetchContent_Declare(
         glslang
-        GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
-        GIT_TAG        vulkan-sdk-1.4.309.0
+        GIT_REPOSITORY "${GLSLANG_REPOSITORY}"
+        GIT_TAG        "${GLSLANG_TAG}"
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(glslang)
 endblock()
 
 # GLM — header-only math library (vectors, matrices, quaternions)
+group2_dependency_git(glm GLM_REPOSITORY GLM_TAG)
 FetchContent_Declare(
     glm
-    GIT_REPOSITORY https://github.com/g-truc/glm.git
-    GIT_TAG        1.0.1
+    GIT_REPOSITORY "${GLM_REPOSITORY}"
+    GIT_TAG        "${GLM_TAG}"
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(glm)
 
 # EnTT — fast header-only ECS library
+group2_dependency_git(EnTT ENTT_REPOSITORY ENTT_TAG)
 FetchContent_Declare(
     EnTT
-    GIT_REPOSITORY https://github.com/skypjack/entt.git
-    GIT_TAG        v3.14.0
+    GIT_REPOSITORY "${ENTT_REPOSITORY}"
+    GIT_TAG        "${ENTT_TAG}"
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(EnTT)
@@ -280,10 +323,11 @@ if(TARGET EnTT)
 endif()
 
 # toml++ - TOML parsing library
+group2_dependency_git(tomlplusplus TOMLPLUSPLUS_REPOSITORY TOMLPLUSPLUS_TAG)
 FetchContent_Declare(
     tomlplusplus
-    GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
-    GIT_TAG        v3.4.0
+    GIT_REPOSITORY "${TOMLPLUSPLUS_REPOSITORY}"
+    GIT_TAG        "${TOMLPLUSPLUS_TAG}"
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(tomlplusplus)
@@ -308,10 +352,11 @@ set(ASSIMP_BUILD_MINIZIP                 ON  CACHE BOOL "" FORCE)
 set(ASSIMP_WARNINGS_AS_ERRORS            OFF CACHE BOOL "" FORCE)
 block()
     set(BUILD_SHARED_LIBS OFF)
+    group2_dependency_git(assimp ASSIMP_REPOSITORY ASSIMP_TAG)
     FetchContent_Declare(
         assimp
-        GIT_REPOSITORY https://github.com/assimp/assimp.git
-        GIT_TAG        v5.4.3
+        GIT_REPOSITORY "${ASSIMP_REPOSITORY}"
+        GIT_TAG        "${ASSIMP_TAG}"
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(assimp)
@@ -321,10 +366,11 @@ endblock()
 # PNG/JPEG textures embedded in GLB files).  stb ships no CMakeLists.txt, so
 # FetchContent just populates the source directory; we expose it as a simple
 # INTERFACE library so callers get -isystem suppression.
+group2_dependency_git(stb STB_REPOSITORY STB_TAG)
 FetchContent_Declare(
     stb
-    GIT_REPOSITORY https://github.com/nothings/stb.git
-    GIT_TAG        master
+    GIT_REPOSITORY "${STB_REPOSITORY}"
+    GIT_TAG        "${STB_TAG}"
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(stb)
@@ -333,10 +379,11 @@ target_include_directories(stb_image SYSTEM INTERFACE ${stb_SOURCE_DIR})
 
 # minimp3 — single-header MP3 decoder (used by SfxSystem to load MP3 sound assets).
 # Same FetchContent+INTERFACE pattern as stb above.
+group2_dependency_git(minimp3 MINIMP3_REPOSITORY MINIMP3_TAG)
 FetchContent_Declare(
     minimp3
-    GIT_REPOSITORY https://github.com/lieff/minimp3.git
-    GIT_TAG        master
+    GIT_REPOSITORY "${MINIMP3_REPOSITORY}"
+    GIT_TAG        "${MINIMP3_TAG}"
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(minimp3)
@@ -361,10 +408,11 @@ if(WIN32)
     set(OPUS_X86_PRESUME_SSE4_1 OFF CACHE BOOL "" FORCE)
     set(OPUS_X86_PRESUME_AVX2 OFF CACHE BOOL "" FORCE)
 endif()
+group2_dependency_git(opus OPUS_REPOSITORY OPUS_TAG)
 FetchContent_Declare(
     opus
-    GIT_REPOSITORY https://github.com/xiph/opus.git
-    GIT_TAG        v1.5.2
+    GIT_REPOSITORY "${OPUS_REPOSITORY}"
+    GIT_TAG        "${OPUS_TAG}"
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(opus)
@@ -374,10 +422,11 @@ if(GROUP2_ENABLE_VHACD)
     # V-HACD — legacy opt-in convex decomposition for prototype props.
     # Production map collision is authored as simplified triangle meshes, so
     # default builds do not fetch or compile V-HACD.
+    group2_dependency_git(vhacd_src VHACD_REPOSITORY VHACD_TAG)
     FetchContent_Declare(
         vhacd_src
-        GIT_REPOSITORY https://github.com/kmammou/v-hacd.git
-        GIT_TAG        v4.1.0
+        GIT_REPOSITORY "${VHACD_REPOSITORY}"
+        GIT_TAG        "${VHACD_TAG}"
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(vhacd_src)
@@ -397,10 +446,11 @@ set(ozz_build_data      OFF CACHE BOOL "" FORCE)
 set(ozz_build_msvc_rt_dll ON CACHE BOOL "" FORCE)
 block()
     set(BUILD_SHARED_LIBS OFF)
+    group2_dependency_git(ozz-animation OZZ_ANIMATION_REPOSITORY OZZ_ANIMATION_TAG)
     FetchContent_Declare(
         ozz-animation
-        GIT_REPOSITORY https://github.com/guillaumeblanc/ozz-animation.git
-        GIT_TAG        0.15.0
+        GIT_REPOSITORY "${OZZ_ANIMATION_REPOSITORY}"
+        GIT_TAG        "${OZZ_ANIMATION_TAG}"
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(ozz-animation)
@@ -435,10 +485,11 @@ endforeach()
 # ImGui ships no CMakeLists.txt, so FetchContent_MakeAvailable just downloads
 # the source tree without calling add_subdirectory. We compile it ourselves
 # as imgui_lib below.
+group2_dependency_git(imgui IMGUI_REPOSITORY IMGUI_TAG)
 FetchContent_Declare(
     imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        v1.92.0
+    GIT_REPOSITORY "${IMGUI_REPOSITORY}"
+    GIT_TAG        "${IMGUI_TAG}"
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(imgui)
@@ -462,6 +513,16 @@ target_compile_options(imgui_lib PRIVATE
     $<$<CXX_COMPILER_ID:Clang,GNU>:-w>
     $<$<CXX_COMPILER_ID:MSVC>:/W0>
 )
+
+# argparse -- header-only command-line argument parser used by the server.
+group2_dependency_git(argparse ARGPARSE_REPOSITORY ARGPARSE_TAG)
+FetchContent_Declare(
+    argparse
+    GIT_REPOSITORY "${ARGPARSE_REPOSITORY}"
+    GIT_TAG        "${ARGPARSE_TAG}"
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(argparse)
 
 # ---- Shaders: GLSL → SPIR-V (→ DXIL on Windows / MSL on macOS) ----
 # Step 1: GLSL → SPIR-V
@@ -636,6 +697,7 @@ set(SHADER_NEW_SOURCES
         geometry_shadowed.frag
         debug_depth.vert debug_depth.frag
         hud.vert hud.frag
+        fxaa.frag
 )
 
 foreach(SHADER_SRC ${SHADER_NEW_SOURCES})
@@ -683,6 +745,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/renderer-new/ShaderUtils.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/FrameRecorder.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/ClientPerfRecorder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/debug/ClientPerfRecorder.hpp"
     # Util
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/util/WorkerPool.hpp"
@@ -765,16 +829,22 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeSlotsWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeSlotsWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ChatWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ChatWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/CrosshairWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RailgunScopeWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/RailgunScopeWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HealthArmorBar.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ShotgunPelletWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ShotgunPelletWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.cpp"
@@ -797,8 +867,6 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MatchHeader.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MatchHeader.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.cpp"
@@ -860,6 +928,8 @@ add_executable(group2
         src/ecs/physics/Solver.cpp
         src/ecs/physics/Joints.hpp
         src/ecs/physics/Joints.cpp
+        src/ecs/physics/RagdollPbd.hpp
+        src/ecs/physics/RagdollPbd.cpp
         src/ecs/physics/Sleep.hpp
         src/ecs/physics/Sleep.cpp
         src/ecs/physics/CookedMeshFormat.hpp
@@ -940,6 +1010,8 @@ add_executable(group2
         src/ecs/components/GrenadeState.hpp
         src/ecs/components/GrenadeConfig.hpp
         src/ecs/components/ViewmodelConfig.hpp
+        src/ecs/components/GripPose.hpp
+        src/ecs/components/GripPose.cpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
         src/ecs/components/Explosion.hpp
@@ -961,8 +1033,14 @@ add_executable(group2
         src/ecs/components/DeathInfo.hpp
         src/ecs/components/WeaponSpawner.hpp
         src/ecs/components/RespawnPoint.hpp
+        src/ecs/components/JumpPad.hpp
+        src/ecs/components/Killzone.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/ecs/systems/JumpPadSystem.hpp
+        src/ecs/systems/JumpPadSystem.cpp
+        src/ecs/systems/KillzoneSystem.hpp
+        src/ecs/systems/KillzoneSystem.cpp
         src/ecs/systems/DroppedWeaponSystem.hpp
         src/ecs/systems/DroppedWeaponSystem.cpp
         src/ecs/components/AbilityState.hpp
@@ -980,6 +1058,7 @@ add_executable(group2
         src/ecs/abilities/GravityAbility.hpp
         src/ecs/abilities/RecallAbility.cpp
         src/ecs/abilities/RecallAbility.hpp
+        src/client/app/AppContext.hpp
         src/client/app/App.hpp
         src/client/app/App.cpp
         src/client/menus/lobby/Lobby.hpp
@@ -997,6 +1076,23 @@ add_executable(group2
         src/ecs/systems/PowerupSpawnerSystem.hpp
         src/ecs/systems/PowerupSystem.cpp
         src/ecs/systems/PowerupSystem.hpp
+        src/client/config/InputBindings.cpp
+        src/client/config/InputBindings.hpp
+        src/client/config/UserSettings.cpp
+        src/client/config/UserSettings.hpp
+        src/client/menus/pause/ConfirmModal.hpp
+        src/client/menus/pause/ConfirmModal.cpp
+        src/client/menus/pause/PauseMenu.hpp
+        src/client/menus/pause/PauseMenu.cpp
+        src/client/host/HostedServer.hpp
+        src/client/host/HostedServer.cpp
+        src/client/menus/host/HostConfig.hpp
+        src/client/menus/host/HostConfig.cpp
+        src/client/menus/host/ui/HostConfigUI.hpp
+        src/client/menus/host/ui/HostConfigUI.cpp
+        src/client/util/LocalAddress.hpp
+        src/client/util/LocalAddress.cpp
+        src/network/MatchConfig.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1173,6 +1269,8 @@ add_executable(server
         src/ecs/physics/Solver.cpp
         src/ecs/physics/Joints.hpp
         src/ecs/physics/Joints.cpp
+        src/ecs/physics/RagdollPbd.hpp
+        src/ecs/physics/RagdollPbd.cpp
         src/ecs/physics/Sleep.hpp
         src/ecs/physics/Sleep.cpp
         src/ecs/physics/CookedMeshFormat.hpp
@@ -1235,6 +1333,8 @@ add_executable(server
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/ViewmodelConfig.hpp
+        src/ecs/components/GripPose.hpp
+        src/ecs/components/GripPose.cpp
         src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
@@ -1256,8 +1356,14 @@ add_executable(server
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
         src/ecs/components/WeaponSpawner.hpp
+        src/ecs/components/JumpPad.hpp
+        src/ecs/components/Killzone.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/ecs/systems/JumpPadSystem.hpp
+        src/ecs/systems/JumpPadSystem.cpp
+        src/ecs/systems/KillzoneSystem.hpp
+        src/ecs/systems/KillzoneSystem.cpp
         src/ecs/systems/DroppedWeaponSystem.hpp
         src/ecs/systems/DroppedWeaponSystem.cpp
         src/ecs/components/Hitbox.hpp
@@ -1334,6 +1440,7 @@ target_link_libraries(server PRIVATE
     ozz_animation_offline
     ozz_animation
     ozz_base
+    argparse
 )
 if(TBB_FOUND)
     target_link_libraries(server PRIVATE TBB::tbb)
@@ -1398,24 +1505,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/animations")
         COMMENT "Copying animation assets to server binary directory"
         VERBATIM
     )
-endif()
-
-# Copy prop GLBs (top-level files in assets/) next to the server binary so
-# MapLoader::loadPropCollision can find them.  ServerGame.cpp loads bottle_a /
-# metallic_pallet_factory_store as collision-only props for prediction parity
-# with the client.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets")
-    file(GLOB _server_prop_glbs "${CMAKE_CURRENT_SOURCE_DIR}/assets/*.glb")
-    if(_server_prop_glbs)
-        add_custom_command(TARGET server POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:server>/assets"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    ${_server_prop_glbs}
-                    "$<TARGET_FILE_DIR:server>/assets/"
-            COMMENT "Copying prop GLBs to server binary directory"
-            VERBATIM
-        )
-    endif()
 endif()
 
 # ===========================================================================
@@ -1554,6 +1643,8 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Solver.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/RagdollPbd.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/RagdollPbd.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Sleep.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Sleep.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CookedMeshFormat.hpp"
@@ -1676,6 +1767,44 @@ target_link_libraries(physics_trimesh_tests PRIVATE
 )
 add_test(NAME physics_trimesh_tests COMMAND physics_trimesh_tests)
 
+add_executable(ragdoll_system_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/ragdoll_system_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/RagdollSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/RagdollPbd.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Forces.cpp"
+)
+target_include_directories(ragdoll_system_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(ragdoll_system_tests PRIVATE
+    EnTT::EnTT
+    glm::glm
+)
+add_test(NAME ragdoll_system_tests COMMAND ragdoll_system_tests)
+
+add_executable(input_bindings_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/input_bindings_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/config/InputBindings.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/config/InputBindings.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/config/UserSettings.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/config/UserSettings.hpp"
+)
+target_include_directories(input_bindings_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+)
+target_link_libraries(input_bindings_tests PRIVATE
+    SDL3::SDL3-static
+    tomlplusplus::tomlplusplus
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(input_bindings_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(input_bindings_tests)
+enable_sanitizers(input_bindings_tests)
+add_test(NAME input_bindings_tests COMMAND input_bindings_tests)
+
 add_executable(udp_session_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/udp_session_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/network/transport/PacketHeader.hpp"
@@ -1780,6 +1909,7 @@ set_compiler_warnings(server)
 set_compiler_warnings(directory_server)
 set_compiler_warnings(clientbot)
 set_compiler_warnings(physics_trimesh_tests)
+set_compiler_warnings(ragdoll_system_tests)
 
 # ---- Sanitizers ----
 enable_sanitizers(group2)
@@ -1787,6 +1917,7 @@ enable_sanitizers(server)
 enable_sanitizers(directory_server)
 enable_sanitizers(clientbot)
 enable_sanitizers(physics_trimesh_tests)
+enable_sanitizers(ragdoll_system_tests)
 
 # Windows MSVC: copy the ASan runtime DLL next to the binary so it runs
 # without a Developer PowerShell (clang_rt.asan_dynamic-x86_64.dll is not on

@@ -173,12 +173,12 @@ inline const WorldGeometry& testWorld()
         // 14. Right wall (offset further)
         {{140, 0, 3400}, {156, 200, 3700}},
 
-        // Climb wall (tall flat wall, 300u tall)
-        // 15. Climb wall (front-facing from the corridor)
+        // Tall flat wall (300u tall)
+        // 15. Tall wall (front-facing from the corridor)
         {{-64, 0, 3900}, {64, 300, 3916}},
 
-        // Ledge wall (medium height wall, 120u -- reachable via climb)
-        // 16. Ledge wall with flat top
+        // Medium wall (120u, flat top)
+        // 16. Medium flat-top wall
         {{200, 0, 3900}, {328, 120, 3916}},
 
         // Slide run (long flat stretch for sprint -> slide)
@@ -195,11 +195,11 @@ inline const WorldGeometry& testWorld()
         {{-140, 0, 4900}, {-124, 200, 5300}},
         // 21. Right wallrun wall (angled course)
         {{124, 0, 5000}, {140, 200, 5400}},
-        // 22. Climb target (at end of wallrun)
+        // 22. Tall target wall (at end of wallrun)
         {{-64, 0, 5500}, {64, 250, 5516}},
-        // 23. Ledge platform (on top of a medium wall)
+        // 23. Raised platform (on top of a medium wall)
         {{200, 0, 5500}, {328, 100, 5516}},
-        // 24. Landing pad (beyond the climb wall)
+        // 24. Landing pad (beyond the tall wall)
         {{-80, 0, 5550}, {80, 16, 5650}},
 
         // Grapple test: arch + high platform

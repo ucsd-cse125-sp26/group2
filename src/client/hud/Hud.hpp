@@ -37,7 +37,7 @@ public:
     void resize(uint32_t newW, uint32_t newH);
 
     /// @brief Forward an SDL event to interactive widgets (buy menu, scoreboard).
-    void processEvent(const SDL_Event* event);
+    void processEvent(const SDL_Event* event, const InputBindings* bindings);
 
     /// @brief Tick widget animations and consume game events.
     void update(float dt, const HudGameState& state);
@@ -54,11 +54,15 @@ public:
     /// @brief Access the tween pool (for debug panel).
     [[nodiscard]] HudTweenPool& tweens() { return tweens_; }
 
+    /// @brief Debug override: render inactive widgets, excluding the railgun scope.
+    [[nodiscard]] bool& debugRenderInactiveWidgets() { return debugRenderInactiveWidgets_; }
+
 private:
     HudRenderer renderer_;
     HudContext context_;
     HudTweenPool tweens_;
     std::vector<std::unique_ptr<HudWidget>> widgets_;
+    bool debugRenderInactiveWidgets_ = false;
 
     float screenW_ = 0.f, screenH_ = 0.f;
 

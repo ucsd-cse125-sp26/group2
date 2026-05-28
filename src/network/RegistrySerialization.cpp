@@ -14,6 +14,7 @@
 #include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/Orientation.hpp"
 #include "ecs/components/PlayerColor.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerName.hpp"
@@ -21,6 +22,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/Projectile.hpp"
+#include "ecs/components/Ragdoll.hpp"
 #include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -159,6 +161,8 @@ using Synced = std::tuple<entt::entity,
                           ClientId,
                           DeathInfo,
                           RespawnTimer,
+                          Orientation,
+                          RagdollBoneTag,
                           WeaponSpawner,
                           DroppedWeapon,
                           RespawnPoint,

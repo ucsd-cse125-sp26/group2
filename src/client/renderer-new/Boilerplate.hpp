@@ -213,10 +213,23 @@ SDL_GPUTexture* loadTexture(SDL_GPUDevice* device, const char* path);
 /// @return The created depth texture, or nullptr on failure.
 SDL_GPUTexture* createDepthTexture(SDL_GPUDevice* device, Uint32 width, Uint32 height);
 
+/// @brief Create a sampleable 2D color render target of the given dimensions.
+SDL_GPUTexture*
+createSampledColorTarget(SDL_GPUDevice* device, Uint32 width, Uint32 height, SDL_GPUTextureFormat format);
+
 /// @brief Create a linear-filtering, repeat-addressing sampler.
 /// @param device The GPU device.
 /// @return The created GPU sampler.
 SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device);
 
+/// @brief Create a linear-filtering, comparison sampler (for shadow map depth comparison).
+/// @param device The GPU device.
+/// @return The created GPU sampler.
 SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device);
+
+/// @brief Create a linear-filtering, clamp-to-edge sampler.
+/// @param device The GPU device.
+/// @return The created GPU sampler.
+SDL_GPUSampler* createLinearClampSampler(SDL_GPUDevice* device);
+
 } // namespace Boilerplate

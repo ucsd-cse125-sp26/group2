@@ -5,7 +5,9 @@
 
 #include "SDL3/SDL_init.h"
 #include "game/Game.hpp"
+#include "host/HostedServer.hpp"
 #include "menus/home/Home.hpp"
+#include "menus/host/HostConfig.hpp"
 #include "menus/lobby/Lobby.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
@@ -38,6 +40,8 @@ const char* connectErrorLogName(ConnectError error)
         return "connect timed out";
     case ConnectError::ConnectFailed:
         return "connect failed";
+    case ConnectError::LobbyFull:
+        return "lobby full";
     }
 
     return "unknown";
@@ -52,6 +56,8 @@ const char* joinErrorMessage(ConnectError error)
     case ConnectError::ResolveTimedOut:
     case ConnectError::ConnectTimedOut:
         return "Connection timed out";
+    case ConnectError::LobbyFull:
+        return "Lobby full";
     default:
         return "Failed to connect to server";
     }
@@ -98,7 +104,18 @@ bool App::init()
 
         networkConfig = loadNetworkConfig(cfgPath.c_str());
         developerConfig = loadDeveloperConfig(cfgPath.c_str());
+        hostConfigState.port = networkConfig.serverNetwork.port;
+        hostConfigState.useSpecificPort = false;
+        hostConfigState.useLegacyTcp = false;
+        hostConfigState.advertiseGlobal = networkConfig.discovery.advertiseServer;
+        hostConfigState.advertiseLan = networkConfig.discovery.lanBroadcastEnabled;
+        hostConfigState.serverName = networkConfig.discovery.serverName;
+        hostConfigState.maxPlayers = networkConfig.discovery.maxPlayers;
     }
+
+    // Pull user-specific settings once; App owns the live copy while screens borrow it.
+    userSettingsPath = user_settings::getPath();
+    userSettings = user_settings::load(userSettingsPath);
 
     // ImGui context must exist before Renderer::init, which sets up the
     // SDL_GPU ImGui backend.  App owns the context lifetime so it survives
@@ -132,8 +149,9 @@ bool App::init()
             cleanup();
             return false;
         }
+        AppContext ctx = screenContext();
         auto game = std::make_unique<Game>();
-        if (!game->initDebugUI(window) || !game->init(&renderer, window, &client)) {
+        if (!game->initDebugUI(ctx) || !game->init(ctx)) {
             game->quit();
             cleanup();
             return false;
@@ -141,8 +159,9 @@ bool App::init()
         screen_ = std::move(game);
         current = Screen::InGame;
     } else {
+        AppContext ctx = screenContext();
         auto homeScreen = std::make_unique<Home>();
-        if (!homeScreen->init(&renderer, window, networkConfig.discovery)) {
+        if (!homeScreen->init(ctx)) {
             homeScreen->quit();
             cleanup();
             return false;
@@ -192,16 +211,25 @@ SDL_AppResult App::iterate()
                                                networkConfig.discovery.connectPunchTimeoutMs,
                                                &relayToken))
                 {
-                    serverIp = punchedServer.host;
-                    serverPort = punchedServer.gamePort;
-                    relayConfig = net::UdpSessionTransport::RelayConfig{
-                        .host = networkConfig.discovery.directoryHost,
-                        .port = networkConfig.discovery.directoryUdpPort,
-                        .serverId = joinRequest->globalServerId,
-                        .clientNonce = clientNonce,
-                        .relayToken = relayToken,
-                        .enabled = true,
-                    };
+                    serverIp = punchedServer.udpHost.empty() ? punchedServer.host : punchedServer.udpHost;
+                    serverPort = punchedServer.udpPort != 0 ? punchedServer.udpPort : punchedServer.gamePort;
+                    SDL_Log("Global punch assist selected public UDP endpoint %s:%u for server %u",
+                            serverIp.c_str(),
+                            serverPort,
+                            joinRequest->globalServerId);
+                    if (!networkConfig.transport.noRelay) {
+                        relayConfig = net::UdpSessionTransport::RelayConfig{
+                            .host = networkConfig.discovery.directoryHost,
+                            .port = networkConfig.discovery.directoryUdpPort,
+                            .serverId = joinRequest->globalServerId,
+                            .clientNonce = clientNonce,
+                            .relayToken = relayToken,
+                            .enabled = true,
+                        };
+                    } else {
+                        SDL_Log("Global punch assist succeeded for server %u; relay disabled, trying direct UDP only",
+                                joinRequest->globalServerId);
+                    }
                 } else if (!punchError.empty()) {
                     SDL_Log("Global punch assist failed for server %u: %s",
                             joinRequest->globalServerId,
@@ -219,8 +247,73 @@ SDL_AppResult App::iterate()
                 home->setJoinError(joinErrorMessage(connectError));
             } else {
                 SDL_Log("Successfully connected to server at %s:%d", serverIp.c_str(), serverPort);
+                currentServerName = joinRequest->serverName.empty() ? serverIp : joinRequest->serverName;
                 transitionTo(Screen::Lobby);
             }
+        }
+
+        if (home->consumeHostRequest()) {
+            transitionTo(Screen::HostConfig);
+        }
+        break;
+    }
+    case Screen::HostConfig: {
+        auto* hostConfig = dynamic_cast<HostConfig*>(screen_.get());
+        if (!hostConfig)
+            break;
+
+        if (hostConfig->consumeLaunchRequest()) {
+            HostConfigState config = hostConfig->draftConfig();
+            hostConfigState = config;
+
+            if (config.useLegacyTcp && !config.useSpecificPort) {
+                hostConfig->setLaunchError("Legacy TCP requires a specific port");
+                break;
+            }
+
+            std::string error;
+            if (!hostedServer.start(config, error)) {
+                hostConfig->setLaunchError(error.empty() ? "Failed to start hosted server" : error);
+                break;
+            }
+
+            SDL_Log("Hosted server started on port %d, connecting client...", hostedServer.port());
+            TransportConfig hostedTransport = networkConfig.transport;
+            if (config.useLegacyTcp) {
+                hostedTransport.useUdpSessions = false;
+            }
+            const ConnectError connectError = client.init("127.0.0.1", hostedServer.port(), hostedTransport);
+            if (connectError != ConnectError::None) {
+                SDL_Log("Failed to connect to hosted server: %s", connectErrorLogName(connectError));
+                hostConfig->setLaunchError(joinErrorMessage(connectError));
+                hostedServer.shutdown();
+            } else {
+                SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
+                currentServerName = config.serverName;
+            }
+        }
+
+        if (hostConfig->consumeShutdownRequest()) {
+            if (client.isConnected()) {
+                if (!client.sendServerShutdown()) {
+                    hostConfig->setLaunchError("Failed to request server shutdown");
+                } else {
+                    hostedServer.clearSession();
+                }
+            } else if (hostedServer.isRunning()) {
+                hostedServer.shutdown();
+                hostedServer.clearSession();
+            }
+        }
+
+        if (hostConfig->consumeGoToLobbyRequest() && (hostedServer.isRunning() || client.isConnected())) {
+            transitionTo(Screen::Lobby);
+            break;
+        }
+
+        if (hostConfig->consumeBackToHomeRequest()) {
+            client.shutdown();
+            transitionTo(Screen::Home);
         }
         break;
     }
@@ -229,9 +322,22 @@ SDL_AppResult App::iterate()
         if (!lobby)
             break;
 
+        if (lobby->consumeReturnToHostConfig()) {
+            transitionTo(Screen::HostConfig);
+            break;
+        }
+
         if (lobby->consumeReturnToMenu()) {
+            const bool showServerShutdownNotice = lobby->consumeServerShutdownNotice();
             client.shutdown();
+            if (hostedServer.isRunning()) {
+                hostedServer.shutdown();
+            }
+
             transitionTo(Screen::Home);
+            if (showServerShutdownNotice) {
+                showHomePopupMessage("Server shutdown");
+            }
             break;
         }
 
@@ -241,13 +347,28 @@ SDL_AppResult App::iterate()
         }
         break;
     }
-    case Screen::InGame:
+    case Screen::InGame: {
+        auto* game = dynamic_cast<Game*>(screen_.get());
+        if (!game)
+            break;
+
+        if (game->consumeReturnToMainMenu()) {
+            const bool showServerShutdownNotice = game->consumeServerShutdownNotice();
+            client.shutdown();
+            transitionTo(Screen::Home);
+            if (showServerShutdownNotice) {
+                showHomePopupMessage("Server shutdown");
+            }
+            break;
+        }
+
         if (developerConfig.skipLobby)
             break;
-        if (auto* game = dynamic_cast<Game*>(screen_.get()); game != nullptr && game->shouldReturnToLobby()) {
+        if (game->shouldReturnToLobby()) {
             transitionTo(Screen::Lobby);
         }
         break;
+    }
     default:
         break;
     }
@@ -270,10 +391,11 @@ void App::transitionTo(Screen next)
         screen_.reset();
     }
 
+    AppContext ctx = screenContext();
     switch (next) {
     case Screen::InGame: {
         auto game = std::make_unique<Game>();
-        if (game->initDebugUI(window) && game->init(&renderer, window, &client)) {
+        if (game->initDebugUI(ctx) && game->init(ctx)) {
             screen_ = std::move(game);
             current = next;
         } else {
@@ -283,7 +405,7 @@ void App::transitionTo(Screen next)
     }
     case Screen::Lobby: {
         auto lobby = std::make_unique<Lobby>();
-        if (lobby->init(&renderer, window, &client)) {
+        if (lobby->init(ctx)) {
             screen_ = std::move(lobby);
             current = next;
         } else {
@@ -291,9 +413,19 @@ void App::transitionTo(Screen next)
         }
         break;
     }
+    case Screen::HostConfig: {
+        auto hostConfig = std::make_unique<HostConfig>();
+        if (hostConfig->init(ctx)) {
+            screen_ = std::move(hostConfig);
+            current = next;
+        } else {
+            hostConfig->quit();
+        }
+        break;
+    }
     case Screen::Home: {
         auto homeScreen = std::make_unique<Home>();
-        if (homeScreen->init(&renderer, window, networkConfig.discovery)) {
+        if (homeScreen->init(ctx)) {
             screen_ = std::move(homeScreen);
             current = next;
         } else {
@@ -310,6 +442,12 @@ void App::cleanup()
 {
     if (screen_) {
         screen_->quit();
+    }
+    if (!userSettingsPath.empty()) {
+        user_settings::save(userSettingsPath, userSettings);
+    }
+    if (hostedServer.isRunning()) {
+        hostedServer.shutdown();
     }
     client.shutdown();
     renderer.quit();
@@ -329,4 +467,28 @@ void App::cleanup()
 
     NET_Quit();
     SDL_Quit();
+}
+
+AppContext App::screenContext()
+{
+    return AppContext{
+        .window = *window,
+        .renderer = renderer,
+        .client = client,
+        .hostedServer = hostedServer,
+        .hostConfigState = hostConfigState,
+        .networkConfig = networkConfig,
+        .developerConfig = developerConfig,
+        .userSettings = userSettings,
+        .userSettingsPath = userSettingsPath,
+        .currentServerName = currentServerName,
+    };
+}
+
+void App::showHomePopupMessage(const std::string& message)
+{
+    auto* home = dynamic_cast<Home*>(screen_.get());
+    if (home) {
+        home->setPopupMessage(message);
+    }
 }

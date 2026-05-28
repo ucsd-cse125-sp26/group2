@@ -99,6 +99,13 @@ public:
     /// Sub-renderers consult this to pick the right precompiled shader binary.
     [[nodiscard]] SDL_GPUShaderFormat getShaderFormat() const { return shaderFormat_; }
 
+    /// @brief Color format of the active swapchain render pass.
+    ///
+    /// Sub-renderers that draw inside NewRenderer's main pass must create
+    /// pipelines with this format so backends such as Metal can validate the
+    /// pipeline against the render-pass texture.
+    [[nodiscard]] SDL_GPUTextureFormat getSwapchainColorFormat() const { return colorTarget_; }
+
     /// @brief Current camera (updated every `drawFrame` call).
     ///
     /// Game code reads this for projection-dependent operations: picking,
@@ -111,13 +118,11 @@ public:
     /// `Asset::models_`, which is populated by `loadSceneModel()`.
     [[nodiscard]] int modelCount() const;
 
-    /// @brief Format of the HDR colour render target.
+    /// @brief Legacy HDR colour render target format.
     ///
-    /// Sub-renderers that render INTO the main HDR pass (particles, beams,
-    /// glow) must declare this as their pipeline's colour target format.
-    /// Returning RGBA16F matches the legacy renderer; graphics team may
-    /// change this if they pick a different intermediate format, BUT must
-    /// update every sub-renderer pipeline to match.
+    /// NewRenderer currently draws directly into the swapchain, so
+    /// sub-renderers registered with it should use getSwapchainColorFormat().
+    /// Keep this for code paths that actually render into an HDR intermediate.
     [[nodiscard]] static constexpr SDL_GPUTextureFormat getHdrFormat()
     {
         return SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
@@ -331,8 +336,11 @@ public:
     // pattern so Game.cpp and the debug UI can read/write without a getter
     // ceremony.
 
-    AAMode aaMode = AAMode::SMAA_T2x;            ///< Anti-aliasing mode.  Re-applied at the start of each frame.
     float renderScale = 1.0f;                    ///< Internal-resolution multiplier (0.5 = half-res, 2.0 = SSAA).
+    float mainHorizontalFovDegrees = 90.0f;      ///< Main camera horizontal field of view in degrees.
+    float scopeZoom = 1.0f;                      ///< Per-frame scope zoom multiplier (FOV divisor).
+                                                 ///< 1.0 = no zoom; 1.5 = ADS through the charge rifle scope (FOV/1.5).
+                                                 ///< Game.cpp drives this each frame from the local player's ADS state.
     bool imguiEnabled = true;                    ///< Master toggle for the ImGui debug overlay.
     RenderToggles toggles{};                     ///< Per-pass on/off toggles (see RenderToggles in RendererTypes.hpp).
     std::vector<std::string> availableHDRFiles;  ///< Filled by `scanHDRFiles()`; consumed by debug UI.
@@ -346,8 +354,9 @@ private:
     bool createDepthPipeline();
     bool createDebugDepthPipeline();
     bool createHudPipeline();
-
+    bool createFxaaPipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
+    bool ensureSceneTextureSize(Uint32 width, Uint32 height);
     void createMeshBuffers(MeshIdInt meshId) const;
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height, float fov);
 
@@ -355,12 +364,14 @@ private:
                                Uint8 layer,
                                SDL_GPUCommandBuffer* cmd,
                                const glm::mat4& shadowViewProjection);
-    void bindLightShadowInfo(SDL_GPURenderPass* renderPass,SDL_GPUCommandBuffer* cmd);
-    void drawGeometryPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+    void bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+    void drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
-    void drawWeaponPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
-
-    void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd,bool depth);
+    void drawHudPass(SDL_GPUTexture* target, SDL_GPUCommandBuffer* cmd);
+    void drawFxaaPass(SDL_GPUTexture* sceneColor, SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+    void drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const;
+    void drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
+    void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd);
     void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
 
@@ -387,11 +398,15 @@ private:
 
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* fxaaPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* depthPipeline_ = nullptr;
 
-    SDL_GPUTextureFormat colorTarget_;
+    SDL_GPUTextureFormat colorTarget_ = SDL_GPU_TEXTUREFORMAT_INVALID;
+    SDL_GPUTexture* sceneColor_ = nullptr;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
+    Uint32 sceneWidth_ = 0;
+    Uint32 sceneHeight_ = 0;
     Uint32 depthWidth_ = 0;
     Uint32 depthHeight_ = 0;
 
@@ -401,6 +416,7 @@ private:
 
     SDL_GPUTexture* hudTexture_ = nullptr;
     SDL_GPUSampler* hudSampler_ = nullptr;
+    SDL_GPUSampler* fxaaSampler_ = nullptr;
 
     SDL_GPUSampler* depthSampler_ = nullptr;
 

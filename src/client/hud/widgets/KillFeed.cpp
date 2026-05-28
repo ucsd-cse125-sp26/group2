@@ -31,8 +31,8 @@ bool nameMatchesYou(const std::string& s)
 KillFeed::KillFeed()
 {
     anchor = HudAnchor::TopRight;
-    offsetX = -20.f;
-    offsetY = 100.f; // sits below the KDA counter
+    offsetX = -80.f;
+    offsetY = 28.f;
 }
 
 void KillFeed::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)
@@ -50,14 +50,22 @@ void KillFeed::update(float dt, const HudGameState& state, HudTweenPool& /*tween
     }
 
     for (auto& e : entries_) {
+        if (e.permanent)
+            continue;
         e.timer -= dt;
         e.slideIn = std::min(1.f, e.slideIn + dt * 6.f); // ~0.16s slide-in
     }
-    entries_.erase(std::remove_if(entries_.begin(), entries_.end(), [](const Entry& e) { return e.timer <= 0.f; }),
-                   entries_.end());
+    entries_.erase(
+        std::remove_if(entries_.begin(), entries_.end(), [](const Entry& e) { return !e.permanent && e.timer <= 0.f; }),
+        entries_.end());
 
-    if (static_cast<int>(entries_.size()) > maxEntries)
-        entries_.resize(static_cast<std::size_t>(maxEntries));
+    while (static_cast<int>(entries_.size()) > maxEntries) {
+        const auto removable =
+            std::find_if(entries_.rbegin(), entries_.rend(), [](const Entry& e) { return !e.permanent; });
+        if (removable == entries_.rend())
+            break;
+        entries_.erase(std::next(removable).base());
+    }
 }
 
 void KillFeed::draw(HudContext& ctx, float anchorX, float y)
@@ -73,7 +81,7 @@ void KillFeed::draw(HudContext& ctx, float anchorX, float y)
 
     float curY = y;
     for (const auto& e : entries_) {
-        const float alpha = std::min(e.timer / fadeOutDuration, 1.f) * e.slideIn;
+        const float alpha = (e.permanent ? 1.f : std::min(e.timer / fadeOutDuration, 1.f)) * e.slideIn;
         const float slideOff = (1.f - e.slideIn) * 16.f * s;
 
         const char* weapon = weaponCallsign(0);
@@ -89,8 +97,8 @@ void KillFeed::draw(HudContext& ctx, float anchorX, float y)
         const float pillY = curY;
 
         // Background — amber-tinted when the local player is involved.
-        const HudColor bg = e.youAreKiller ? HudColor{0.30f, 0.20f, 0.05f, 0.65f * alpha}
-                                           : HudColor{0.10f, 0.09f, 0.08f, 0.78f * alpha};
+        const HudColor bg =
+            e.youAreKiller ? withAlpha(k_secondary, 0.65f * alpha) : withAlpha(k_quaternary, 0.78f * alpha);
         const HudColor border = e.youAreKiller ? withAlpha(k_amber, alpha) : withAlpha(k_lineDim, alpha);
         ctx.rect(pillX, pillY, pillW, pillH, bg);
         ctx.rectOutline(pillX, pillY, pillW, pillH, 1.f, border);

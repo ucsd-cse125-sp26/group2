@@ -74,6 +74,7 @@ public:
               HudColor color,
               HudAlign align = HudAlign::Left,
               bool outlined = false);
+    void knockoutText(const char* str, float x, float y, float size, HudAlign align = HudAlign::Left);
     float measureText(const char* str, float size) const;
 
     // ── Icons ───────────────────────────────────────────────────────────
@@ -92,6 +93,13 @@ public:
     /// @param color    Tint color with alpha controlling intensity.
     void vignette(float screenW, float screenH, HudColor color);
 
+    /// @brief Draw a full-screen scope mask with a transparent circular cut-out.
+    /// @param screenW Viewport width in pixels.
+    /// @param screenH Viewport height in pixels.
+    /// @param radiusPx Radius of the clear scope glass in pixels.
+    /// @param color Mask tint; alpha controls opacity outside the cut-out.
+    void scopeMask(float screenW, float screenH, float radiusPx, HudColor color);
+
     // ── Clipping ────────────────────────────────────────────────────────
 
     void pushClipRect(float x, float y, float w, float h);
@@ -100,6 +108,9 @@ public:
     /// @brief Flush any remaining unflushed vertices into a final clip span.
     /// Must be called after all draw() calls, before accessing vertices/clipSpans.
     void endFrame();
+
+    /// @brief Multiply already-emitted vertex colors by a tint.
+    void tintVertices(std::size_t startVertex, HudColor tint);
 
     // ── Access for HudRenderer ──────────────────────────────────────────
 

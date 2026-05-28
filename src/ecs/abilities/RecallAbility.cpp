@@ -4,6 +4,7 @@
 #include "RecallAbility.hpp"
 
 #include "ecs/abilities/AbilityTuning.hpp"
+#include "ecs/components/PlayerSimState.hpp"
 #include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/Velocity.hpp"
@@ -59,7 +60,11 @@ void RecallAbility::activate(entt::entity player, Registry& registry)
     vis.grappleActive = false;
     vis.moveMode = MoveMode::OnFoot;
     vis.exitingWall = false;
-    vis.exitingClimb = false;
+
+    if (auto* sim = registry.try_get<PlayerSimState>(player)) {
+        sim->lastSafePosition = pos.value;
+        sim->lastSafePositionValid = true;
+    }
 
     abilState.recallMarkerSet = false;
     setAbilityCooldown(abilState, type(), cooldown());

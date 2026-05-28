@@ -10,6 +10,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PreviousPosition.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "network/MatchConfig.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/NetKillEvent.hpp"
 #include "network/PacketType.hpp"
@@ -24,6 +25,22 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string_view>
+
+namespace
+{
+constexpr Uint64 k_joinRejectGraceMs = 100;
+
+bool isJoinFailedPacket(const std::uint8_t* data, Uint32 size, std::string_view expectedMessage)
+{
+    if (size < 1 || static_cast<PacketType>(data[0]) != PacketType::JOIN_FAILED)
+        return false;
+
+    const auto* payload = reinterpret_cast<const char*>(data + 1);
+    const std::string_view message(payload, size - 1);
+    return message == expectedMessage;
+}
+} // namespace
 
 ConnectError Client::init(const char* addr,
                           Uint16 port,
@@ -42,8 +59,8 @@ ConnectError Client::init(const char* addr,
 
     if (transportConfig_.useUdpSessions) {
         usingUdpSession_ = true;
-        session_.preferRelay(transportConfig_.forceRelay);
-        if (relay)
+        session_.preferRelay(transportConfig_.forceRelay && !transportConfig_.noRelay);
+        if (relay && !transportConfig_.noRelay)
             session_.setRelayConfig(*relay);
         if (!session_.connectClient(addr, port, timeoutMs)) {
             SDL_Log("Client: UDP session connection to %s:%u failed", addr, port);
@@ -53,6 +70,35 @@ ConnectError Client::init(const char* addr,
         }
 
         connectionId_ = session_.clientConnectionId();
+        const Uint64 rejectDeadline = SDL_GetTicks() + k_joinRejectGraceMs;
+        while (SDL_GetTicks() <= rejectDeadline) {
+            session_.pump();
+            net::UdpSessionTransport::Event event;
+            while (session_.pollEvent(event)) {
+                if (event.type == net::UdpSessionTransport::EventType::Payload) {
+                    if (isJoinFailedPacket(
+                            event.payload.data(), static_cast<Uint32>(event.payload.size()), "Lobby full"))
+                    {
+                        SDL_Log("Client: server rejected join: Lobby full");
+                        session_.close();
+                        usingUdpSession_ = false;
+                        return ConnectError::LobbyFull;
+                    }
+
+                    std::lock_guard<std::mutex> lock(stateMutex_);
+                    recvUdpDelayed(std::move(event.payload));
+                } else if (event.type == net::UdpSessionTransport::EventType::Disconnected) {
+                    SDL_Log("Client: server disconnected during join grace period");
+                    session_.close();
+                    usingUdpSession_ = false;
+                    return ConnectError::ConnectFailed;
+                }
+            }
+            SDL_Delay(1);
+        }
+
+        udpSessionLastBytesSent_ = 0;
+        udpSessionLastBytesRecv_ = 0;
         SDL_Log("Client: UDP session connected to %s:%u, session=0x%llx",
                 addr,
                 port,
@@ -99,6 +145,45 @@ ConnectError Client::init(const char* addr,
     }
 
     msgStream.socket = sock;
+    const Uint64 rejectDeadline = SDL_GetTicks() + k_joinRejectGraceMs;
+    while (SDL_GetTicks() <= rejectDeadline) {
+        if (!msgStream.pumpReads()) {
+            NET_DestroyStreamSocket(sock);
+            msgStream.socket = nullptr;
+            NET_UnrefAddress(serverAddr);
+            serverAddr = nullptr;
+            return ConnectError::ConnectFailed;
+        }
+
+        bool rejectedLobbyFull = false;
+        bool streamOk = msgStream.drainComplete([&](const void* data, Uint32 size) {
+            const auto* bytes = static_cast<const std::uint8_t*>(data);
+            if (isJoinFailedPacket(bytes, size, "Lobby full")) {
+                rejectedLobbyFull = true;
+                return;
+            }
+
+            dispatchMessage(bytes, size);
+        });
+        if (!streamOk) {
+            NET_DestroyStreamSocket(sock);
+            msgStream.socket = nullptr;
+            NET_UnrefAddress(serverAddr);
+            serverAddr = nullptr;
+            return ConnectError::ConnectFailed;
+        }
+        if (rejectedLobbyFull) {
+            SDL_Log("Client: server rejected join: Lobby full");
+            NET_DestroyStreamSocket(sock);
+            msgStream.socket = nullptr;
+            NET_UnrefAddress(serverAddr);
+            serverAddr = nullptr;
+            return ConnectError::LobbyFull;
+        }
+
+        SDL_Delay(1);
+    }
+
     transportConfig_ = transport;
 
     // PR-11: read GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS once at connect.
@@ -161,6 +246,8 @@ void Client::shutdown()
     std::lock_guard<std::mutex> lock(stateMutex_);
     session_.close();
     usingUdpSession_ = false;
+    udpSessionLastBytesSent_ = 0;
+    udpSessionLastBytesRecv_ = 0;
     if (msgStream.socket) {
         NET_DestroyStreamSocket(msgStream.socket);
         msgStream.socket = nullptr;
@@ -175,6 +262,12 @@ void Client::shutdown()
     }
 
     outbound_.clear();
+}
+
+bool Client::isConnected()
+{
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    return (msgStream.socket != nullptr || usingUdpSession_) && !socketDead_.load(std::memory_order_relaxed);
 }
 
 // ── Stage 3c: framing helper (mirrors Server.cpp's frameMessage) ─────────
@@ -193,13 +286,7 @@ std::vector<uint8_t> frameMessage(const void* data, uint32_t len)
 bool Client::send(const void* data, uint32_t len)
 {
     if (usingUdpSession_) {
-        const bool ok =
-            session_.send(connectionId_, net::ChannelId::ControlReliableOrdered, data, static_cast<int>(len));
-        if (ok) {
-            stats.bytesSentTotal += len + sizeof(net::PacketHeader);
-            bytesSentWindow += len + sizeof(net::PacketHeader);
-        }
-        return ok;
+        return session_.send(connectionId_, net::ChannelId::ControlReliableOrdered, data, static_cast<int>(len));
     }
 
     // Frame outside the lock; lock briefly to push into the outbound queue.
@@ -436,6 +523,15 @@ bool Client::sendChatMessage(std::string_view message)
     return send(payload.data(), static_cast<std::uint32_t>(payload.size()));
 }
 
+bool Client::sendPhysicsDiagRecording(bool enabled)
+{
+    const uint8_t buf[2] = {
+        static_cast<uint8_t>(PacketType::PHYSICS_DIAG_RECORDING),
+        static_cast<uint8_t>(enabled ? 1 : 0),
+    };
+    return send(buf, static_cast<std::uint32_t>(sizeof(buf)));
+}
+
 bool Client::sendVoiceFrame(std::uint16_t sequence, std::uint8_t frameMs, std::span<const std::uint8_t> opus)
 {
     if (!usingUdpSession_)
@@ -458,6 +554,30 @@ bool Client::sendPlayerReady(bool ready)
 bool Client::sendStartMatch()
 {
     const auto type = static_cast<uint8_t>(PacketType::START_MATCH);
+    return send(&type, sizeof(type));
+}
+
+bool Client::sendMatchConfig(const MatchConfig& config)
+{
+    std::uint8_t buf[sizeof(PacketType) + sizeof(MatchConfig)];
+    buf[0] = static_cast<std::uint8_t>(PacketType::UPDATE_MATCH_CONFIG);
+    std::memcpy(buf + 1, &config, sizeof(MatchConfig));
+    return send(buf, static_cast<std::uint32_t>(sizeof(buf)));
+}
+
+bool Client::sendDiscoverySettings(const DiscoverySettings& settings)
+{
+    const std::uint8_t buf[3] = {
+        static_cast<std::uint8_t>(PacketType::UPDATE_DISCOVERY_SETTINGS),
+        static_cast<std::uint8_t>(settings.advertiseGlobal ? 1 : 0),
+        static_cast<std::uint8_t>(settings.advertiseLan ? 1 : 0),
+    };
+    return send(buf, static_cast<std::uint32_t>(sizeof(buf)));
+}
+
+bool Client::sendServerShutdown()
+{
+    const auto type = static_cast<std::uint8_t>(PacketType::REQUEST_SERVER_SHUTDOWN);
     return send(&type, sizeof(type));
 }
 
@@ -789,10 +909,29 @@ void Client::networkLoop()
                 }
             }
 
-            const auto& s = session_.stats();
-            stats.rttMs = s.rttMs;
-            if (s.rttMs > 0.0f)
-                stats.avgRttMs = stats.avgRttMs <= 0.0f ? s.rttMs : stats.avgRttMs * 0.8f + s.rttMs * 0.2f;
+            const auto& sessionStats = session_.stats();
+            const float rttMs = sessionStats.rttMs;
+            const std::uint64_t bytesSent = sessionStats.bytesSent;
+            const std::uint64_t bytesRecv = sessionStats.bytesRecv;
+
+            if (rttMs > 0.0f) {
+                stats.rttMs = rttMs;
+                stats.avgRttMs = stats.avgRttMs <= 0.0f ? rttMs : stats.avgRttMs * 0.8f + rttMs * 0.2f;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(stateMutex_);
+                const std::uint64_t sentDelta =
+                    bytesSent >= udpSessionLastBytesSent_ ? bytesSent - udpSessionLastBytesSent_ : 0;
+                const std::uint64_t recvDelta =
+                    bytesRecv >= udpSessionLastBytesRecv_ ? bytesRecv - udpSessionLastBytesRecv_ : 0;
+                udpSessionLastBytesSent_ = bytesSent;
+                udpSessionLastBytesRecv_ = bytesRecv;
+                stats.bytesSentTotal += sentDelta;
+                stats.bytesRecvTotal += recvDelta;
+                bytesSentWindow += sentDelta;
+                bytesRecvWindow += recvDelta;
+            }
 
             SDL_Delay(1);
         }
@@ -1283,6 +1422,19 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         const auto frame = net::voice::decodeServerFrame(std::span<const std::uint8_t>(data, size));
         if (frame && voiceFrameFn_)
             voiceFrameFn_(*frame);
+        break;
+    }
+    case PacketType::MATCH_CONFIG: {
+        if (payloadSize < sizeof(MatchConfig))
+            break;
+
+        MatchConfig config{};
+        std::memcpy(&config, payload, sizeof(MatchConfig));
+        SDL_Log("Client: received match config: kills=%d maxPlayers=%d", config.killsToWin, config.maxPlayers);
+
+        latestMatchConfig_ = config;
+        if (matchConfigFn_)
+            matchConfigFn_(config);
         break;
     }
     default:

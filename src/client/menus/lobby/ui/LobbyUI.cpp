@@ -20,8 +20,23 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
     }
 
     ImGui::SetNextWindowPos(ImVec2(40.0f, 40.0f), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(320.0f, 240.0f), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(380.0f, 300.0f), ImGuiCond_Once);
     if (ImGui::Begin("Lobby")) {
+        if (!config.serverName.empty()) {
+            ImGui::Text("Server: %.*s", static_cast<int>(config.serverName.size()), config.serverName.data());
+            ImGui::Separator();
+        }
+
+        if (config.isHosting) {
+            ImGui::SeparatorText("Hosting");
+            ImGui::Text("Listen address: %.*s:%u",
+                        static_cast<int>(config.hostLanIp.size()),
+                        config.hostLanIp.data(),
+                        static_cast<unsigned>(config.hostPort));
+            ImGui::Text("Local address: 127.0.0.1:%u", static_cast<unsigned>(config.hostPort));
+            ImGui::Spacing();
+        }
+
         ImGui::Text("Players (%zu)", config.players.size());
         ImGui::Separator();
         for (const auto& p : config.players) {
@@ -37,6 +52,15 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
 
             ImGui::SameLine();
             ImGui::TextUnformatted(p.ready ? "Ready" : "Not ready");
+        }
+
+        ImGui::Separator();
+        ImGui::SeparatorText("Match Settings");
+        if (config.matchConfig) {
+            ImGui::Text("Kills to win: %d", config.matchConfig->killsToWin);
+            ImGui::Text("Max players: %d", config.matchConfig->maxPlayers);
+        } else {
+            ImGui::TextDisabled("Waiting for match settings");
         }
 
         ImGui::Separator();
@@ -60,6 +84,12 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         ImGui::EndDisabled();
 
         ImGui::Separator();
+        if (config.isHost) {
+            if (ImGui::Button("Back to Host Config")) {
+                result.returnToHostConfigClicked = true;
+            }
+            ImGui::SameLine();
+        }
         if (ImGui::Button("Return to Main Menu")) {
             result.returnToMenuClicked = true;
         }

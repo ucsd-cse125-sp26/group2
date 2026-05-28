@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "config/InputBindings.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -27,18 +28,62 @@ namespace systems
 inline bool prevKillSelfKey = false;
 /// @brief Tracks previous-frame G key state for grenade quick-throw / radial behavior.
 inline bool prevGrenadeKey = false;
+/// @brief Seconds the grenade key has been continuously held.
 inline float grenadeHeldSeconds = 0.0f;
+/// @brief True while the grenade radial selector is open.
 inline bool grenadeRadialActive = false;
+/// @brief Current mouse-relative aim vector inside the grenade radial selector.
 inline glm::vec2 grenadeRadialAim{0.0f, -1.0f};
+/// @brief Latched quick-throw request consumed by HUD/gameplay code.
 inline bool pendingGrenadeThrow = false;
+/// @brief Hold duration before the grenade quick-throw becomes radial selection.
 inline constexpr float k_grenadeRadialHoldSeconds = 0.24f;
+/// @brief Minimum radial aim distance required to choose a grenade slot.
 inline constexpr float k_grenadeRadialDeadzone = 18.0f;
+/// @brief Maximum stored cursor distance from the grenade radial center.
 inline constexpr float k_grenadeRadialMaxDistance = 130.0f;
 /// @brief Tracks previous-frame Alt+LMB state for ability choice edge detection.
 inline bool prevAbilitySelectLeft = false;
 /// @brief Tracks previous-frame Alt+RMB state for ability choice edge detection.
 inline bool prevAbilitySelectRight = false;
+/// @brief Tracks previous-frame gamepad left ability-select chord for edge detection.
+inline bool prevGamepadAbilitySelectLeft = false;
+/// @brief Tracks previous-frame gamepad right ability-select chord for edge detection.
+inline bool prevGamepadAbilitySelectRight = false;
 
+/// @brief Gamepad axis mapping configuration for look and move axes, used to support stick swapping in user settings.
+struct JoystickAxis
+{
+    SDL_GamepadAxis x;
+    SDL_GamepadAxis y;
+};
+
+/// @brief Return the SDL axes used for camera look, honoring the stick-swap setting.
+inline JoystickAxis getLookJoystickAxes(bool swapSticks)
+{
+    return {
+        .x = swapSticks ? SDL_GAMEPAD_AXIS_LEFTX : SDL_GAMEPAD_AXIS_RIGHTX,
+        .y = swapSticks ? SDL_GAMEPAD_AXIS_LEFTY : SDL_GAMEPAD_AXIS_RIGHTY,
+    };
+}
+
+/// @brief Return the SDL axes used for movement, honoring the stick-swap setting.
+inline JoystickAxis getMoveJoystickAxes(bool swapSticks)
+{
+    return {
+        .x = swapSticks ? SDL_GAMEPAD_AXIS_RIGHTX : SDL_GAMEPAD_AXIS_LEFTX,
+        .y = swapSticks ? SDL_GAMEPAD_AXIS_RIGHTY : SDL_GAMEPAD_AXIS_LEFTY,
+    };
+}
+
+/// @brief True when a gamepad handle is non-null and still connected.
+inline bool gamepadConnected(SDL_Gamepad* gamepad)
+{
+    return gamepad != nullptr && SDL_GamepadConnected(gamepad);
+}
+
+/// @brief Convert the current grenade radial aim vector into a grenade slot index.
+/// @return Selected grenade slot, or kInvalidGrenadeSelectIndex inside the radial deadzone.
 inline std::uint8_t grenadeRadialIndexFromAim()
 {
     if (glm::dot(grenadeRadialAim, grenadeRadialAim) < k_grenadeRadialDeadzone * k_grenadeRadialDeadzone) {
@@ -64,6 +109,7 @@ inline std::uint8_t grenadeRadialIndexFromAim()
     return bestIndex;
 }
 
+/// @brief Consume and clear the queued grenade quick-throw request.
 inline bool consumePendingGrenadeThrow()
 {
     const bool shouldThrow = pendingGrenadeThrow;
@@ -129,30 +175,38 @@ inline void runMouseLook(Registry& registry, float mouseSensitivity, bool gravit
 /// Can also be called every iterate() when the sync toggle is off.
 ///
 /// @param registry        The ECS registry.
+/// @param bindings        Keyboard/mouse bindings to sample.
 /// @param gravityFlipped  When true, A/D are swapped so strafing feels
 ///                        correct while the camera is rolled 180°.
-inline void runMovementKeys(Registry& registry, bool gravityFlipped = false)
+inline void runMovementKeys(Registry& registry, const InputBindings& bindings, bool gravityFlipped = false)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
+    const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
 
     // Edge-detect K key: only fire killSelf on the rising edge (key-down),
     // not while held.  Prevents respawn → immediate re-death loop.
-    const bool killKeyNow = kKeys[SDL_SCANCODE_K];
+    const bool killKeyNow = bindings.pressed(Action::KillSelf, kKeys, mouse);
     const bool killEdge = killKeyNow && !prevKillSelfKey;
     prevKillSelfKey = killKeyNow;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
-        snap.forward = kKeys[SDL_SCANCODE_W];
-        snap.back = kKeys[SDL_SCANCODE_S];
+        // Movement keys
+        const bool forward = bindings.pressed(Action::Forward, kKeys, mouse);
+        const bool back = bindings.pressed(Action::Back, kKeys, mouse);
+        const bool left = bindings.pressed(Action::Left, kKeys, mouse);
+        const bool right = bindings.pressed(Action::Right, kKeys, mouse);
+
+        snap.forward = forward;
+        snap.back = back;
         // When gravity is flipped the camera is rolled 180°, which negates
         // the screen-space right vector.  Swapping A/D compensates so
         // pressing A still moves the player screen-left.
-        snap.left = gravityFlipped ? kKeys[SDL_SCANCODE_D] : kKeys[SDL_SCANCODE_A];
-        snap.right = gravityFlipped ? kKeys[SDL_SCANCODE_A] : kKeys[SDL_SCANCODE_D];
-        snap.jump = kKeys[SDL_SCANCODE_SPACE];
-        snap.crouch = kKeys[SDL_SCANCODE_LCTRL];
-        snap.ability1 = kKeys[SDL_SCANCODE_LSHIFT];
-        snap.ability2 = kKeys[SDL_SCANCODE_E];
+        snap.left = gravityFlipped ? right : left;
+        snap.right = gravityFlipped ? left : right;
+        snap.jump = bindings.pressed(Action::Jump, kKeys, mouse);
+        snap.crouch = bindings.pressed(Action::Crouch, kKeys, mouse);
+        snap.ability1 = bindings.pressed(Action::Ability1, kKeys, mouse);
+        snap.ability2 = bindings.pressed(Action::Ability2, kKeys, mouse);
         snap.killSelf = killEdge;
         snap.skipRespawn = false; // Clear stale flag from previous death.
     });
@@ -160,16 +214,20 @@ inline void runMovementKeys(Registry& registry, bool gravityFlipped = false)
 
 /// @brief Sample skip-respawn input while the local player is dead.
 ///
-/// Runs independently of Controllable — dead players can press Space to
-/// skip the remaining respawn timer and respawn immediately.
+/// Runs independently of Controllable — dead players can use the Jump binding
+/// to skip the remaining respawn timer and respawn immediately.
 ///
 /// @param registry  The ECS registry.
-inline void runDeadInput(Registry& registry)
+/// @param bindings  The configured keyboard/mouse bindings.
+inline void runDeadInput(Registry& registry, const InputBindings& bindings)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
+    const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
 
     registry.view<InputSnapshot, LocalPlayer, RespawnTimer>().each(
-        [&](InputSnapshot& snap, const RespawnTimer& /*unused*/) { snap.skipRespawn = kKeys[SDL_SCANCODE_SPACE]; });
+        [&](InputSnapshot& snap, const RespawnTimer& /*unused*/) {
+            snap.skipRespawn = bindings.pressed(Action::Jump, kKeys, mouse);
+        });
 }
 
 /// @brief Sample keyboard state into the weapon flags.
@@ -179,21 +237,23 @@ inline void runDeadInput(Registry& registry)
 /// Can also be called every iterate() when the sync toggle is off.
 ///
 /// @param registry  The ECS registry.
-inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
+/// @param bindings  The input bindings.
+/// @param dt        Frame delta time in seconds, used to detect grenade radial hold duration.
+inline void runWeaponKeys(Registry& registry, const InputBindings& bindings, float dt = 0.0f)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
     const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
-    const bool altHeld = kKeys[SDL_SCANCODE_LALT] || kKeys[SDL_SCANCODE_RALT];
-    const bool leftDown = (mouse & SDL_BUTTON_LMASK) != 0;
-    const bool rightDown = (mouse & SDL_BUTTON_RMASK) != 0;
-    const bool selectLeftNow = altHeld && leftDown;
-    const bool selectRightNow = altHeld && rightDown;
+    const bool abilityMenuHeld = bindings.pressed(Action::AbilityMenu, kKeys, mouse);
+    const bool shootDown = bindings.pressed(Action::Shoot, kKeys, mouse);
+    const bool scopeDown = bindings.pressed(Action::Scope, kKeys, mouse);
+    const bool selectLeftNow = abilityMenuHeld && shootDown;
+    const bool selectRightNow = abilityMenuHeld && scopeDown;
     const bool selectLeftEdge = selectLeftNow && !prevAbilitySelectLeft;
     const bool selectRightEdge = selectRightNow && !prevAbilitySelectRight;
     prevAbilitySelectLeft = selectLeftNow;
     prevAbilitySelectRight = selectRightNow;
 
-    const bool grenadeKeyNow = kKeys[SDL_SCANCODE_G];
+    const bool grenadeKeyNow = bindings.pressed(Action::CycleGrenade, kKeys, mouse);
     if (grenadeKeyNow) {
         if (!prevGrenadeKey) {
             grenadeHeldSeconds = 0.0f;
@@ -218,15 +278,16 @@ inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
         grenadeRadialActive ? grenadeRadialIndexFromAim() : kInvalidGrenadeSelectIndex;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
-        snap.shooting = leftDown && !altHeld;
-        snap.switchToPrimary = kKeys[SDL_SCANCODE_1];
-        snap.switchToSecondary = kKeys[SDL_SCANCODE_2];
+        snap.shooting = shootDown && !abilityMenuHeld;
+        snap.scoped = scopeDown && !abilityMenuHeld;
+        snap.switchToPrimary = bindings.pressed(Action::SwitchToPrimary, kKeys, mouse);
+        snap.switchToSecondary = bindings.pressed(Action::SwitchToSecondary, kKeys, mouse);
         snap.throwGrenade = false;
         snap.grenadeMenuHeld = grenadeRadialActive;
         snap.grenadeSelectIndex = grenadeSelectIndex;
-        snap.reload = kKeys[SDL_SCANCODE_R];
-        snap.pickup = kKeys[SDL_SCANCODE_F];
-        snap.abilitySelectHeld = altHeld;
+        snap.reload = bindings.pressed(Action::Reload, kKeys, mouse);
+        snap.pickup = bindings.pressed(Action::Pickup, kKeys, mouse);
+        snap.abilitySelectHeld = abilityMenuHeld;
         snap.abilitySelectLeft = selectLeftEdge;
         snap.abilitySelectRight = selectRightEdge;
     });
@@ -235,11 +296,11 @@ inline void runWeaponKeys(Registry& registry, float dt = 0.0f)
 /// @brief Legacy combined sampler — calls both runMouseLook and runMovementKeys.
 /// @param registry          The ECS registry.
 /// @param mouseSensitivity  Radians per pixel (default 0.001).
-inline void runInputSample(Registry& registry, float mouseSensitivity = 0.001f)
+inline void runInputSample(Registry& registry, const InputBindings& bindings, float mouseSensitivity = 0.001f)
 {
     runMouseLook(registry, mouseSensitivity);
-    runMovementKeys(registry);
-    runWeaponKeys(registry);
+    runMovementKeys(registry, bindings);
+    runWeaponKeys(registry, bindings);
 }
 
 // ─── Gamepad samplers ────────────────────────────────────────────────────────
@@ -275,17 +336,17 @@ inline constexpr float k_triggerThreshold = 0.5f;
 ///
 /// Applies a radial deadzone and rescales so the live range is still [-1, 1]
 /// (otherwise full stick deflection would only feel like ~0.85 of the range).
-inline float normaliseAxis(Sint16 raw)
+inline float normaliseAxis(Sint16 raw, float deadzone = k_stickDeadzone)
 {
     // SDL_Gamepad axes are int16; normalise to [-1, 1].  -32768 is one larger
     // in magnitude than 32767 — divide by 32767 and clamp to keep the range
     // symmetric (otherwise full-down on a stick reads as -1.0000305...).
     const float v = std::clamp(static_cast<float>(raw) / 32767.0f, -1.0f, 1.0f);
-    if (std::fabs(v) < k_stickDeadzone)
+    if (std::fabs(v) < deadzone)
         return 0.0f;
     // Rescale [deadzone, 1] → [0, 1] so the user gets the full output range.
     const float sign = v < 0.0f ? -1.0f : 1.0f;
-    return sign * (std::fabs(v) - k_stickDeadzone) / (1.0f - k_stickDeadzone);
+    return sign * (std::fabs(v) - deadzone) / (1.0f - deadzone);
 }
 
 } // namespace gamepad
@@ -301,17 +362,28 @@ inline float normaliseAxis(Sint16 raw)
 ///
 /// @param registry          The ECS registry.
 /// @param gamepad           Open gamepad, or nullptr to no-op.
-/// @param lookSensitivity   Radians per second at full stick deflection.
+/// @param pitchSensitivity  Pitch radians per second at full stick deflection.
+/// @param yawSensitivity    Yaw radians per second at full stick deflection.
+/// @param deadzone          Stick deadzone as a fraction of full deflection.
 /// @param dt                Frame delta time in seconds.
 /// @param gravityFlipped    When true, both axes are inverted for 180° camera roll.
-inline void
-runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, float dt, bool gravityFlipped = false)
+/// @param swapSticks        When true, use the left stick for look instead of the right stick.
+inline void runGamepadLook(Registry& registry,
+                           SDL_Gamepad* gamepad,
+                           float pitchSensitivity,
+                           float yawSensitivity,
+                           float deadzone,
+                           float dt,
+                           bool gravityFlipped = false,
+                           bool swapSticks = false)
 {
-    if (!gamepad)
+    if (!gamepadConnected(gamepad))
         return;
 
-    float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
-    float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+    JoystickAxis lookAxis = getLookJoystickAxes(swapSticks);
+
+    float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.x), deadzone);
+    float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.y), deadzone);
 
     if (rx == 0.0f && ry == 0.0f)
         return;
@@ -325,12 +397,12 @@ runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, 
         // Sign convention matches runMouseLook: stick-right (positive rx)
         // should look right, which means yaw decreases (see runMouseLook
         // comment for why the negation is correct).
-        snap.yaw -= rx * lookSensitivity * dt;
+        snap.yaw -= rx * yawSensitivity * dt;
         snap.yaw = std::remainder(snap.yaw, glm::radians(360.0f));
 
         // SDL gamepad Y axis is +down/-up (screen-coord convention) — same as
         // mouse mdy — so adding directly matches mouse-down = pitch+ behaviour.
-        snap.pitch = std::clamp(snap.pitch + ry * lookSensitivity * dt, -glm::radians(89.0f), glm::radians(89.0f));
+        snap.pitch = std::clamp(snap.pitch + ry * pitchSensitivity * dt, -glm::radians(89.0f), glm::radians(89.0f));
     });
 }
 
@@ -342,22 +414,29 @@ runGamepadLook(Registry& registry, SDL_Gamepad* gamepad, float lookSensitivity, 
 ///
 /// Mapping:
 ///   Left stick     → forward / back / strafe
-///   A (south)      → jump
-///   B (east)       → crouch
-///   L3 (LS click)  → sprint
-///   LT             → primary ability   (analog, threshold @ 0.5)
+///   Configured buttons/triggers drive jump, crouch, and abilities.
 ///
 /// @param registry        The ECS registry.
 /// @param gamepad          Open gamepad, or nullptr to no-op.
+/// @param bindings         Controller bindings to sample.
+/// @param deadzone         Stick deadzone as a fraction of full deflection.
 /// @param gravityFlipped   When true, left/right stick are swapped to match
 ///                         the 180° camera roll.
-inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, bool gravityFlipped = false)
+/// @param swapSticks       When true, use the right stick for movement instead of the left stick.
+inline void runGamepadMovement(Registry& registry,
+                               SDL_Gamepad* gamepad,
+                               const InputBindings& bindings,
+                               float deadzone,
+                               bool gravityFlipped = false,
+                               bool swapSticks = false)
 {
-    if (!gamepad)
+    if (!gamepadConnected(gamepad))
         return;
 
-    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
-    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
+    JoystickAxis moveAxis = getMoveJoystickAxes(swapSticks);
+
+    const float lx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, moveAxis.x), deadzone);
+    const float ly = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, moveAxis.y), deadzone);
 
     // Movement booleans are derived from a stronger threshold than the deadzone
     // so a player resting their thumb on the stick doesn't drift-walk.  0.3 is
@@ -369,12 +448,10 @@ inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, bool gr
     const bool padLeft = gravityFlipped ? (lx > moveThresh) : (lx < -moveThresh);
     const bool padRight = gravityFlipped ? (lx < -moveThresh) : (lx > moveThresh);
 
-    const bool padJump = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH);
-    const bool padCrouch = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_EAST);
-    const bool padSprint = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
-
-    const float lt = static_cast<float>(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER)) / 32767.0f;
-    const bool padAbility1 = lt >= gamepad::k_triggerThreshold;
+    const bool padJump = bindings.controllerPressed(Action::Jump, gamepad);
+    const bool padCrouch = bindings.controllerPressed(Action::Crouch, gamepad);
+    const bool padAbility1 = bindings.controllerPressed(Action::Ability1, gamepad);
+    const bool padAbility2 = bindings.controllerPressed(Action::Ability2, gamepad);
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.forward |= padForward;
@@ -383,8 +460,8 @@ inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, bool gr
         snap.right |= padRight;
         snap.jump |= padJump;
         snap.crouch |= padCrouch;
-        snap.sprint |= padSprint;
         snap.ability1 |= padAbility1;
+        snap.ability2 |= padAbility2;
     });
 }
 
@@ -393,37 +470,56 @@ inline void runGamepadMovement(Registry& registry, SDL_Gamepad* gamepad, bool gr
 /// ORs with whatever the keyboard sampler set so kbm + pad coexist.
 ///
 /// Mapping:
-///   RT             → shoot     (analog, threshold @ 0.5)
-///   X (west)       → reload
-///   Y (north)      → pickup
-///   LB             → switchToPrimary
-///   D-pad up       → switchToPrimary  (alt)
-///   RB             → switchToSecondary
-///   D-pad down     → switchToSecondary (alt)
+///   Configured buttons/triggers drive weapon actions.
 ///
 /// @param registry  The ECS registry.
 /// @param gamepad   Open gamepad, or nullptr to no-op.
-inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad)
+/// @param bindings  Controller bindings to sample.
+inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const InputBindings& bindings)
 {
-    if (!gamepad)
+    if (!gamepadConnected(gamepad))
         return;
 
-    const float rt = static_cast<float>(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)) / 32767.0f;
-    const bool padShoot = rt >= gamepad::k_triggerThreshold;
-    const bool padReload = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_WEST);
-    const bool padPickup = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_NORTH);
-    const bool padPrimary = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) ||
-                            SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_UP);
-    const bool padSecondary = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) ||
-                              SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    const bool abilityMenuHeld = bindings.controllerPressed(Action::AbilityMenu, gamepad);
+    const bool padShoot = bindings.controllerPressed(Action::Shoot, gamepad);
+    const bool padScope = bindings.controllerPressed(Action::Scope, gamepad);
+    const bool padReload = bindings.controllerPressed(Action::Reload, gamepad);
+    const bool padPickup = bindings.controllerPressed(Action::Pickup, gamepad);
+    const bool padPrimary = bindings.controllerPressed(Action::SwitchToPrimary, gamepad);
+    const bool padSecondary = bindings.controllerPressed(Action::SwitchToSecondary, gamepad);
+    const bool padCycleGrenade = bindings.controllerPressed(Action::CycleGrenade, gamepad);
+    const bool selectLeftNow = abilityMenuHeld && padShoot;
+    const bool selectRightNow = abilityMenuHeld && padScope;
+    const bool selectLeftEdge = selectLeftNow && !prevGamepadAbilitySelectLeft;
+    const bool selectRightEdge = selectRightNow && !prevGamepadAbilitySelectRight;
+    prevGamepadAbilitySelectLeft = selectLeftNow;
+    prevGamepadAbilitySelectRight = selectRightNow;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
-        snap.shooting |= padShoot;
+        snap.shooting |= padShoot && !abilityMenuHeld;
+        snap.scoped |= padScope && !abilityMenuHeld;
         snap.reload |= padReload;
         snap.pickup |= padPickup;
         snap.switchToPrimary |= padPrimary;
         snap.switchToSecondary |= padSecondary;
+        snap.grenadeMenuHeld |= padCycleGrenade;
+        snap.abilitySelectHeld |= abilityMenuHeld;
+        snap.abilitySelectLeft |= selectLeftEdge;
+        snap.abilitySelectRight |= selectRightEdge;
     });
+}
+
+/// @brief Sample controller skip-respawn input while the local player is dead.
+/// @param registry  The ECS registry.
+/// @param gamepad   Open gamepad, or nullptr to no-op.
+/// @param bindings  Controller bindings to sample.
+inline void runGamepadDeadInput(Registry& registry, SDL_Gamepad* gamepad, const InputBindings& bindings)
+{
+    if (!gamepadConnected(gamepad))
+        return;
+    const bool skipRespawn = bindings.controllerPressed(Action::Jump, gamepad);
+    registry.view<InputSnapshot, LocalPlayer, RespawnTimer>().each(
+        [&](InputSnapshot& snap, const RespawnTimer& /*unused*/) { snap.skipRespawn = skipRespawn; });
 }
 
 } // namespace systems

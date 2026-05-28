@@ -325,6 +325,23 @@ void AudioManifest::buildDefault()
         makeClip("healing", SfxId::Healing, "Player", 0.55f, 1.2f, 1.0f, false, false, 1),
         makeClip("footstep_light", SfxId::FootstepLight, "Footsteps", 0.55f, 0.8f, 0.06f, true, false, 16),
         makeClip("footstep_heavy", SfxId::FootstepHeavy, "Footsteps", 0.75f, 0.9f, 0.06f, true, false, 16),
+        makeClip("footstep_concrete_01", SfxId::ConcreteFootstep01, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_02", SfxId::ConcreteFootstep02, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_03", SfxId::ConcreteFootstep03, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_04", SfxId::ConcreteFootstep04, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_05", SfxId::ConcreteFootstep05, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_06", SfxId::ConcreteFootstep06, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_07", SfxId::ConcreteFootstep07, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_08", SfxId::ConcreteFootstep08, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_09", SfxId::ConcreteFootstep09, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_10", SfxId::ConcreteFootstep10, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_11", SfxId::ConcreteFootstep11, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_12", SfxId::ConcreteFootstep12, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_13", SfxId::ConcreteFootstep13, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_14", SfxId::ConcreteFootstep14, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_15", SfxId::ConcreteFootstep15, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_16", SfxId::ConcreteFootstep16, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
+        makeClip("footstep_concrete_17", SfxId::ConcreteFootstep17, "Footsteps", 0.92f, 0.85f, 0.02f, true, false, 4),
         makeClip("voice_start", SfxId::VoiceStart, "VoiceChat", 0.2f, 1.0f, 0.05f, false, false, 2),
         makeClip("voice_stop", SfxId::VoiceStop, "VoiceChat", 0.14f, 1.0f, 0.05f, false, false, 2),
     };
@@ -344,6 +361,31 @@ void AudioManifest::buildDefault()
     };
     nodes_.push_back(std::move(footstepSwitch));
 
+    AudioNodeDef concreteFootsteps;
+    concreteFootsteps.id = nodeId("node.footstep.concrete");
+    concreteFootsteps.name = "node.footstep.concrete";
+    concreteFootsteps.type = AudioNodeType::Random;
+    concreteFootsteps.children = {
+        {.node = nodeId("node.footstep_concrete_01"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_02"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_03"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_04"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_05"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_06"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_07"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_08"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_09"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_10"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_11"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_12"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_13"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_14"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_15"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_16"), .weight = 1.0f},
+        {.node = nodeId("node.footstep_concrete_17"), .weight = 1.0f},
+    };
+    nodes_.push_back(std::move(concreteFootsteps));
+
     events_ = {
         makePlayEvent("weapon.rifle.fire", "node.rifle_fire"),
         makePlayEvent("weapon.rocket.fire", "node.rocket_fire"),
@@ -362,7 +404,7 @@ void AudioManifest::buildDefault()
         makePlayEvent("player.respawn", "node.respawn"),
         makePlayEvent("player.kill_confirm", "node.kill_confirm"),
         makePlayEvent("player.healing", "node.healing"),
-        makePlayEvent("footstep", "node.footstep.by_weight"),
+        makePlayEvent("footstep", "node.footstep.concrete"),
         makePlayEvent("footstep.light", "node.footstep_light"),
         makePlayEvent("footstep.heavy", "node.footstep_heavy"),
         makePlayEvent("voice.start", "node.voice_start"),

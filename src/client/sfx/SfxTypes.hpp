@@ -43,9 +43,45 @@ enum class SfxId : uint8_t
     Healing,        ///< Voicy_Syringe SFX .mp3
     ShieldRecharge, ///< Voicy_Halo Shield Recharge.mp3
 
-    // Movement / equipment placeholders. These synthesize if final assets are absent.
+    // Movement / equipment placeholders. FootstepLight/Heavy still back simple impact fallbacks.
     FootstepLight,
     FootstepHeavy,
+    ConcreteFootstep01,
+    ConcreteFootstep02,
+    ConcreteFootstep03,
+    ConcreteFootstep04,
+    ConcreteFootstep05,
+    ConcreteFootstep06,
+    ConcreteFootstep07,
+    ConcreteFootstep08,
+    ConcreteFootstep09,
+    ConcreteFootstep10,
+    ConcreteFootstep11,
+    ConcreteFootstep12,
+    ConcreteFootstep13,
+    ConcreteFootstep14,
+    ConcreteFootstep15,
+    ConcreteFootstep16,
+    ConcreteFootstep17,
+    DirtFootstep01,
+    DirtFootstep02,
+    DirtFootstep03,
+    DirtFootstep04,
+    DirtFootstep05,
+    DirtFootstep06,
+    DirtFootstep07,
+    DirtFootstep08,
+    DirtFootstep09,
+    DirtFootstep10,
+    DirtFootstep11,
+    DirtFootstep12,
+    DirtFootstep13,
+    DirtFootstep14,
+    Slide,          ///< sliding.mp3 — looped while in Slide mode.
+    DashSfx,        ///< Synth: dash whoosh.
+    GravityFlipSfx, ///< Synth: gravity flip warble.
+    GrappleSfx,     ///< Synth: grapple twang/launch.
+    RecallSfx,      ///< Synth: recall rewind.
     GrenadeThrow,
     VoiceStart,
     VoiceStop,
@@ -120,6 +156,78 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "FootstepLight";
     case SfxId::FootstepHeavy:
         return "FootstepHeavy";
+    case SfxId::ConcreteFootstep01:
+        return "ConcreteFootstep01";
+    case SfxId::ConcreteFootstep02:
+        return "ConcreteFootstep02";
+    case SfxId::ConcreteFootstep03:
+        return "ConcreteFootstep03";
+    case SfxId::ConcreteFootstep04:
+        return "ConcreteFootstep04";
+    case SfxId::ConcreteFootstep05:
+        return "ConcreteFootstep05";
+    case SfxId::ConcreteFootstep06:
+        return "ConcreteFootstep06";
+    case SfxId::ConcreteFootstep07:
+        return "ConcreteFootstep07";
+    case SfxId::ConcreteFootstep08:
+        return "ConcreteFootstep08";
+    case SfxId::ConcreteFootstep09:
+        return "ConcreteFootstep09";
+    case SfxId::ConcreteFootstep10:
+        return "ConcreteFootstep10";
+    case SfxId::ConcreteFootstep11:
+        return "ConcreteFootstep11";
+    case SfxId::ConcreteFootstep12:
+        return "ConcreteFootstep12";
+    case SfxId::ConcreteFootstep13:
+        return "ConcreteFootstep13";
+    case SfxId::ConcreteFootstep14:
+        return "ConcreteFootstep14";
+    case SfxId::ConcreteFootstep15:
+        return "ConcreteFootstep15";
+    case SfxId::ConcreteFootstep16:
+        return "ConcreteFootstep16";
+    case SfxId::ConcreteFootstep17:
+        return "ConcreteFootstep17";
+    case SfxId::DirtFootstep01:
+        return "DirtFootstep01";
+    case SfxId::DirtFootstep02:
+        return "DirtFootstep02";
+    case SfxId::DirtFootstep03:
+        return "DirtFootstep03";
+    case SfxId::DirtFootstep04:
+        return "DirtFootstep04";
+    case SfxId::DirtFootstep05:
+        return "DirtFootstep05";
+    case SfxId::DirtFootstep06:
+        return "DirtFootstep06";
+    case SfxId::DirtFootstep07:
+        return "DirtFootstep07";
+    case SfxId::DirtFootstep08:
+        return "DirtFootstep08";
+    case SfxId::DirtFootstep09:
+        return "DirtFootstep09";
+    case SfxId::DirtFootstep10:
+        return "DirtFootstep10";
+    case SfxId::DirtFootstep11:
+        return "DirtFootstep11";
+    case SfxId::DirtFootstep12:
+        return "DirtFootstep12";
+    case SfxId::DirtFootstep13:
+        return "DirtFootstep13";
+    case SfxId::DirtFootstep14:
+        return "DirtFootstep14";
+    case SfxId::Slide:
+        return "Slide";
+    case SfxId::DashSfx:
+        return "DashSfx";
+    case SfxId::GravityFlipSfx:
+        return "GravityFlipSfx";
+    case SfxId::GrappleSfx:
+        return "GrappleSfx";
+    case SfxId::RecallSfx:
+        return "RecallSfx";
     case SfxId::GrenadeThrow:
         return "GrenadeThrow";
     case SfxId::VoiceStart:

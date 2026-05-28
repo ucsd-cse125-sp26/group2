@@ -52,6 +52,7 @@ namespace
 {
 
 constexpr float kPi = 3.1415926535f;
+constexpr float kDefaultVoiceChatGain = 2.0f;
 
 bool sequenceNewer(std::uint16_t a, std::uint16_t b) noexcept
 {
@@ -106,6 +107,42 @@ bool SfxSystem::init()
 
     synthesizeClip(SfxId::FootstepLight, SfxCategory::Footsteps, 0.40f, 0.06f);
     synthesizeClip(SfxId::FootstepHeavy, SfxCategory::Footsteps, 0.55f, 0.06f);
+    loadClip(SfxId::ConcreteFootstep01, "Footsteps/concrete_ct_01.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep02, "Footsteps/concrete_ct_02.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep03, "Footsteps/concrete_ct_03.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep04, "Footsteps/concrete_ct_04.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep05, "Footsteps/concrete_ct_05.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep06, "Footsteps/concrete_ct_06.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep07, "Footsteps/concrete_ct_07.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep08, "Footsteps/concrete_ct_08.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep09, "Footsteps/concrete_ct_09.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep10, "Footsteps/concrete_ct_10.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep11, "Footsteps/concrete_ct_11.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep12, "Footsteps/concrete_ct_12.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep13, "Footsteps/concrete_ct_13.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep14, "Footsteps/concrete_ct_14.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep15, "Footsteps/concrete_ct_15.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep16, "Footsteps/concrete_ct_16.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::ConcreteFootstep17, "Footsteps/concrete_ct_17.wav", SfxCategory::Footsteps, 0.62f, 0.02f);
+    loadClip(SfxId::DirtFootstep01, "Footsteps/dirt_01.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep02, "Footsteps/dirt_02.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep03, "Footsteps/dirt_03.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep04, "Footsteps/dirt_04.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep05, "Footsteps/dirt_05.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep06, "Footsteps/dirt_06.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep07, "Footsteps/dirt_07.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep08, "Footsteps/dirt_08.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep09, "Footsteps/dirt_09.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep10, "Footsteps/dirt_10.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep11, "Footsteps/dirt_11.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep12, "Footsteps/dirt_12.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep13, "Footsteps/dirt_13.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::DirtFootstep14, "Footsteps/dirt_14.wav", SfxCategory::Footsteps, 0.85f, 0.02f);
+    loadClip(SfxId::Slide, "sliding.mp3", SfxCategory::Player, 0.75f, 0.0f);
+    synthesizeClip(SfxId::DashSfx, SfxCategory::Player, 0.7f, 0.10f);
+    synthesizeClip(SfxId::GravityFlipSfx, SfxCategory::Player, 0.7f, 0.10f);
+    synthesizeClip(SfxId::GrappleSfx, SfxCategory::Player, 0.7f, 0.10f);
+    synthesizeClip(SfxId::RecallSfx, SfxCategory::Player, 0.7f, 0.10f);
     synthesizeClip(SfxId::GrenadeThrow, SfxCategory::Weapons, 0.45f, 0.12f);
     synthesizeClip(SfxId::VoiceStart, SfxCategory::Voice, 0.20f, 0.05f);
     synthesizeClip(SfxId::VoiceStop, SfxCategory::Voice, 0.14f, 0.05f);
@@ -281,6 +318,19 @@ SfxSystem::SourceHandle SfxSystem::postAudioEvent(std::string_view eventName, au
     return first;
 }
 
+SfxSystem::SourceHandle
+SfxSystem::postLocalAudioEvent(std::string_view eventName, audio::AudioObjectId object, float gain)
+{
+    SourceHandle first = kInvalidSource;
+    for (audio::AudioCommand command : audioRuntime_.postEvent(eventName, object, gain)) {
+        command.positional = false;
+        const SourceHandle handle = playCommand(command);
+        if (first == kInvalidSource && handle != kInvalidSource)
+            first = handle;
+    }
+    return first;
+}
+
 void SfxSystem::submitVoiceFrame(ClientId speaker,
                                  std::uint16_t sequence,
                                  std::span<const float> monoPcm48k,
@@ -306,7 +356,7 @@ void SfxSystem::submitVoiceFrame(ClientId speaker,
         source->playingId = SfxId::_Count;
         source->handle = handle;
         source->speaker = speaker;
-        source->gain = 1.0f;
+        source->gain = kDefaultVoiceChatGain;
         source->priority = 3.0f;
         source->bus = audio::busId("VoiceChat");
         source->busGain = audioRuntime_.busGain(source->bus);
@@ -319,6 +369,7 @@ void SfxSystem::submitVoiceFrame(ClientId speaker,
     source->newestVoiceSeq = sequence;
     source->hasVoiceSeq = true;
     source->age = 0.0f;
+    source->gain = kDefaultVoiceChatGain;
     source->position = position;
     source->velocity = velocity;
     source->occluded = isOccluded(position);
@@ -356,22 +407,29 @@ void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
 {
     const audio::AudioObjectId object = audio::objectId("event.weapon_fire");
     setAudioObjectTransform(object, e.origin);
+    const auto postFireSound = [&](std::string_view eventName) {
+        if (e.localPlayer)
+            postLocalAudioEvent(eventName, object);
+        else
+            postAudioEvent(eventName, object);
+    };
+
     switch (e.type) {
     case WeaponType::Rifle:
-        postAudioEvent("weapon.rifle.fire", object);
+        postFireSound("weapon.rifle.fire");
         break;
     case WeaponType::Rocket:
-        postAudioEvent("weapon.rocket.fire", object);
+        postFireSound("weapon.rocket.fire");
         break;
     case WeaponType::RailGun:
-        postAudioEvent("weapon.railgun.fire", object);
+        postFireSound("weapon.railgun.fire");
         break;
     case WeaponType::EnergyGun:
-        postAudioEvent("weapon.energy.fire", object);
+        postFireSound("weapon.energy.fire");
         break;
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
-    case WeaponType::Impulse:
+    case WeaponType::Sticky:
         break;
     }
 }
@@ -387,16 +445,11 @@ void SfxSystem::handleEvent(const SDL_Event& event)
 {
 #ifdef __APPLE__
     if (event.type == SDL_EVENT_AUDIO_DEVICE_REMOVED && !event.adevice.recording) {
-        if (physicalDeviceId_ != 0 && event.adevice.which == physicalDeviceId_) {
-            SDL_Log("[sfx] Playback device removed (id=%u), scheduling reopen",
-                    static_cast<unsigned>(physicalDeviceId_));
-            pendingReopenDeviceId_ = 0;
-            pendingReopen_ = true;
-        }
+        SDL_Log("[sfx] Playback device removed (id=%u), scheduling reopen", static_cast<unsigned>(event.adevice.which));
+        pendingReopen_ = true;
     } else if (event.type == SDL_EVENT_AUDIO_DEVICE_ADDED && !event.adevice.recording) {
-        SDL_Log("[sfx] New playback device available (id=%u), scheduling switch",
+        SDL_Log("[sfx] New playback device available (id=%u), scheduling reopen",
                 static_cast<unsigned>(event.adevice.which));
-        pendingReopenDeviceId_ = event.adevice.which;
         pendingReopen_ = true;
     }
 #else
@@ -452,7 +505,6 @@ void SfxSystem::update(float dt, const Registry& registry)
         const bool justDied = stats.deaths > prevDeaths_;
         if (justDied) {
             postAudioEvent("player.death");
-            postAudioEvent("player.respawn");
         } else {
             const bool healthLost = h.health < prevHealth_ || h.armor < prevArmor_;
             const bool armorJustBroke = prevArmor_ > 0.0f && h.armor <= 0.0f;
@@ -554,23 +606,95 @@ bool SfxSystem::loadClip(SfxId id, const char* filename, SfxCategory cat, float 
 void SfxSystem::synthesizeClip(SfxId id, SfxCategory cat, float gain, float cooldownSecs)
 {
     SoundClip& clip = clips_[static_cast<size_t>(id)];
-    const int frames = id == SfxId::FootstepHeavy ? 4200 : 2800;
+
+    int frames = 2800;
+    switch (id) {
+    case SfxId::FootstepHeavy:
+        frames = 4200;
+        break;
+    case SfxId::DashSfx:
+    case SfxId::GrappleSfx:
+        frames = 8000;
+        break;
+    case SfxId::GravityFlipSfx:
+    case SfxId::RecallSfx:
+        frames = 12000;
+        break;
+    default:
+        break;
+    }
+
     clip.samples.assign(static_cast<std::size_t>(frames) * 2u, 0.0f);
     std::uint32_t seed = 0x1234567u + static_cast<std::uint32_t>(id) * 101u;
+    const float sampleRate = static_cast<float>(audio::k_mixerSampleRate);
+
     for (int i = 0; i < frames; ++i) {
         seed = seed * 1664525u + 1013904223u;
         const float noise = (static_cast<float>((seed >> 9u) & 0xffffu) / 32767.5f) - 1.0f;
         const float t = static_cast<float>(i) / static_cast<float>(frames);
-        const float env = std::exp(-t * (id == SfxId::FootstepHeavy ? 8.0f : 12.0f));
-        const float tone = std::sin(2.0f * kPi * (id == SfxId::GrenadeThrow ? 220.0f : 95.0f) *
-                                    (static_cast<float>(i) / static_cast<float>(audio::k_mixerSampleRate)));
-        const float sample = (noise * 0.55f + tone * 0.2f) * env * 0.32f;
+        const float secs = static_cast<float>(i) / sampleRate;
+        float sample = 0.0f;
+
+        switch (id) {
+        case SfxId::DashSfx: {
+            // Rising whoosh: pitch sweeps up, brightens, snappy decay.
+            const float pitch = 220.0f + 900.0f * t;
+            const float env = std::exp(-t * 2.5f) * (1.0f - std::exp(-t * 18.0f));
+            const float body = std::sin(2.0f * kPi * pitch * secs);
+            const float harm = std::sin(2.0f * kPi * pitch * 2.0f * secs) * 0.4f;
+            sample = (body * 0.5f + harm * 0.3f + noise * 0.25f) * env * 0.45f;
+            break;
+        }
+        case SfxId::GravityFlipSfx: {
+            // Eerie warble: low sine waver + bell-like upper octave.
+            const float baseHz = 110.0f;
+            const float wobble = std::sin(2.0f * kPi * 6.0f * secs) * 35.0f;
+            const float pitch = baseHz + wobble;
+            const float env = std::sin(kPi * std::min(t, 1.0f)) * std::exp(-t * 1.2f);
+            const float low = std::sin(2.0f * kPi * pitch * secs);
+            const float bell = std::sin(2.0f * kPi * (pitch * 4.03f) * secs) * 0.35f;
+            sample = (low * 0.55f + bell * 0.35f + noise * 0.05f) * env * 0.5f;
+            break;
+        }
+        case SfxId::GrappleSfx: {
+            // Metallic twang: descending pitch, sharp attack.
+            const float pitch = 740.0f - 380.0f * t;
+            const float env = std::exp(-t * 4.0f) * (1.0f - std::exp(-t * 60.0f));
+            const float body = std::sin(2.0f * kPi * pitch * secs);
+            const float ring = std::sin(2.0f * kPi * pitch * 1.5f * secs) * 0.35f;
+            sample = (body * 0.55f + ring * 0.25f + noise * 0.15f) * env * 0.55f;
+            break;
+        }
+        case SfxId::RecallSfx: {
+            // Rewind: pitch slides up over a long tail with shimmer.
+            const float pitch = 200.0f + 380.0f * t * t;
+            const float env = std::sin(kPi * std::min(t, 1.0f)) * 0.9f;
+            const float body = std::sin(2.0f * kPi * pitch * secs);
+            const float shimmer = std::sin(2.0f * kPi * pitch * 2.99f * secs) * 0.4f;
+            const float trem = 0.5f + 0.5f * std::sin(2.0f * kPi * 14.0f * secs);
+            sample = (body * 0.45f + shimmer * 0.35f) * env * trem * 0.55f;
+            break;
+        }
+        case SfxId::GrenadeThrow: {
+            const float env = std::exp(-t * 12.0f);
+            const float tone = std::sin(2.0f * kPi * 220.0f * secs);
+            sample = (noise * 0.55f + tone * 0.2f) * env * 0.32f;
+            break;
+        }
+        default: {
+            const float env = std::exp(-t * (id == SfxId::FootstepHeavy ? 8.0f : 12.0f));
+            const float tone = std::sin(2.0f * kPi * 95.0f * secs);
+            sample = (noise * 0.55f + tone * 0.2f) * env * 0.32f;
+            break;
+        }
+        }
+
         clip.samples[static_cast<std::size_t>(i) * 2u] = sample;
         clip.samples[static_cast<std::size_t>(i) * 2u + 1u] = sample;
     }
     clip.spec = mixerSpec_;
     clip.frameCount = static_cast<std::size_t>(frames);
-    clip.durationSeconds = static_cast<float>(frames) / static_cast<float>(audio::k_mixerSampleRate);
+    clip.durationSeconds = static_cast<float>(frames) / sampleRate;
     clip.category = cat;
     clip.defaultGain = gain;
     clip.minCooldown = cooldownSecs;
@@ -816,30 +940,17 @@ bool SfxSystem::openDevice()
 
 #ifdef __APPLE__
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "1024");
-    SDL_AudioDeviceID targetPhysical = pendingReopenDeviceId_;
-    if (!targetPhysical) {
-        int count = 0;
-        SDL_AudioDeviceID* devs = SDL_GetAudioPlaybackDevices(&count);
-        if (devs && count > 0) {
-            targetPhysical = devs[0];
-            SDL_free(devs);
-        }
-    }
-    physicalDeviceId_ = targetPhysical;
-    mixStream_ = SDL_OpenAudioDeviceStream(targetPhysical ? targetPhysical : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-                                           &mixerSpec_,
-                                           &SfxSystem::mixCallback,
-                                           this);
-#else
+#endif
+
     mixStream_ =
         SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &mixerSpec_, &SfxSystem::mixCallback, this);
-#endif
 
     if (!mixStream_) {
         SDL_Log("[sfx] SDL_OpenAudioDeviceStream failed: %s", SDL_GetError());
         return false;
     }
     device_ = SDL_GetAudioStreamDevice(mixStream_);
+    physicalDeviceId_ = device_;
     SDL_ResumeAudioStreamDevice(mixStream_);
     return true;
 }
@@ -862,13 +973,10 @@ void SfxSystem::reopenDevice()
 
     if (openDevice()) {
         warmUpDevice();
-        SDL_Log("[sfx] Reopened audio on physical device %u (logical %u)",
-                static_cast<unsigned>(physicalDeviceId_),
-                static_cast<unsigned>(device_));
+        SDL_Log("[sfx] Reopened audio on device %u", static_cast<unsigned>(device_));
     } else {
         SDL_Log("[sfx] No audio device available after reopen — running mute");
     }
-    pendingReopenDeviceId_ = 0;
     stateInitialized_ = false;
 }
 
@@ -1009,4 +1117,24 @@ void SfxSystem::mixIntoStream(SDL_AudioStream* stream, int additionalAmount)
     }
 
     SDL_PutAudioStreamData(stream, mix.data(), static_cast<int>(mix.size() * sizeof(float)));
+}
+
+std::uint32_t SfxSystem::activeSourceCount() const noexcept
+{
+    std::uint32_t count = 0;
+    for (const Source& source : sources_) {
+        if (source.active)
+            ++count;
+    }
+    return count;
+}
+
+std::uint32_t SfxSystem::activeVoiceSourceCount() const noexcept
+{
+    std::uint32_t count = 0;
+    for (const Source& source : sources_) {
+        if (source.active && source.voiceStream)
+            ++count;
+    }
+    return count;
 }

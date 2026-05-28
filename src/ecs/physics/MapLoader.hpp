@@ -6,13 +6,12 @@
 /// ancestor is named after the collision collection (default `"Collision"`) are
 /// extracted as collision geometry. Everything else is treated as visual-only.
 ///
-/// **Prototype mode** (`allMeshesAreCollision = true`): every mesh in the file is
-/// used for *both* rendering and collision.  Handy for blockout maps where the
-/// visual geometry is already simple enough to collide against.
+/// **All-mesh mode** (`allMeshesAreCollision = true`): every mesh in the file is
+/// used for *both* rendering and collision, preserving the authored triangles.
+/// Handy for blockout maps where the visual geometry is the collision source.
 ///
-/// Production separated maps load collision meshes as authored triangle
-/// surfaces. Primitive fitting is kept only for prototype/debug maps where
-/// every mesh is treated as collision, and for standalone prop collision.
+/// Map loading always preserves collision meshes as authored triangle
+/// surfaces. Primitive fitting is kept only for standalone prop collision.
 /// V-HACD is never part of the map load path; it remains a build-time opt-in
 /// for experimental prop decomposition only.
 
@@ -75,8 +74,8 @@ struct MapLoadOptions
     std::string collisionCollection = "Collision";
 
     /// When true, **every** mesh in the file is treated as both visual and
-    /// collision geometry.  The `collisionCollection` name is ignored.
-    /// Ideal for prototype / blockout maps whose geometry is already simple.
+    /// collision geometry.  The `collisionCollection` name is ignored, and
+    /// meshes are preserved as authored triangle surfaces.
     bool allMeshesAreCollision = false;
 
     /// When true, an infinite floor plane is added at the lowest Y coordinate
@@ -96,15 +95,15 @@ struct MapLoadOptions
 ///
 /// Walks the Assimp scene graph.  For each mesh node, determines whether it
 /// belongs to the collision collection (by checking ancestor node names) or,
-/// in prototype mode, always. In separated production mode, collision meshes
-/// are preserved as `WorldTriMesh` vertex-for-vertex after Assimp triangulation.
+/// in all-mesh mode, always. Collision meshes are preserved as `WorldTriMesh`
+/// vertex-for-vertex after Assimp triangulation.
 ///
 /// This function does **not** produce visual / renderable data — use the
 /// existing `Renderer::loadSceneModel()` path for that.
 ///
 /// @param path  Absolute or relative path to the `.glb` file.
 /// @param out   Filled with extracted collision geometry on success.
-/// @param opts  Loading options (scale, collection name, prototype mode).
+/// @param opts  Loading options (scale, collection name, all-mesh mode).
 /// @return True on success; false on any Assimp load error (logged via SDL_Log).
 bool loadMapCollision(const std::string& path, MapCollisionData& out, const MapLoadOptions& opts = {});
 

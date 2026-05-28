@@ -1,6 +1,6 @@
 /// @file hud.frag
 /// @brief HUD fragment shader — branches on texMode for solid, SDF text,
-///        sprite, SDF rounded rect, or vignette.
+///        sprite, SDF rounded rect, vignette, or scope mask.
 ///
 /// Output is **premultiplied alpha**: the pipeline's blend state is set up
 /// to expect (rgb·a, a) here, so we always emit `vec4(rgb*alpha, alpha)`.
@@ -92,6 +92,15 @@ void main()
         float alpha = mix(alphaNoOutline, alphaOutlined, outlineAmount) * vColor.a;
         outColor = premul(rgb, alpha);
 
+    } else if (mode == 6) {
+        // SDF alpha mask for knockout text. The erase blend pipeline ignores
+        // src RGB and uses src alpha to remove existing HUD target coverage.
+        float sdf = texture(sdfAtlas, vUV).r;
+        float pxRange = screenPxRange();
+        float screenPxDistance = pxRange * (sdf - 0.5);
+        float alpha = clamp(screenPxDistance + 0.5, 0.0, 1.0) * vColor.a;
+        outColor = vec4(0.0, 0.0, 0.0, alpha);
+
     } else if (mode == 2) {
         // Sprite / icon — texture is RGBA straight-alpha; tint and convert.
         vec4 texel = texture(iconAtlas, vUV) * vColor;
@@ -118,6 +127,15 @@ void main()
         float vig  = smoothstep(0.35, 1.4, dist);
         vig = vig * vig;
         outColor = premul(vColor.rgb, vColor.a * vig);
+
+    } else if (mode == 5) {
+        // Scope mask: full-screen translucent tint outside a circular clear
+        // cut-out. vShapeData = {screenW, screenH, radiusPx}.
+        vec2  screenPx = vUV * vShapeData.xy;
+        vec2  centerPx = vShapeData.xy * 0.5;
+        float distPx   = length(screenPx - centerPx);
+        float edge     = smoothstep(vShapeData.z - 1.5, vShapeData.z + 1.5, distPx);
+        outColor = premul(vColor.rgb, vColor.a * edge);
 
     } else {
         // Mode 0: solid color.

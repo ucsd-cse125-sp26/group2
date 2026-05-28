@@ -40,8 +40,9 @@ namespace gamemap
 
 /// @brief Does this map use SEPARATED collision and visual meshes?
 ///
-///   false → "prototype mode": every mesh in the GLB is both visual *and*
-///           collision. Used for blockout maps like map1.glb.
+///   false → "all-mesh mode": every mesh in the GLB is both visual *and*
+///           collision, loaded as authored triangles with no shape guessing.
+///           Used for blockout maps like map1.glb.
 ///   true  → "separated mode": collision-only nodes are tagged in Blender
 ///           with the prefix `kCollisionPattern` and excluded from the visual
 ///           model. Used for production maps where collision is hand-authored
@@ -49,7 +50,7 @@ namespace gamemap
 ///
 /// IMPORTANT: this flag controls *how* the map is processed, not *which* map
 /// is loaded. The map filename comes solely from `kMapAsset` in `AssetCatalog.hpp`.
-inline constexpr bool k_separatedCollisionMap = true;
+inline constexpr bool k_separatedCollisionMap = false;
 
 /// @brief Substring that identifies collision-only nodes in separated mode.
 /// Matched case-insensitively against Assimp node names.
@@ -121,6 +122,29 @@ struct PowerupSpawner
 };
 inline std::vector<PowerupSpawner> powerupSpawner_;
 
+/// @brief Jump pad authored in Blender (entity_type = 3).
+/// Optional custom properties: `jump_velocity_x`, `jump_velocity_y`,
+/// `jump_velocity_z` (floats, units/s). If omitted, the runtime default
+/// in `JumpPad::velocity` is used (typically straight up).
+/// Optional `half_extent_x/y/z` set the trigger AABB half-size.
+struct JumpPadSpawner
+{
+    glm::vec3 pos{0.0f};
+    glm::vec3 velocity{0.0f, 1500.0f, 0.0f};
+    glm::vec3 halfExtents{48.0f, 24.0f, 48.0f};
+};
+inline std::vector<JumpPadSpawner> jumpPadSpawner_;
+
+/// @brief Killzone authored in Blender (entity_type = 4).
+/// Optional `half_extent_x/y/z` set the trigger AABB half-size — a
+/// lava pit is typically wide and shallow (e.g. 256, 16, 256).
+struct KillzoneSpawner
+{
+    glm::vec3 pos{0.0f};
+    glm::vec3 halfExtents{128.0f, 32.0f, 128.0f};
+};
+inline std::vector<KillzoneSpawner> killzoneSpawner_;
+
 void traverseNodeTree(const aiNode* node, int depth = 0)
 {
     if (node == nullptr) {
@@ -151,6 +175,31 @@ void* getMetadataValue(const aiMetadata* metadata, const std::string& key)
     }
 
     return nullptr;
+}
+
+/// @brief Read a numeric custom property as float. Blender exports floats
+/// as AI_DOUBLE and ints as AI_INT32; either is accepted. Returns
+/// `fallback` when the key is missing or has an unsupported type.
+inline float getMetadataFloat(const aiMetadata* metadata, const std::string& key, float fallback)
+{
+    if (metadata == nullptr)
+        return fallback;
+    for (unsigned int i = 0; i < metadata->mNumProperties; i++) {
+        if (key != metadata->mKeys[i].C_Str())
+            continue;
+        const aiMetadataEntry& entry = metadata->mValues[i];
+        switch (entry.mType) {
+        case AI_FLOAT:
+            return *static_cast<float*>(entry.mData);
+        case AI_DOUBLE:
+            return static_cast<float>(*static_cast<double*>(entry.mData));
+        case AI_INT32:
+            return static_cast<float>(*static_cast<int32_t*>(entry.mData));
+        default:
+            return fallback;
+        }
+    }
+    return fallback;
 }
 
 /// @brief Load the configured map's collision into `out`.
@@ -196,40 +245,74 @@ inline bool loadConfiguredMap(physics::MapCollisionData& out, const char* tag)
         }
 
         if (node->mMetaData) {
-            for (unsigned int i = 0; i < node->mMetaData->mNumProperties; i++) {
-                if (std::string(node->mMetaData->mKeys[i].C_Str()) == "entity_type") {
-                    int32_t entity_type = *static_cast<int32_t*>(getMetadataValue(node->mMetaData, "entity_type"));
-                    switch (entity_type) {
-                    case 0: // Player spawn point
-                    {
-                        const aiMatrix4x4& t = node->mTransformation;
-                        glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
-                        spawnPoints_.push_back(pos);
+            void* entity_type_ptr = getMetadataValue(node->mMetaData, "entity_type");
+            if (entity_type_ptr != nullptr) {
+                const int32_t entity_type = *static_cast<int32_t*>(entity_type_ptr);
+                const char* const nodeName = node->mName.C_Str();
+                switch (entity_type) {
+                case 0: // Player spawn point
+                {
+                    const aiMatrix4x4& t = node->mTransformation;
+                    glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
+                    spawnPoints_.push_back(pos);
+                    break;
+                }
+                case 1: // Weapon spawn point
+                {
+                    void* weapon_type_ptr = getMetadataValue(node->mMetaData, "weapon_type");
+                    if (weapon_type_ptr == nullptr) {
+                        SDL_Log("Weapon spawner '%s' missing 'weapon_type' metadata — skipping", nodeName);
                         break;
                     }
-                    case 1: // Weapon spawn point
-                    {
-                        const aiMatrix4x4& t = node->mTransformation;
-
-                        WeaponType weapon_type = static_cast<WeaponType>(
-                            *static_cast<int32_t*>(getMetadataValue(node->mMetaData, "weapon_type")));
-                        glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
-                        weaponSpawner_.push_back(WeaponSpawner{.type = weapon_type, .pos = pos});
+                    const aiMatrix4x4& t = node->mTransformation;
+                    WeaponType weapon_type = static_cast<WeaponType>(*static_cast<int32_t*>(weapon_type_ptr));
+                    glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
+                    weaponSpawner_.push_back(WeaponSpawner{.type = weapon_type, .pos = pos});
+                    break;
+                }
+                case 2: // Power up spawn point
+                {
+                    void* powerup_type_ptr = getMetadataValue(node->mMetaData, "powerup_type");
+                    if (powerup_type_ptr == nullptr) {
+                        SDL_Log("Powerup spawner '%s' missing 'powerup_type' metadata — skipping", nodeName);
                         break;
                     }
-                    case 2: // Power up spawn point
-                    {
-                        const aiMatrix4x4& t = node->mTransformation;
-                        PowerupType powerup_type = static_cast<PowerupType>(
-                            *static_cast<int32_t*>(getMetadataValue(node->mMetaData, "powerup_type")));
-                        glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
-                        powerupSpawner_.push_back(PowerupSpawner{.type = powerup_type, .pos = pos});
-                        break;
-                    }
-                    default:
-                        SDL_Log("Unknown entity type found: %d", entity_type);
-                        break;
-                    }
+                    const aiMatrix4x4& t = node->mTransformation;
+                    PowerupType powerup_type = static_cast<PowerupType>(*static_cast<int32_t*>(powerup_type_ptr));
+                    glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
+                    powerupSpawner_.push_back(PowerupSpawner{.type = powerup_type, .pos = pos});
+                    break;
+                }
+                case 3: // Jump pad
+                {
+                    const aiMatrix4x4& t = node->mTransformation;
+                    glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
+                    JumpPadSpawner pad;
+                    pad.pos = pos;
+                    pad.velocity.x = getMetadataFloat(node->mMetaData, "jump_velocity_x", pad.velocity.x);
+                    pad.velocity.y = getMetadataFloat(node->mMetaData, "jump_velocity_y", pad.velocity.y);
+                    pad.velocity.z = getMetadataFloat(node->mMetaData, "jump_velocity_z", pad.velocity.z);
+                    pad.halfExtents.x = getMetadataFloat(node->mMetaData, "half_extent_x", pad.halfExtents.x);
+                    pad.halfExtents.y = getMetadataFloat(node->mMetaData, "half_extent_y", pad.halfExtents.y);
+                    pad.halfExtents.z = getMetadataFloat(node->mMetaData, "half_extent_z", pad.halfExtents.z);
+                    jumpPadSpawner_.push_back(pad);
+                    break;
+                }
+                case 4: // Killzone (lava pit, void, etc.)
+                {
+                    const aiMatrix4x4& t = node->mTransformation;
+                    glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
+                    KillzoneSpawner kz;
+                    kz.pos = pos;
+                    kz.halfExtents.x = getMetadataFloat(node->mMetaData, "half_extent_x", kz.halfExtents.x);
+                    kz.halfExtents.y = getMetadataFloat(node->mMetaData, "half_extent_y", kz.halfExtents.y);
+                    kz.halfExtents.z = getMetadataFloat(node->mMetaData, "half_extent_z", kz.halfExtents.z);
+                    killzoneSpawner_.push_back(kz);
+                    break;
+                }
+                default:
+                    SDL_Log("Unknown entity_type %d on node '%s' — skipping", entity_type, nodeName);
+                    break;
                 }
             }
         }

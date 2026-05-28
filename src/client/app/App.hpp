@@ -2,8 +2,11 @@
 /// @brief Top-level application object owning the window, renderer, and network client.
 
 #pragma once
+#include "AppContext.hpp"
 #include "DeveloperConfig.hpp"
 #include "IScreen.hpp"
+#include "config/UserSettings.hpp"
+#include "host/HostedServer.hpp"
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
 #include "renderer-new/NewRenderer.hpp"
@@ -11,11 +14,13 @@
 #include <SDL3/SDL.h>
 
 #include <memory>
+#include <string>
 
 /// @brief Root application class; owns shared resources and manages screen transitions.
 ///
 /// Implements the SDL3 app-callback contract (init/event/iterate/quit).  Exactly
-/// one IScreen is active at a time; App drives transitions between Lobby and InGame.
+/// one IScreen is active at a time; App drives transitions among Home, host
+/// configuration, Lobby, and InGame screens.
 class App
 {
 public:
@@ -37,9 +42,10 @@ public:
     /// @brief Named screens the application can display.
     enum class Screen
     {
-        Home,  ///< Main menu screen.
-        Lobby, ///< Pre-match lobby waiting room.
-        InGame ///< Active match session.
+        Home,       ///< Main menu screen.
+        HostConfig, ///< Local hosting configuration screen.
+        Lobby,      ///< Pre-match lobby waiting room.
+        InGame      ///< Active match session.
     };
 
     /// @brief Destroy the current screen and activate the requested one.
@@ -47,11 +53,26 @@ public:
     void transitionTo(Screen next);
 
 private:
-    SDL_Window* window = nullptr;     ///< Main application window.
-    NewRenderer renderer;             ///< SDL_GPU PBR renderer, shared across screens.
-    NetworkConfig networkConfig;      ///< Host/port/transport loaded from config.toml.
-    DeveloperConfig developerConfig;  ///< Developer toggles loaded from config.toml.
-    Client client;                    ///< Network client connected to the authoritative server.
+    SDL_Window* window = nullptr;    ///< Main application window.
+    NewRenderer renderer;            ///< SDL_GPU PBR renderer, shared across screens.
+    NetworkConfig networkConfig;     ///< Host/port/transport loaded from config.toml.
+    DeveloperConfig developerConfig; ///< Developer toggles loaded from config.toml.
+    UserSettings userSettings;       ///< User-specific input and gameplay settings.
+    std::string userSettingsPath;    ///< Path used to load and save user settings.
+    std::string currentServerName;   ///< Display name for the connected server, if known.
+    Client client;                   ///< Network client connected to the authoritative server when in a session.
+    HostedServer hostedServer;       ///< Optional local server process launched by the host screen.
+    HostConfigState hostConfigState{
+        .port = 9999,
+        .useSpecificPort = false,
+        .useLegacyTcp = false,
+        .persistAfterClientExit = false,
+        .advertiseGlobal = true,
+        .advertiseLan = true,
+        .serverName = "Group 2 Server",
+        .killsToWin = 10,
+        .maxPlayers = 8,
+    }; ///< Persistent host screen draft state.
 
     Screen current = Screen::Home;    ///< Which screen is currently active.
     std::unique_ptr<IScreen> screen_; ///< Active screen instance.
@@ -59,4 +80,10 @@ private:
 
     /// @brief Destroy all subsystems without asserting on partial-init state.
     void cleanup();
+
+    /// @brief Build a borrowed context for screen initialisation.
+    AppContext screenContext();
+
+    /// @brief Show a modal message on the active home screen, if it is active.
+    void showHomePopupMessage(const std::string& message);
 };

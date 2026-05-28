@@ -38,7 +38,7 @@ void DamageIndicator::draw(HudContext& ctx, float cx, float cy)
         const float alpha = t01 * 0.85f;
         // Wedge glides from outside slightly inward as it fades — captures the
         // prototype's "blade-from-edge" feel on a fixed scale.
-        const float radius = (180.f * (1.f - t01) + 200.f) * s;
+        const float radius = (arcDistance + arcDistance * 0.9f * (1.f - t01)) * s;
 
         // Direction the damage came from (0° = front, +CW).
         const float rad = a.angleDeg * std::numbers::pi_v<float> / 180.f;

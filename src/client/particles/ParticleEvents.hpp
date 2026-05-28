@@ -13,10 +13,11 @@ struct WeaponFiredEvent
 {
     entt::entity shooter = entt::null;
     WeaponType type = WeaponType::Rifle;
-    glm::vec3 origin{};    ///< Muzzle world position.
-    glm::vec3 direction{}; ///< Normalised fire direction.
+    glm::vec3 origin{};       ///< Muzzle world position.
+    glm::vec3 direction{};    ///< Normalised fire direction.
     bool isHitscan = false;
-    glm::vec3 hitPos{};    ///< Valid only when isHitscan == true.
+    bool localPlayer = false; ///< True when this event originated from the listening client.
+    glm::vec3 hitPos{};       ///< Valid only when isHitscan == true.
 };
 
 /// @brief Emitted when a projectile or hitscan hits a surface.

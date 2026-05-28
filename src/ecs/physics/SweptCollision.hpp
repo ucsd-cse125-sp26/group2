@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "PhysicsPerfStats.hpp"
 #include "SurfaceType.hpp"
 
 #include <cmath>
@@ -160,6 +161,64 @@ void buildStaticWorldBroadphase(StaticWorldBroadphase& broadphase, std::span<con
 void queryStaticWorldBroadphase(const StaticWorldBroadphase& broadphase,
                                 const WorldAABB& query,
                                 const std::function<bool(uint32_t meshIndex)>& visit);
+
+[[nodiscard]] inline bool broadphaseAabbOverlap(const WorldAABB& a, const WorldAABB& b) noexcept
+{
+    return a.max.x >= b.min.x && a.min.x <= b.max.x && a.max.y >= b.min.y && a.min.y <= b.max.y && a.max.z >= b.min.z &&
+           a.min.z <= b.max.z;
+}
+
+template <class Visit>
+inline void
+queryStaticWorldBroadphaseFast(const StaticWorldBroadphase& broadphase, const WorldAABB& query, Visit&& visit)
+{
+    perf::add(&perf::FrameStats::staticBroadphaseQueries);
+    if (broadphase.nodes.empty())
+        return;
+
+    constexpr int kStackCapacity = 128;
+    int stack[kStackCapacity];
+    std::vector<int> overflowStack;
+    int stackPtr = 0;
+    stack[0] = 0;
+
+    auto pushNode = [&](int nodeIndex) {
+        if (stackPtr + 1 < kStackCapacity) {
+            stack[++stackPtr] = nodeIndex;
+        } else {
+            overflowStack.push_back(nodeIndex);
+        }
+    };
+
+    while (stackPtr >= 0 || !overflowStack.empty()) {
+        int nodeIdx = 0;
+        if (stackPtr >= 0) {
+            nodeIdx = stack[stackPtr--];
+        } else {
+            nodeIdx = overflowStack.back();
+            overflowStack.pop_back();
+        }
+        const BVHNode& node = broadphase.nodes[static_cast<std::size_t>(nodeIdx)];
+        const WorldAABB nodeBounds{.min = node.boundsMin, .max = node.boundsMax};
+        if (!broadphaseAabbOverlap(nodeBounds, query))
+            continue;
+
+        if (node.count > 0) {
+            for (int i = node.leftFirst; i < node.leftFirst + node.count; ++i) {
+                const uint32_t meshIndex = broadphase.meshIndices[static_cast<std::size_t>(i)];
+                if (meshIndex >= broadphase.meshBounds.size() ||
+                    !broadphaseAabbOverlap(broadphase.meshBounds[meshIndex], query))
+                    continue;
+                perf::add(&perf::FrameStats::staticBroadphaseMeshes);
+                if (!visit(meshIndex))
+                    return;
+            }
+        } else {
+            pushNode(node.leftFirst);
+            pushNode(node.leftFirst + 1);
+        }
+    }
+}
 
 /// @brief All world collision geometry for one tick.
 struct WorldGeometry
@@ -437,6 +496,21 @@ struct DepenContact
     SurfaceType surfaceType{SurfaceType::Concrete};
 };
 
+struct DepenetrationOptions
+{
+    float maxPushDistance{1e30f};
+    bool allowEmergencyUnstick{true};
+};
+
+struct DepenetrationResult
+{
+    float pushDistance{0.0f};
+    int passes{0};
+    bool emergencyUnstuck{false};
+    bool exceededMaxPush{false};
+    bool unresolvedOverlap{false};
+};
+
 /// @brief Scene-wide deepest single contact (per-primitive, per-feature).
 /// Used by the modern depen as the per-pass oracle: pick the deepest
 /// violation across the whole world, push out of it, re-probe.
@@ -460,6 +534,12 @@ DepenContact deepestCapsuleContact(CapsuleShape capsule, glm::vec3 pos, glm::vec
 /// @param capsule  Player capsule shape.
 /// @param world    World collision geometry.
 void depenetrateCapsuleVsWorld(glm::vec3& pos, glm::vec3& vel, CapsuleShape capsule, const WorldGeometry& world);
+
+DepenetrationResult depenetrateCapsuleVsWorldDetailed(glm::vec3& pos,
+                                                      glm::vec3& vel,
+                                                      CapsuleShape capsule,
+                                                      const WorldGeometry& world,
+                                                      DepenetrationOptions options = {});
 
 /// @brief Last-resort recovery for a capsule embedded in geometry with no
 /// clear depen direction.

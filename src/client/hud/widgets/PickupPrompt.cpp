@@ -1,6 +1,7 @@
 /// @file PickupPrompt.cpp
 #include "PickupPrompt.hpp"
 
+#include "config/InputBindings.hpp"
 #include "hud/HudContext.hpp"
 #include "hud/VoidfallStyle.hpp"
 
@@ -35,7 +36,7 @@ PickupPrompt::PickupPrompt()
     // sit in the player's primary aiming sightline.
     anchor = HudAnchor::Center;
     offsetX = 0.f;
-    offsetY = 260.f;
+    offsetY = 220.f;
     visible = false;
 }
 
@@ -43,6 +44,9 @@ void PickupPrompt::update(float /*dt*/, const HudGameState& state, HudTweenPool&
 {
     visible = state.isAlive && state.pickupAvailable;
     weaponId_ = state.pickupWeaponId;
+    if (state.bindings) {
+        keyLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Pickup));
+    }
 }
 
 void PickupPrompt::draw(HudContext& ctx, float cx, float cy)
@@ -55,20 +59,20 @@ void PickupPrompt::draw(HudContext& ctx, float cx, float cy)
     const float pad = keyBoxPadding * s;
     const float gap = spacing * s;
 
-    const char* keyStr = "F";
+    const char* keyStr = keyLabel_.c_str();
     char prompt[64];
     SDL_snprintf(prompt, sizeof(prompt), "to pick up %s", weaponDisplayName(weaponId_));
 
     // Lay the prompt out as one horizontally-centered block:
     //
-    //   [F]  to pick up Rocket Launcher
+    //   [key]  to pick up Rocket Launcher
     //
     // The key glyph sits in a rounded rect on the left; the descriptive
     // text is left-aligned to its right.
     //
     // SDF font glyphs only fill ~72% of the EM size vertically (cap-height),
     // so basing the box on the font size yields a box ~2× too tall for the
-    // visible "F". Hug the cap-height instead.
+    // visible key glyph. Hug the cap-height instead.
     const float capHeight = kfs * 0.72f;
     const float keyTextW = ctx.measureText(keyStr, kfs);
     const float boxW = keyTextW + pad * 2.f;
@@ -96,7 +100,7 @@ void PickupPrompt::draw(HudContext& ctx, float cx, float cy)
     // Key glyph box (lighter rect with the key letter centered).
     const float boxX = startX;
     const float boxY = midY - boxH * 0.5f;
-    ctx.rect(boxX, boxY, boxW, boxH, HudColor{0.f, 0.f, 0.f, 0.40f});
+    ctx.rect(boxX, boxY, boxW, boxH, withAlpha(k_quaternary, 0.40f));
     ctx.rectOutline(boxX, boxY, boxW, boxH, 1.f, k_lineBright);
     ctx.text(keyStr, boxX + boxW * 0.5f, midY - kfs * 0.64f, kfs, k_textBright, HudAlign::Center);
 

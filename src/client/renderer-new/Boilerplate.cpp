@@ -488,6 +488,28 @@ SDL_GPUTexture* createDepthTexture(SDL_GPUDevice* device, Uint32 width, Uint32 h
     return texture;
 }
 
+SDL_GPUTexture* createSampledColorTarget(SDL_GPUDevice* device,
+                                         Uint32 width,
+                                         Uint32 height,
+                                         SDL_GPUTextureFormat format)
+{
+    SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = format;
+    info.width = width;
+    info.height = height;
+    info.layer_count_or_depth = 1;
+    info.num_levels = 1;
+    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+    SDL_GPUTexture* texture = SDL_CreateGPUTexture(device, &info);
+    if (!texture)
+        SDL_Log("createSampledColorTarget: SDL_CreateGPUTexture failed: %s", SDL_GetError());
+
+    return texture;
+}
+
 SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device)
 {
     SDL_GPUSamplerCreateInfo samplerInfo{};
@@ -506,8 +528,6 @@ SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device)
     SDL_GPUSamplerCreateInfo samplerInfo{};
     samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
     samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
-    //samplerInfo.min_filter = SDL_GPU_FILTER_NEAREST;
-    //samplerInfo.mag_filter = SDL_GPU_FILTER_NEAREST;
     samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
     samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
     samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
@@ -515,8 +535,21 @@ SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device)
 
     samplerInfo.enable_compare = true;
     samplerInfo.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
-    //samplerInfo.compare_op = SDL_GPU_COMPAREOP_LESS;
 
     return SDL_CreateGPUSampler(device, &samplerInfo);
 }
+
+SDL_GPUSampler* createLinearClampSampler(SDL_GPUDevice* device)
+{
+    SDL_GPUSamplerCreateInfo samplerInfo{};
+    samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+
+    return SDL_CreateGPUSampler(device, &samplerInfo);
+}
+
 } // namespace Boilerplate
