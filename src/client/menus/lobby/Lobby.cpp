@@ -94,7 +94,7 @@ bool Lobby::init(AppContext& ctx)
     });
 
     client->onMatchConfig([this](const MatchConfig& config) {
-        SDL_Log("Lobby: match settings updated: killsToWin=%d", config.killsToWin);
+        SDL_Log("Lobby: match settings updated: killsToWin=%d maxPlayers=%d", config.killsToWin, config.maxPlayers);
         matchConfig = config;
     });
 

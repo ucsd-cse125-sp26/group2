@@ -59,6 +59,7 @@ enum class ConnectError
     CreateClientFailed,
     ConnectTimedOut,
     ConnectFailed,
+    LobbyFull,
 };
 
 /// @brief TCP stream client — sends input to the server and receives state updates.

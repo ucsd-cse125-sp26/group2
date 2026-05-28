@@ -26,6 +26,7 @@
 
 #include <array>
 #include <entt/entity/entity.hpp>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -61,7 +62,10 @@ public:
     void shutdown();
 
     [[nodiscard]] bool isHost(ClientId clientId) const;
+    void onMatchConfigUpdated(std::function<void(const MatchConfig&)> fn) { matchConfigUpdatedFn_ = std::move(fn); }
+    bool setMatchConfig(const MatchConfig& config);
     bool setKillsToWin(int kills);
+    bool setMaxPlayers(int maxPlayers);
     bool setIdleShutdownMinutes(int minutes);
 
 private:
@@ -153,6 +157,7 @@ private:
     std::vector<AbilityType> matchSecondaryAbilities;
     LobbyManager lobbyManager;                      ///< Owns lobby roster and validates host-initiated match starts.
     MatchController matchController;                ///< Manages match flow and state.
+    std::function<void(const MatchConfig&)> matchConfigUpdatedFn_;
     bool lobbyStartCountdownActive = false; ///< True while lobby is counting down before entering match countdown.
     float lobbyStartCountdownTimer = 0.0f;  ///< Seconds remaining in the lobby staging countdown.
     ClientId lobbyStartRequester{-1};       ///< Host that requested the active lobby staging countdown.

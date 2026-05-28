@@ -34,6 +34,7 @@ public:
 
     bool setMatchConfig(const MatchConfig& cfg);
     bool setKillsToWin(int killsToWin);
+    bool setMaxPlayers(int maxPlayers);
     [[nodiscard]] MatchConfig getMatchConfig() const;
 
 private:
@@ -70,5 +71,6 @@ private:
     void broadcastMatchState(Server& server);
 
     bool validateKillsToWin(int killsToWin);
+    bool validateMaxPlayers(int maxPlayers);
     void broadcastMatchConfig(Server& server);
 };

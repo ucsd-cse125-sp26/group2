@@ -29,6 +29,13 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Max Players");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SliderInt("##MaxPlayers", &draft.maxPlayers, 2, 128);
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted("Keep Server Running");
             ImGui::TableSetColumnIndex(1);
             ImGui::BeginDisabled(inputs.serverRunning);

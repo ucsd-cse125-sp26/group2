@@ -53,6 +53,7 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         ImGui::SeparatorText("Match Settings");
         if (config.matchConfig) {
             ImGui::Text("Kills to win: %d", config.matchConfig->killsToWin);
+            ImGui::Text("Max players: %d", config.matchConfig->maxPlayers);
         } else {
             ImGui::TextDisabled("Waiting for match settings");
         }

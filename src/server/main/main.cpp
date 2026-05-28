@@ -174,6 +174,9 @@ int main(int argc, char* argv[])
         .scan<'i', int>()
         .default_value(10)
         .help("Kills required to win a match (default: 10)");
+    program.add_argument("--max-players")
+        .scan<'i', int>()
+        .help("Maximum accepted players, clamped to 2..128 (default: config global-discovery.max-players)");
     program.add_argument("--idle-shutdown-minutes")
         .scan<'i', int>()
         .help("Minutes of idle time before automatic shutdown. Omit to run indefinitely (default)");
@@ -226,7 +229,12 @@ int main(int argc, char* argv[])
         cfg.transport.useUdpSessions = false;
     }
 
+    if (program.is_used("--max-players")) {
+        cfg.discovery.maxPlayers = static_cast<std::uint8_t>(std::clamp(program.get<int>("--max-players"), 2, 128));
+    }
+
     Server server;
+    server.setMaxPlayers(cfg.discovery.maxPlayers);
     if (!server.init(serverNet.host.c_str(), serverNet.port, cfg.transport, cfg.discovery)) {
         ::group2::perf::stopAggregator();
         closeCsv();
@@ -269,9 +277,12 @@ int main(int argc, char* argv[])
         }
     }
 
-    int killsToWin = program.get<int>("--killsToWin");
-    if (!game.setKillsToWin(killsToWin)) {
-        SDL_Log("Invalid killsToWin value: %d", killsToWin);
+    const MatchConfig initialMatchConfig{.killsToWin = program.get<int>("--killsToWin"),
+                                         .maxPlayers = static_cast<int>(cfg.discovery.maxPlayers)};
+    if (!game.setMatchConfig(initialMatchConfig)) {
+        SDL_Log("Invalid match config: killsToWin=%d maxPlayers=%d",
+                initialMatchConfig.killsToWin,
+                initialMatchConfig.maxPlayers);
         game.shutdown();
         server.shutdown();
         ::group2::perf::stopAggregator();
@@ -283,12 +294,16 @@ int main(int argc, char* argv[])
 
     // start server discovery system
     DiscoveryServer discoveryServer;
-    const DiscoveryServer::ServerInfo serverInfo{
+    DiscoveryServer::ServerInfo serverInfo{
         .serverName = cfg.discovery.serverName,
         .gamePort = actualPort,
         .currentPlayers = 0,
         .maxPlayers = cfg.discovery.maxPlayers,
     };
+    game.onMatchConfigUpdated([&discoveryServer, &serverInfo](const MatchConfig& config) {
+        serverInfo.maxPlayers = static_cast<std::uint8_t>(std::clamp(config.maxPlayers, 2, 128));
+        discoveryServer.updateInfo(serverInfo);
+    });
     discoveryServer.start(9998, serverInfo, [&server]() { return server.getClientCount(); });
 
     std::cout << "READY " << actualPort << '\n' << std::flush;

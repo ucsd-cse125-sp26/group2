@@ -24,7 +24,9 @@ bool HostConfig::init(AppContext& ctx)
     if (const auto latestMatchConfig = client->getLatestMatchConfig()) {
         lastSyncedMatchConfig = latestMatchConfig;
     } else {
-        lastSyncedMatchConfig = MatchConfig{.killsToWin = draftConfig().killsToWin};
+        const HostConfigState initialDraft = draftConfig();
+        lastSyncedMatchConfig =
+            MatchConfig{.killsToWin = initialDraft.killsToWin, .maxPlayers = initialDraft.maxPlayers};
     }
     client->onMatchConfig([this](const MatchConfig& config) { lastSyncedMatchConfig = config; });
     return true;
@@ -100,6 +102,7 @@ SDL_AppResult HostConfig::iterate()
         if (pendingConfirmAction == PendingConfirmAction::DiscardMatchChanges) {
             if (lastSyncedMatchConfig) {
                 draft->killsToWin = lastSyncedMatchConfig->killsToWin;
+                draft->maxPlayers = lastSyncedMatchConfig->maxPlayers;
             }
             pendingGoToLobby = true;
         } else if (pendingConfirmAction == PendingConfirmAction::ShutdownServer) {
@@ -161,11 +164,13 @@ HostConfigState HostConfig::draftConfig() const
             .useLegacyTcp = false,
             .persistAfterClientExit = false,
             .killsToWin = 10,
+            .maxPlayers = 8,
         };
 
     HostConfigState result = *draft;
     result.port = std::clamp(result.port, 0, 65535);
     result.killsToWin = std::clamp(result.killsToWin, 1, 100);
+    result.maxPlayers = std::clamp(result.maxPlayers, 2, 128);
     return result;
 }
 
@@ -194,7 +199,8 @@ bool HostConfig::hasUnsavedMatchChanges() const
     if (!draft || !lastSyncedMatchConfig)
         return false;
 
-    return std::clamp(draft->killsToWin, 1, 100) != lastSyncedMatchConfig->killsToWin;
+    return std::clamp(draft->killsToWin, 1, 100) != lastSyncedMatchConfig->killsToWin ||
+           std::clamp(draft->maxPlayers, 2, 128) != lastSyncedMatchConfig->maxPlayers;
 }
 
 bool HostConfig::updateMatchConfig()
@@ -202,8 +208,10 @@ bool HostConfig::updateMatchConfig()
     if (!client || !draft)
         return false;
 
-    const MatchConfig config{.killsToWin = std::clamp(draft->killsToWin, 1, 100)};
+    const MatchConfig config{.killsToWin = std::clamp(draft->killsToWin, 1, 100),
+                             .maxPlayers = std::clamp(draft->maxPlayers, 2, 128)};
     draft->killsToWin = config.killsToWin;
+    draft->maxPlayers = config.maxPlayers;
     if (!client->sendMatchConfig(config)) {
         lastError = "Failed to send match settings update";
         return false;

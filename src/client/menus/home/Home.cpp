@@ -103,13 +103,22 @@ SDL_AppResult Home::iterate()
     }
     if (result.globalServerIndex >= 0 && result.globalServerIndex < static_cast<int>(servers.size())) {
         const auto& server = servers[static_cast<std::size_t>(result.globalServerIndex)];
-        joinError.clear();
-        pendingJoinRequest =
-            JoinRequest{.serverIp = server.host, .serverPort = server.gamePort, .globalServerId = server.id};
+        if (server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers) {
+            joinError = "Lobby full";
+        } else {
+            joinError.clear();
+            pendingJoinRequest =
+                JoinRequest{.serverIp = server.host, .serverPort = server.gamePort, .globalServerId = server.id};
+        }
     } else if (result.localServerIndex >= 0 && result.localServerIndex < static_cast<int>(localServers.size())) {
         const auto& server = localServers[static_cast<std::size_t>(result.localServerIndex)];
-        joinError.clear();
-        pendingJoinRequest = JoinRequest{.serverIp = server.hostIp, .serverPort = server.gamePort, .globalServerId = 0};
+        if (server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers) {
+            joinError = "Lobby full";
+        } else {
+            joinError.clear();
+            pendingJoinRequest =
+                JoinRequest{.serverIp = server.hostIp, .serverPort = server.gamePort, .globalServerId = 0};
+        }
     }
 
     ImGui::Render();

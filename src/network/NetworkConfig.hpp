@@ -118,10 +118,10 @@ struct GlobalDiscoveryConfig
     uint16_t directoryTcpPort = 10080;             ///< Legacy directory TCP API port.
     uint16_t directoryUdpPort = 10081;             ///< UDP directory/relay port.
     std::string serverName = "Group 2 Server";     ///< Name advertised by local servers.
-    uint8_t maxPlayers = 8;                        ///< Display-only capacity advertised by servers.
-    int refreshSeconds = 5;                        ///< Client browser refresh cadence.
-    int connectPunchTimeoutMs = 900;               ///< UDP punch-assist window before a direct join attempt.
-    int relayFallbackDelayMs = 450; ///< Start relay if direct route has not validated within this window.
+    uint8_t maxPlayers = 8;          ///< Default capacity advertised by servers and enforced on hosted sessions.
+    int refreshSeconds = 5;          ///< Client browser refresh cadence.
+    int connectPunchTimeoutMs = 900; ///< UDP punch-assist window before a direct join attempt.
+    int relayFallbackDelayMs = 450;  ///< Start relay if direct route has not validated within this window.
 };
 
 /// @brief Runtime network connection parameters.

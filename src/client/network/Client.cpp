@@ -25,6 +25,22 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string_view>
+
+namespace
+{
+constexpr Uint64 k_joinRejectGraceMs = 100;
+
+bool isJoinFailedPacket(const std::uint8_t* data, Uint32 size, std::string_view expectedMessage)
+{
+    if (size < 1 || static_cast<PacketType>(data[0]) != PacketType::JOIN_FAILED)
+        return false;
+
+    const auto* payload = reinterpret_cast<const char*>(data + 1);
+    const std::string_view message(payload, size - 1);
+    return message == expectedMessage;
+}
+} // namespace
 
 ConnectError Client::init(const char* addr,
                           Uint16 port,
@@ -54,6 +70,33 @@ ConnectError Client::init(const char* addr,
         }
 
         connectionId_ = session_.clientConnectionId();
+        const Uint64 rejectDeadline = SDL_GetTicks() + k_joinRejectGraceMs;
+        while (SDL_GetTicks() <= rejectDeadline) {
+            session_.pump();
+            net::UdpSessionTransport::Event event;
+            while (session_.pollEvent(event)) {
+                if (event.type == net::UdpSessionTransport::EventType::Payload) {
+                    if (isJoinFailedPacket(
+                            event.payload.data(), static_cast<Uint32>(event.payload.size()), "Lobby full"))
+                    {
+                        SDL_Log("Client: server rejected join: Lobby full");
+                        session_.close();
+                        usingUdpSession_ = false;
+                        return ConnectError::LobbyFull;
+                    }
+
+                    std::lock_guard<std::mutex> lock(stateMutex_);
+                    recvUdpDelayed(std::move(event.payload));
+                } else if (event.type == net::UdpSessionTransport::EventType::Disconnected) {
+                    SDL_Log("Client: server disconnected during join grace period");
+                    session_.close();
+                    usingUdpSession_ = false;
+                    return ConnectError::ConnectFailed;
+                }
+            }
+            SDL_Delay(1);
+        }
+
         udpSessionLastBytesSent_ = 0;
         udpSessionLastBytesRecv_ = 0;
         SDL_Log("Client: UDP session connected to %s:%u, session=0x%llx",
@@ -102,6 +145,45 @@ ConnectError Client::init(const char* addr,
     }
 
     msgStream.socket = sock;
+    const Uint64 rejectDeadline = SDL_GetTicks() + k_joinRejectGraceMs;
+    while (SDL_GetTicks() <= rejectDeadline) {
+        if (!msgStream.pumpReads()) {
+            NET_DestroyStreamSocket(sock);
+            msgStream.socket = nullptr;
+            NET_UnrefAddress(serverAddr);
+            serverAddr = nullptr;
+            return ConnectError::ConnectFailed;
+        }
+
+        bool rejectedLobbyFull = false;
+        bool streamOk = msgStream.drainComplete([&](const void* data, Uint32 size) {
+            const auto* bytes = static_cast<const std::uint8_t*>(data);
+            if (isJoinFailedPacket(bytes, size, "Lobby full")) {
+                rejectedLobbyFull = true;
+                return;
+            }
+
+            dispatchMessage(bytes, size);
+        });
+        if (!streamOk) {
+            NET_DestroyStreamSocket(sock);
+            msgStream.socket = nullptr;
+            NET_UnrefAddress(serverAddr);
+            serverAddr = nullptr;
+            return ConnectError::ConnectFailed;
+        }
+        if (rejectedLobbyFull) {
+            SDL_Log("Client: server rejected join: Lobby full");
+            NET_DestroyStreamSocket(sock);
+            msgStream.socket = nullptr;
+            NET_UnrefAddress(serverAddr);
+            serverAddr = nullptr;
+            return ConnectError::LobbyFull;
+        }
+
+        SDL_Delay(1);
+    }
+
     transportConfig_ = transport;
 
     // PR-11: read GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS once at connect.
@@ -1338,7 +1420,7 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
 
         MatchConfig config{};
         std::memcpy(&config, payload, sizeof(MatchConfig));
-        SDL_Log("Client: received match config: kills=%d", config.killsToWin);
+        SDL_Log("Client: received match config: kills=%d maxPlayers=%d", config.killsToWin, config.maxPlayers);
 
         latestMatchConfig_ = config;
         if (matchConfigFn_)

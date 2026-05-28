@@ -453,7 +453,11 @@ void ServerGame::eventHandler(const Event& event)
         GROUP2_PROF_SCOPE("eventMatchConfigUpdated");
         // Client can propose new match config (e.g. kill threshold) which is then broadcast to all clients.
         if (isHost(event.clientId) && matchController.setMatchConfig(event.matchConfig)) {
-            server->broadcastMatchConfig(matchController.getMatchConfig());
+            const MatchConfig config = matchController.getMatchConfig();
+            server->setMaxPlayers(config.maxPlayers);
+            if (matchConfigUpdatedFn_)
+                matchConfigUpdatedFn_(config);
+            server->broadcastMatchConfig(config);
         }
         break;
     }
@@ -1263,6 +1267,30 @@ bool ServerGame::isHost(ClientId clientId) const
 bool ServerGame::setKillsToWin(int kills)
 {
     return matchController.setKillsToWin(kills);
+}
+
+bool ServerGame::setMaxPlayers(int maxPlayers)
+{
+    if (!matchController.setMaxPlayers(maxPlayers))
+        return false;
+
+    if (server)
+        server->setMaxPlayers(maxPlayers);
+    if (matchConfigUpdatedFn_)
+        matchConfigUpdatedFn_(matchController.getMatchConfig());
+    return true;
+}
+
+bool ServerGame::setMatchConfig(const MatchConfig& config)
+{
+    if (!matchController.setMatchConfig(config))
+        return false;
+
+    if (server)
+        server->setMaxPlayers(matchController.getMatchConfig().maxPlayers);
+    if (matchConfigUpdatedFn_)
+        matchConfigUpdatedFn_(matchController.getMatchConfig());
+    return true;
 }
 
 bool ServerGame::setIdleShutdownMinutes(int minutes)

@@ -132,6 +132,11 @@ bool MatchController::validateKillsToWin(int killsToWin)
     return true;
 }
 
+bool MatchController::validateMaxPlayers(int maxPlayers)
+{
+    return maxPlayers >= 2 && maxPlayers <= 128;
+}
+
 void MatchController::broadcastMatchConfig(Server& server)
 {
     server.broadcastMatchConfig(config);
@@ -139,7 +144,7 @@ void MatchController::broadcastMatchConfig(Server& server)
 
 bool MatchController::setMatchConfig(const MatchConfig& cfg)
 {
-    if (!validateKillsToWin(cfg.killsToWin))
+    if (!validateKillsToWin(cfg.killsToWin) || !validateMaxPlayers(cfg.maxPlayers))
         return false;
 
     this->config = cfg;
@@ -152,6 +157,15 @@ bool MatchController::setKillsToWin(int killsToWin)
         return false;
 
     config.killsToWin = killsToWin;
+    return true;
+}
+
+bool MatchController::setMaxPlayers(int maxPlayers)
+{
+    if (!validateMaxPlayers(maxPlayers))
+        return false;
+
+    config.maxPlayers = maxPlayers;
     return true;
 }
 

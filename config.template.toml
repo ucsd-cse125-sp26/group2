@@ -39,6 +39,7 @@ advertise-server = true
 directory-host = "cse125.ucsd.edu"
 directory-udp-port = 10081
 server-name = "Group 2 Server"
+# Default authoritative player cap for locally hosted servers.
 max-players = 8
 refresh-seconds = 5
 connect-punch-timeout-ms = 900

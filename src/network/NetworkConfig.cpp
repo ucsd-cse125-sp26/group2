@@ -77,7 +77,7 @@ NetworkConfig loadNetworkConfig(const char* path)
     if (auto v = discovery["server-name"].value<std::string>())
         cfg.discovery.serverName = *v;
     if (auto v = discovery["max-players"].value<int>())
-        cfg.discovery.maxPlayers = static_cast<uint8_t>(std::clamp(*v, 0, 255));
+        cfg.discovery.maxPlayers = static_cast<uint8_t>(std::clamp(*v, 2, 128));
     if (auto v = discovery["refresh-seconds"].value<int>())
         cfg.discovery.refreshSeconds = std::clamp(*v, 1, 60);
     if (auto v = discovery["connect-punch-timeout-ms"].value<int>())

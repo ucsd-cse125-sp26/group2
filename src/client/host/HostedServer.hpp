@@ -20,6 +20,7 @@ struct HostConfigState
     bool useLegacyTcp;           ///< True to force the hosted server to legacy TCP transport.
     bool persistAfterClientExit; ///< UI-only persistence request; not wired yet.
     int killsToWin;              ///< Match config: kill threshold to win, sent to the server on launch and update.
+    int maxPlayers;              ///< Match config: maximum number of connected players accepted by the server.
 };
 
 /// @brief Reserved metadata for an active hosted session.

@@ -7,6 +7,7 @@
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "network/ChatProtocol.hpp"
+#include "network/MatchConfig.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/MessageStream.hpp"
 #include "network/NetworkConfig.hpp"
@@ -160,6 +161,9 @@ public:
     bool sendLobbyStateToClient(ClientId clientId, const std::vector<LobbyPlayer>& players);
 
     bool sendMatchConfigToClient(ClientId clientId, const MatchConfig& config);
+
+    /// @brief Update the authoritative client admission cap.
+    void setMaxPlayers(int maxPlayers);
 
     /// @brief Drain every connection's outbound queue to its socket.
     ///
@@ -406,6 +410,7 @@ private:
     std::uint32_t directoryServerId_ = 0;
     Uint64 lastDirectoryHeartbeatMs_ = 0;
     std::uint32_t nextChatServerSeq_ = 0;
+    std::atomic<int> maxPlayers_{128};
     bool usingUdpSession_ = false;
     Uint16 listenPort_ = 0;
     std::unordered_map<std::uint64_t, ClientId> connIdToClient_; ///< UDP connection-id → ClientId lookup.

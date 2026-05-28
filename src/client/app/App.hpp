@@ -66,6 +66,8 @@ private:
         .useSpecificPort = false,
         .useLegacyTcp = false,
         .persistAfterClientExit = false,
+        .killsToWin = 10,
+        .maxPlayers = 8,
     }; ///< Persistent host screen draft state.
 
     Screen current = Screen::Home;    ///< Which screen is currently active.

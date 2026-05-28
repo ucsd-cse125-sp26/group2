@@ -20,6 +20,7 @@
 #include <SDL3/SDL.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <entt/entity/entity.hpp>
@@ -27,10 +28,13 @@
 #include <random>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace
 {
+
+constexpr std::string_view k_lobbyFullMessage = "Lobby full";
 
 bool combatLogEnabled()
 {
@@ -39,6 +43,15 @@ bool combatLogEnabled()
         return env != nullptr && env[0] != '\0' && env[0] != '0';
     }();
     return enabled;
+}
+
+std::vector<std::uint8_t> makeJoinFailedPacket(std::string_view message)
+{
+    std::vector<std::uint8_t> packet;
+    packet.reserve(1 + message.size());
+    packet.push_back(static_cast<std::uint8_t>(PacketType::JOIN_FAILED));
+    packet.insert(packet.end(), message.begin(), message.end());
+    return packet;
 }
 
 } // namespace
@@ -706,11 +719,17 @@ void Server::sendDirectoryHeartbeat(Uint64 nowMs)
         .name = discoveryConfig_.serverName,
         .gamePort = listenPort_,
         .currentPlayers = static_cast<std::uint8_t>(std::clamp(currentPlayers, 0, 255)),
-        .maxPlayers = discoveryConfig_.maxPlayers,
+        .maxPlayers = static_cast<std::uint8_t>(maxPlayers_.load(std::memory_order_relaxed)),
     };
     std::vector<std::uint8_t> payload = net::discovery::encodeRegistration(kind, reg);
     session_.sendDirectoryControl(directoryAddr_, payload.data(), static_cast<int>(payload.size()));
     lastDirectoryHeartbeatMs_ = nowMs;
+}
+
+void Server::setMaxPlayers(int maxPlayers)
+{
+    const int clamped = std::clamp(maxPlayers, 2, static_cast<int>(k_maxAcceptedClients));
+    maxPlayers_.store(clamped, std::memory_order_relaxed);
 }
 
 void Server::networkLoop()
@@ -721,9 +740,33 @@ void Server::networkLoop()
             net::UdpSessionTransport::Event ev;
             while (session_.pollEvent(ev)) {
                 if (ev.type == net::UdpSessionTransport::EventType::Connected) {
+                    {
+                        std::shared_lock<std::shared_mutex> lock(stateMutex_);
+                        if (clients.size() >= static_cast<std::size_t>(maxPlayers_.load(std::memory_order_relaxed))) {
+                            SDL_Log("Server: rejecting UDP session client; max player cap reached");
+                            const std::vector<std::uint8_t> packet = makeJoinFailedPacket(k_lobbyFullMessage);
+                            session_.send(ev.connectionId,
+                                          net::ChannelId::ControlReliableOrdered,
+                                          packet.data(),
+                                          static_cast<int>(packet.size()));
+                            session_.disconnect(ev.connectionId);
+                            continue;
+                        }
+                    }
+
                     ClientId clientId = getNextClientId();
                     {
                         std::unique_lock<std::shared_mutex> lock(stateMutex_);
+                        if (clients.size() >= static_cast<std::size_t>(maxPlayers_.load(std::memory_order_relaxed))) {
+                            SDL_Log("Server: rejecting UDP session client; max player cap reached");
+                            const std::vector<std::uint8_t> packet = makeJoinFailedPacket(k_lobbyFullMessage);
+                            session_.send(ev.connectionId,
+                                          net::ChannelId::ControlReliableOrdered,
+                                          packet.data(),
+                                          static_cast<int>(packet.size()));
+                            session_.disconnect(ev.connectionId);
+                            continue;
+                        }
                         auto [it, inserted] = clients.try_emplace(clientId);
                         if (inserted) {
                             auto& conn = it->second;
@@ -1034,8 +1077,12 @@ ClientId Server::acceptClients()
         SDL_Log("NET_AcceptClient failed: %s", SDL_GetError());
         return {};
     } else if (socket) {
-        if (clients.size() >= k_maxAcceptedClients) {
-            SDL_Log("Server: rejecting client; max client cap reached");
+        const auto maxPlayers = static_cast<std::size_t>(maxPlayers_.load(std::memory_order_relaxed));
+        if (clients.size() >= maxPlayers || clients.size() >= k_maxAcceptedClients) {
+            SDL_Log("Server: rejecting client; max player cap reached");
+            const std::vector<std::uint8_t> packet = makeJoinFailedPacket(k_lobbyFullMessage);
+            MessageStream stream(socket);
+            stream.send(packet.data(), static_cast<Uint32>(packet.size()));
             NET_DestroyStreamSocket(socket);
             return {};
         }

@@ -40,6 +40,8 @@ const char* connectErrorLogName(ConnectError error)
         return "connect timed out";
     case ConnectError::ConnectFailed:
         return "connect failed";
+    case ConnectError::LobbyFull:
+        return "lobby full";
     }
 
     return "unknown";
@@ -54,6 +56,8 @@ const char* joinErrorMessage(ConnectError error)
     case ConnectError::ResolveTimedOut:
     case ConnectError::ConnectTimedOut:
         return "Connection timed out";
+    case ConnectError::LobbyFull:
+        return "Lobby full";
     default:
         return "Failed to connect to server";
     }
@@ -103,6 +107,7 @@ bool App::init()
         hostConfigState.port = networkConfig.serverNetwork.port;
         hostConfigState.useSpecificPort = false;
         hostConfigState.useLegacyTcp = false;
+        hostConfigState.maxPlayers = networkConfig.discovery.maxPlayers;
     }
 
     // Pull user-specific settings once; App owns the live copy while screens borrow it.
