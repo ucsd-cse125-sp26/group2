@@ -4,20 +4,13 @@
 #include "HealthPackSpawnerSystem.hpp"
 
 #include "PlayerStatusSystem.hpp"
-#include "WeaponSpawnerSystem.hpp"
 #include "ecs/components/CollisionShape.hpp"
-#include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/HealthPackSpawner.hpp"
-#include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
-#include "ecs/components/PlayerVisState.hpp"
 #include "ecs/components/Position.hpp"
-#include "ecs/components/WeaponConfig.hpp"
-#include "ecs/components/WeaponSpawner.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
-#include "entt/entity/entity.hpp"
 
 namespace systems
 {
@@ -26,7 +19,7 @@ namespace systems
 /// @param registry      The ECS registry.
 /// @param spawnerPos    Position of the spawner entity.
 /// @param spawnerShape  Collision shape of the spawner.
-/// @param spawner       Spawner component (weapon type, availability, cooldown).
+/// @param spawner       Spawner component
 inline void
 checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, HealthPackSpawner& spawner)
 {

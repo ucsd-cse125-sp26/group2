@@ -5,6 +5,7 @@
 
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/GrenadeConfig.hpp"
+#include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerVisState.hpp"
@@ -26,15 +27,25 @@ namespace systems
 inline void
 checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, WeaponSpawner& spawner)
 {
-    auto view = registry.view<Player, Position, CollisionShape, InputSnapshot, WeaponState, PlayerVisState>();
+    auto view = registry.view<Player, Position, CollisionShape, InputSnapshot, WeaponState, PlayerVisState, GrenadeState>();
     view.each([&](entt::entity /*player*/,
                   const Position& pos,
                   const CollisionShape& shape,
                   const InputSnapshot& input,
                   WeaponState& weapon,
-                  const PlayerVisState& pvis) {
+                  const PlayerVisState& pvis,
+                  GrenadeState& grenade) {
         if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasWeapon)
         {
+            // Check if grenade spawner
+            if (std::ranges::contains(kGrenadeTypes, spawner.type)) {
+                int& currentAmmo = grenadeAmmo(grenade, spawner.type);
+                spawner.hasWeapon = false;
+                spawner.spawnCooldown = weaponCooldownTime;
+                currentAmmo++;
+                return;
+            }
+
             const WeaponConfig config = getWeaponConfig(spawner.type);
             GunInstance& primary = getSlot(weapon, WeaponSlot::PRIMARY);
             GunInstance& secondary = getSlot(weapon, WeaponSlot::SECONDARY);
