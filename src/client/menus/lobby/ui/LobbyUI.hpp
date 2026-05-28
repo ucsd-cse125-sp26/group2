@@ -2,6 +2,7 @@
 /// @brief ImGui widgets for the pre-match lobby player list and ready/start controls.
 
 #pragma once
+#include "network/MatchConfig.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 
 #include <optional>
@@ -24,9 +25,11 @@ struct LobbyUIConfig
     const std::vector<LobbyPlayer>& players; ///< Current snapshot of all connected players.
     ClientId localId;                        ///< This client's own ID, used to label the local player.
     bool isHost;                             ///< True if the local client is the lobby host.
-    bool canStartMatch;                      ///< True when all non-host players are ready.
+    bool canStartMatch;                      ///< True when the host is allowed to start the match.
     bool startCountdownActive;               ///< True while the pre-match countdown is running.
     float startCountdownRemaining;           ///< Seconds remaining in the countdown.
+    std::optional<MatchConfig> matchConfig;  ///< Current match settings, if received from the server.
+    std::string_view serverName;             ///< Display name for the connected server.
     bool isHosting;                          ///< True if this client owns a local hosted server process.
     std::string_view hostLanIp;              ///< LAN IPv4 shown to other local players.
     uint16_t hostPort;                       ///< Port shown to other players when hosting locally.

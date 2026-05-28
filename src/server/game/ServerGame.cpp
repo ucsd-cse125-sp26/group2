@@ -19,6 +19,8 @@
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/JumpPad.hpp"
+#include "ecs/components/Killzone.hpp"
 #include "ecs/components/LagCompTarget.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerColor.hpp"
@@ -49,6 +51,8 @@
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
+#include "ecs/systems/JumpPadSystem.hpp"
+#include "ecs/systems/KillzoneSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
@@ -227,6 +231,26 @@ void ServerGame::run()
         registry.emplace<CollisionShape>(spawner);
     }
 
+    // Jump pads — invisible AABB triggers placed in Blender that launch
+    // any overlapping player. Position is used verbatim from the map
+    // transform; the trigger box is centred on it so the pad's pivot
+    // should sit at the pad's surface centre.
+    for (const gamemap::JumpPadSpawner& jp : gamemap::jumpPadSpawner_) {
+        const entt::entity pad = registry.create();
+        registry.emplace<JumpPad>(pad, JumpPad{.velocity = jp.velocity});
+        registry.emplace<Position>(pad, jp.pos);
+        registry.emplace<CollisionShape>(pad, CollisionShape{.halfExtents = jp.halfExtents});
+    }
+
+    // Killzones — invisible AABB triggers, typically placed over lava or
+    // bottomless pits. Any overlapping player is killed on the next tick.
+    for (const gamemap::KillzoneSpawner& kz : gamemap::killzoneSpawner_) {
+        const entt::entity zone = registry.create();
+        registry.emplace<Killzone>(zone);
+        registry.emplace<Position>(zone, kz.pos);
+        registry.emplace<CollisionShape>(zone, CollisionShape{.halfExtents = kz.halfExtents});
+    }
+
     while (running) {
         server->poll();
 
@@ -345,6 +369,7 @@ void ServerGame::eventHandler(const Event& event)
             break;
         }
         lobbyManager.addPlayer(event.clientId);
+        server->sendMatchConfigToClient(event.clientId, matchController.getMatchConfig());
         break;
     }
     case EventType::Disconnected: {
@@ -448,6 +473,43 @@ void ServerGame::eventHandler(const Event& event)
             recipients, event.clientId, event.voiceFrame.sequence, event.voiceFrame.frameMs, event.voiceFrame.opus);
         break;
     }
+    case EventType::MatchConfigUpdated: {
+        GROUP2_PROF_SCOPE("eventMatchConfigUpdated");
+        // Client can propose new match config (e.g. kill threshold) which is then broadcast to all clients.
+        if (isHost(event.clientId) && matchController.setMatchConfig(event.matchConfig)) {
+            const MatchConfig config = matchController.getMatchConfig();
+            server->setMaxPlayers(config.maxPlayers);
+            if (matchConfigUpdatedFn_)
+                matchConfigUpdatedFn_(config);
+            server->broadcastMatchConfig(config);
+        }
+        break;
+    }
+    case EventType::DiscoverySettingsUpdated: {
+        GROUP2_PROF_SCOPE("eventDiscoverySettingsUpdated");
+        if (!isHost(event.clientId)) {
+            SDL_Log("ServerGame: rejecting discovery settings update from non-host clientId %u", event.clientId.value);
+            break;
+        }
+        if (server) {
+            server->setAdvertiseServer(event.discoverySettings.advertiseGlobal);
+        }
+        if (discoverySettingsUpdatedFn_) {
+            discoverySettingsUpdatedFn_(event.discoverySettings);
+        }
+        break;
+    }
+    case EventType::ServerShutdownRequested: {
+        GROUP2_PROF_SCOPE("eventServerShutdownRequested");
+        if (!isHost(event.clientId)) {
+            SDL_Log("ServerGame: rejecting shutdown request from non-host clientId %u", event.clientId.value);
+            break;
+        }
+
+        SDL_Log("ServerGame: host clientId %u requested server shutdown", event.clientId.value);
+        shutdown();
+        break;
+    }
     default:
         break;
     }
@@ -535,6 +597,18 @@ void ServerGame::tick(float dt, Uint64 nextTick)
                         chatEvents);
                 nextWarningMs = nowMs + 1000;
             }
+        }
+    }
+
+    // Check if idle server should shutdown
+    GROUP2_PROF_SCOPE("idleCheck");
+    if (idleShutdownEnabled_) {
+        if (server->getClientCount() > 0) {
+            lastNonEmptyMs_ = SDL_GetTicks();
+        } else if (idleShutdownMs_ > 0 && (SDL_GetTicks() - lastNonEmptyMs_) >= idleShutdownMs_) {
+            SDL_Log("[server] Idle shutdown triggered after %d minutes with no clients",
+                    static_cast<int>(idleShutdownMs_ / 60000));
+            running = false;
         }
     }
 
@@ -672,6 +746,17 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         GROUP2_PROF_SCOPE("PowerupSpawners");
         systems::runPowerupSpawners(registry, dt);
+    }
+    {
+        GROUP2_PROF_SCOPE("jumpPads");
+        systems::runJumpPads(registry, dt);
+    }
+    {
+        // Killzones run after PlayerStatus so a dead player's lingering
+        // overlap on a lava pit doesn't double-charge their death
+        // (RespawnTimer is checked first inside applyDamage).
+        GROUP2_PROF_SCOPE("killzones");
+        systems::runKillzones(registry, pendingKillEvents);
     }
     {
         GROUP2_PROF_SCOPE("powerup");
@@ -1221,4 +1306,51 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
     // Step 2: Transform bone poses into world-space hitbox capsules.
     // updateHitboxes itself was parallelized in PR-3; see HitboxSystem.cpp.
     systems::updateHitboxes(registry, hitboxRig_, rigScale_, rigMeshMinY_);
+}
+
+bool ServerGame::isHost(ClientId clientId) const
+{
+    return lobbyManager.isHost(clientId);
+}
+
+bool ServerGame::setKillsToWin(int kills)
+{
+    return matchController.setKillsToWin(kills);
+}
+
+bool ServerGame::setMaxPlayers(int maxPlayers)
+{
+    if (!matchController.setMaxPlayers(maxPlayers))
+        return false;
+
+    if (server)
+        server->setMaxPlayers(maxPlayers);
+    if (matchConfigUpdatedFn_)
+        matchConfigUpdatedFn_(matchController.getMatchConfig());
+    return true;
+}
+
+bool ServerGame::setMatchConfig(const MatchConfig& config)
+{
+    if (!matchController.setMatchConfig(config))
+        return false;
+
+    if (server)
+        server->setMaxPlayers(matchController.getMatchConfig().maxPlayers);
+    if (matchConfigUpdatedFn_)
+        matchConfigUpdatedFn_(matchController.getMatchConfig());
+    return true;
+}
+
+bool ServerGame::setIdleShutdownMinutes(int minutes)
+{
+    if (minutes <= 0 || minutes > 1440) { // 1440 minutes = 24 hours
+        return false;
+    }
+
+    idleShutdownEnabled_ = true;
+    idleShutdownMs_ = static_cast<uint64_t>(minutes) * 60 * 1000;
+    lastNonEmptyMs_ = SDL_GetTicks();
+
+    return true;
 }

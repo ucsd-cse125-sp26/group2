@@ -3,7 +3,10 @@
 
 #include "HostConfigUI.hpp"
 
+#include "network/ServerName.hpp"
+
 #include <imgui.h>
+#include <misc/cpp/imgui_stdlib.h>
 
 namespace host_config_ui
 {
@@ -22,13 +25,37 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            ImGui::TextUnformatted("Persistent Server");
+            ImGui::TextUnformatted("Server Name");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::BeginDisabled(inputs.serverRunning);
+            ImGui::SetNextItemWidth(240.0f);
+            ImGui::InputText("##ServerName", &draft.serverName);
+            draft.serverName = server_name::clampUtf8Bytes(draft.serverName);
+            ImGui::EndDisabled();
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Kill Threshold to Win");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SliderInt("##KillsToWin", &draft.killsToWin, 1, 100);
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Max Players");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SliderInt("##MaxPlayers", &draft.maxPlayers, 2, 128);
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Keep Server Running");
             ImGui::TableSetColumnIndex(1);
             ImGui::BeginDisabled(inputs.serverRunning);
             ImGui::Checkbox("##PersistentServer", &draft.persistAfterClientExit);
             ImGui::EndDisabled();
             ImGui::SameLine();
-            ImGui::TextDisabled("not yet wired");
+            ImGui::TextDisabled("stays online after you close the game");
 
             ImGui::EndTable();
         }
@@ -68,6 +95,22 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Advertise on LAN");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::BeginDisabled(inputs.serverRunning && !inputs.canManageServer);
+            ImGui::Checkbox("##AdvertiseLan", &draft.advertiseLan);
+            ImGui::EndDisabled();
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted("Advertise on Internet");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::BeginDisabled(inputs.serverRunning && !inputs.canManageServer);
+            ImGui::Checkbox("##AdvertiseGlobal", &draft.advertiseGlobal);
+            ImGui::EndDisabled();
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted("Auto Port");
             ImGui::TableSetColumnIndex(1);
             ImGui::TextUnformatted(draft.useSpecificPort ? "Off" : "On");
@@ -79,7 +122,19 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
         ImGui::SeparatorText("Server");
         if (inputs.serverRunning) {
-            ImGui::Text("Running on port %u", static_cast<unsigned>(inputs.boundPort));
+            if (inputs.boundPort != 0) {
+                ImGui::Text("Connected on port %u", static_cast<unsigned>(inputs.boundPort));
+            } else {
+                ImGui::TextUnformatted("Connected to server");
+            }
+            if (inputs.ownsLocalProcess) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("local process");
+            }
+            if (inputs.hasUnsavedServerChanges) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("Unsaved changes");
+            }
         } else {
             ImGui::TextUnformatted("Not running");
         }
@@ -101,13 +156,21 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
         if (inputs.serverRunning) {
             ImGui::SameLine();
+            ImGui::BeginDisabled(!inputs.canManageServer || !inputs.hasUnsavedServerChanges);
+            if (ImGui::Button("Update Settings")) {
+                result.updateClicked = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
             if (ImGui::Button("Go to Lobby")) {
                 result.goToLobbyClicked = true;
             }
             ImGui::SameLine();
+            ImGui::BeginDisabled(!inputs.canManageServer);
             if (ImGui::Button("Shutdown")) {
                 result.shutdownClicked = true;
             }
+            ImGui::EndDisabled();
         }
 
         ImGui::Separator();

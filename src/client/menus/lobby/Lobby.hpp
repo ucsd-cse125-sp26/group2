@@ -5,6 +5,7 @@
 #include "IScreen.hpp"
 #include "app/AppContext.hpp"
 #include "network/Client.hpp"
+#include "network/MatchConfig.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 #include "renderer-new/NewRenderer.hpp"
 
@@ -46,7 +47,7 @@ public:
     bool consumeServerShutdownNotice();
 
 private:
-    /// @brief True if the local client is host and all non-host players are ready.
+    /// @brief True when all connected non-host players are ready; a host-only lobby may start.
     bool canHostStartMatch() const;
 
     /// @brief Advance the local countdown timer using SDL_GetTicksNS delta.
@@ -57,6 +58,7 @@ private:
     Client* client = nullptr;                        ///< Network client; not owned.
     std::vector<LobbyPlayer> players;                ///< Latest snapshot of connected players.
     ClientId localClientId{-1};                      ///< This client's own ID, set by the server on join.
+    std::optional<MatchConfig> matchConfig;          ///< Latest match settings received from the server.
     std::optional<MatchStatePacket> startMatchState; ///< Set when the server signals a match start.
     bool startCountdownActive = false;               ///< True while the pre-match countdown is ticking.
     float startCountdownRemaining = 0.0f;            ///< Seconds remaining in the countdown.
@@ -65,6 +67,7 @@ private:
     bool returnToHostConfig = false;                 ///< Set when the host wants to return to HostConfig.
     bool serverShutdownNotice = false;               ///< Set when the server connection closed while in the lobby.
     bool isHosting = false;                          ///< True if App owns a running hosted server.
+    std::string serverName;                          ///< Display name for the connected server.
     std::string hostLanIp = "127.0.0.1";             ///< LAN IPv4 shown in the hosting banner.
     uint16_t hostPort = 0;                           ///< Hosted server port shown in the hosting banner.
 };

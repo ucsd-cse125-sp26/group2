@@ -26,6 +26,7 @@
 
 #include <array>
 #include <entt/entity/entity.hpp>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -59,6 +60,30 @@ public:
 
     /// @brief Signal the loop to stop and release all resources.
     void shutdown();
+
+    /// @brief True if the given client currently owns host-only lobby/server controls.
+    [[nodiscard]] bool isHost(ClientId clientId) const;
+
+    /// @brief Register a callback fired after the host updates match settings.
+    void onMatchConfigUpdated(std::function<void(const MatchConfig&)> fn) { matchConfigUpdatedFn_ = std::move(fn); }
+
+    /// @brief Register a callback fired after the host updates discovery visibility.
+    void onDiscoverySettingsUpdated(std::function<void(const DiscoverySettings&)> fn)
+    {
+        discoverySettingsUpdatedFn_ = std::move(fn);
+    }
+
+    /// @brief Apply a complete match config to the authoritative match controller.
+    bool setMatchConfig(const MatchConfig& config);
+
+    /// @brief Update only the kill threshold in the authoritative match config.
+    bool setKillsToWin(int kills);
+
+    /// @brief Update only the maximum accepted player count in the authoritative match config.
+    bool setMaxPlayers(int maxPlayers);
+
+    /// @brief Configure idle shutdown timeout in minutes; non-positive values disable it.
+    bool setIdleShutdownMinutes(int minutes);
 
 private:
     /// @brief Apply a single event to the ECS registry.
@@ -149,6 +174,9 @@ private:
     std::vector<AbilityType> matchSecondaryAbilities;
     LobbyManager lobbyManager;                      ///< Owns lobby roster and validates host-initiated match starts.
     MatchController matchController;                ///< Manages match flow and state.
+    std::function<void(const MatchConfig&)> matchConfigUpdatedFn_; ///< Mirrors match updates to networking/discovery.
+    std::function<void(const DiscoverySettings&)>
+        discoverySettingsUpdatedFn_;                               ///< Mirrors discovery visibility changes.
     bool lobbyStartCountdownActive = false; ///< True while lobby is counting down before entering match countdown.
     float lobbyStartCountdownTimer = 0.0f;  ///< Seconds remaining in the lobby staging countdown.
     ClientId lobbyStartRequester{-1};       ///< Host that requested the active lobby staging countdown.
@@ -263,4 +291,8 @@ private:
     };
     static constexpr std::size_t k_pendingShotIntentsMax = 256;
     std::unordered_map<ShotIntentKey, ShotIntentPayload, ShotIntentKeyHash> pendingShotIntents_;
+
+    bool idleShutdownEnabled_ = false; ///< True if idle shutdown is enabled via env var.
+    uint64_t idleShutdownMs_ = 0;      ///< Idle shutdown timeout in ms, from env var. 0 = no timeout.
+    uint64_t lastNonEmptyMs_ = 0;      ///< Timestamp of the last player activity, for idle shutdown.
 };

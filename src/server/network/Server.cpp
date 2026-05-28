@@ -6,6 +6,7 @@
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "network/MatchConfig.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
@@ -19,6 +20,7 @@
 #include <SDL3/SDL.h>
 
 #include <SDL3_net/SDL_net.h>
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <entt/entity/entity.hpp>
@@ -26,10 +28,13 @@
 #include <random>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace
 {
+
+constexpr std::string_view k_lobbyFullMessage = "Lobby full";
 
 bool combatLogEnabled()
 {
@@ -38,6 +43,15 @@ bool combatLogEnabled()
         return env != nullptr && env[0] != '\0' && env[0] != '0';
     }();
     return enabled;
+}
+
+std::vector<std::uint8_t> makeJoinFailedPacket(std::string_view message)
+{
+    std::vector<std::uint8_t> packet;
+    packet.reserve(1 + message.size());
+    packet.push_back(static_cast<std::uint8_t>(PacketType::JOIN_FAILED));
+    packet.insert(packet.end(), message.begin(), message.end());
+    return packet;
 }
 
 } // namespace
@@ -49,6 +63,7 @@ bool Server::init(const char* addr,
 {
     transportConfig_ = transport;
     discoveryConfig_ = discovery;
+    advertiseServer_.store(discoveryConfig_.advertiseServer, std::memory_order_relaxed);
     usingUdpSession_ = transportConfig_.useUdpSessions;
     listenPort_ = port;
 
@@ -73,9 +88,9 @@ bool Server::init(const char* addr,
             return false;
         }
 
-        session_.preferRelay(transportConfig_.forceRelay);
+        session_.preferRelay(transportConfig_.forceRelay && !transportConfig_.noRelay);
 
-        if (discoveryConfig_.enabled && discoveryConfig_.advertiseServer) {
+        if (discoveryConfig_.enabled) {
             NET_Address* dir = NET_ResolveHostname(discoveryConfig_.directoryHost.c_str());
             if (dir && NET_WaitUntilResolved(dir, 1000) == NET_SUCCESS) {
                 directoryAddr_.release();
@@ -655,14 +670,17 @@ void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload, cons
     if (kind == net::discovery::DirectoryMessage::RegisterAck) {
         const auto ack = net::discovery::decodeRegisterAck(body, bodyLen);
         if (ack && ack->accepted) {
-            directoryServerId_ = ack->serverId;
-            session_.setRelayConfig(net::UdpSessionTransport::RelayConfig{
-                .host = discoveryConfig_.directoryHost,
-                .port = discoveryConfig_.directoryUdpPort,
-                .serverId = directoryServerId_,
-                .clientNonce = 0,
-                .enabled = true,
-            });
+            directoryServerId_.store(ack->serverId, std::memory_order_relaxed);
+            if (!transportConfig_.noRelay) {
+                session_.setRelayConfig(net::UdpSessionTransport::RelayConfig{
+                    .host = discoveryConfig_.directoryHost,
+                    .port = discoveryConfig_.directoryUdpPort,
+                    .serverId = ack->serverId,
+                    .clientNonce = 0,
+                    .relayToken = {},
+                    .enabled = true,
+                });
+            }
         }
         return;
     }
@@ -671,6 +689,11 @@ void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload, cons
         const auto peer = net::discovery::decodeUdpPunchPeer(body, bodyLen);
         if (!peer || peer->host.empty() || peer->port == 0)
             return;
+
+        SDL_Log("Server: received global punch peer %s:%u for client nonce %u",
+                peer->host.c_str(),
+                peer->port,
+                peer->clientNonce);
 
         NET_Address* rawAddr = NET_ResolveHostname(peer->host.c_str());
         if (!rawAddr)
@@ -683,8 +706,9 @@ void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload, cons
         net::UdpEndpointAddr dest;
         dest.addr = rawAddr;
         dest.port = peer->port;
+        const std::uint32_t directoryServerId = directoryServerId_.load(std::memory_order_relaxed);
         const std::vector<std::uint8_t> probe = net::discovery::encodeUdpHello(
-            {.role = net::discovery::UdpRole::Server, .idOrNonce = directoryServerId_, .gamePort = listenPort_});
+            {.role = net::discovery::UdpRole::Server, .idOrNonce = directoryServerId, .gamePort = listenPort_});
         for (int i = 0; i < 4; ++i)
             session_.sendDirectoryControl(dest, probe.data(), static_cast<int>(probe.size()));
     }
@@ -692,24 +716,37 @@ void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload, cons
 
 void Server::sendDirectoryHeartbeat(Uint64 nowMs)
 {
-    if (!usingUdpSession_ || !discoveryConfig_.enabled || !discoveryConfig_.advertiseServer || !directoryAddr_.addr)
+    if (!usingUdpSession_ || !discoveryConfig_.enabled || !advertiseServer_.load(std::memory_order_relaxed) ||
+        !directoryAddr_.addr)
         return;
     if (lastDirectoryHeartbeatMs_ != 0 && nowMs - lastDirectoryHeartbeatMs_ < 2000)
         return;
 
-    const auto kind = directoryServerId_ == 0 ? net::discovery::DirectoryMessage::RegisterServer
-                                              : net::discovery::DirectoryMessage::Heartbeat;
+    const std::uint32_t directoryServerId = directoryServerId_.load(std::memory_order_relaxed);
+    const auto kind = directoryServerId == 0 ? net::discovery::DirectoryMessage::RegisterServer
+                                             : net::discovery::DirectoryMessage::Heartbeat;
     const int currentPlayers = getClientCount();
     const net::discovery::ServerRegistration reg{
-        .serverId = directoryServerId_,
+        .serverId = directoryServerId,
         .name = discoveryConfig_.serverName,
         .gamePort = listenPort_,
         .currentPlayers = static_cast<std::uint8_t>(std::clamp(currentPlayers, 0, 255)),
-        .maxPlayers = discoveryConfig_.maxPlayers,
+        .maxPlayers = static_cast<std::uint8_t>(maxPlayers_.load(std::memory_order_relaxed)),
     };
     std::vector<std::uint8_t> payload = net::discovery::encodeRegistration(kind, reg);
     session_.sendDirectoryControl(directoryAddr_, payload.data(), static_cast<int>(payload.size()));
     lastDirectoryHeartbeatMs_ = nowMs;
+}
+
+void Server::setMaxPlayers(int maxPlayers)
+{
+    const int clamped = std::clamp(maxPlayers, 2, static_cast<int>(k_maxAcceptedClients));
+    maxPlayers_.store(clamped, std::memory_order_relaxed);
+}
+
+void Server::setAdvertiseServer(bool enabled)
+{
+    advertiseServer_.store(enabled, std::memory_order_relaxed);
 }
 
 void Server::networkLoop()
@@ -720,9 +757,33 @@ void Server::networkLoop()
             net::UdpSessionTransport::Event ev;
             while (session_.pollEvent(ev)) {
                 if (ev.type == net::UdpSessionTransport::EventType::Connected) {
+                    {
+                        std::shared_lock<std::shared_mutex> lock(stateMutex_);
+                        if (clients.size() >= static_cast<std::size_t>(maxPlayers_.load(std::memory_order_relaxed))) {
+                            SDL_Log("Server: rejecting UDP session client; max player cap reached");
+                            const std::vector<std::uint8_t> packet = makeJoinFailedPacket(k_lobbyFullMessage);
+                            session_.send(ev.connectionId,
+                                          net::ChannelId::ControlReliableOrdered,
+                                          packet.data(),
+                                          static_cast<int>(packet.size()));
+                            session_.disconnect(ev.connectionId);
+                            continue;
+                        }
+                    }
+
                     ClientId clientId = getNextClientId();
                     {
                         std::unique_lock<std::shared_mutex> lock(stateMutex_);
+                        if (clients.size() >= static_cast<std::size_t>(maxPlayers_.load(std::memory_order_relaxed))) {
+                            SDL_Log("Server: rejecting UDP session client; max player cap reached");
+                            const std::vector<std::uint8_t> packet = makeJoinFailedPacket(k_lobbyFullMessage);
+                            session_.send(ev.connectionId,
+                                          net::ChannelId::ControlReliableOrdered,
+                                          packet.data(),
+                                          static_cast<int>(packet.size()));
+                            session_.disconnect(ev.connectionId);
+                            continue;
+                        }
                         auto [it, inserted] = clients.try_emplace(clientId);
                         if (inserted) {
                             auto& conn = it->second;
@@ -1033,8 +1094,12 @@ ClientId Server::acceptClients()
         SDL_Log("NET_AcceptClient failed: %s", SDL_GetError());
         return {};
     } else if (socket) {
-        if (clients.size() >= k_maxAcceptedClients) {
-            SDL_Log("Server: rejecting client; max client cap reached");
+        const auto maxPlayers = static_cast<std::size_t>(maxPlayers_.load(std::memory_order_relaxed));
+        if (clients.size() >= maxPlayers || clients.size() >= k_maxAcceptedClients) {
+            SDL_Log("Server: rejecting client; max player cap reached");
+            const std::vector<std::uint8_t> packet = makeJoinFailedPacket(k_lobbyFullMessage);
+            MessageStream stream(socket);
+            stream.send(packet.data(), static_cast<Uint32>(packet.size()));
             NET_DestroyStreamSocket(socket);
             return {};
         }
@@ -1323,6 +1388,39 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         // backlog would be worse than dropped syllables.
         break;
 
+    case PacketType::UPDATE_MATCH_CONFIG: {
+        // Client can propose new match config
+        if (payloadLen != sizeof(MatchConfig))
+            return;
+        MatchConfig config;
+        std::memcpy(&config, payload, sizeof(MatchConfig));
+
+        Event event{};
+        event.type = EventType::MatchConfigUpdated;
+        event.clientId = conn.clientId;
+        event.matchConfig = config;
+        eventQueue.enqueue(event);
+        break;
+    }
+    case PacketType::UPDATE_DISCOVERY_SETTINGS: {
+        if (payloadLen != 2)
+            return;
+
+        Event event{};
+        event.type = EventType::DiscoverySettingsUpdated;
+        event.clientId = conn.clientId;
+        event.discoverySettings.advertiseGlobal = payload[0] != 0;
+        event.discoverySettings.advertiseLan = payload[1] != 0;
+        eventQueue.enqueue(event);
+        break;
+    }
+    case PacketType::REQUEST_SERVER_SHUTDOWN: {
+        Event event{};
+        event.type = EventType::ServerShutdownRequested;
+        event.clientId = conn.clientId;
+        eventQueue.enqueue(event);
+        break;
+    }
     default:
         SDL_Log("Server: received unknown packet type %d", static_cast<int>(type));
         break;
@@ -1553,6 +1651,11 @@ int Server::getClientCount()
     return static_cast<int>(clientCountAtomic_.load(std::memory_order_relaxed));
 }
 
+uint32_t Server::globalDirectoryServerId() const noexcept
+{
+    return directoryServerId_.load(std::memory_order_relaxed);
+}
+
 uint16_t Server::getClientRttMs(ClientId clientId)
 {
     // PR-6: shared lock — pure read. Modern callers should use
@@ -1733,4 +1836,20 @@ void Server::broadcastLobbyUpdate(const LobbyUpdateEvent& event)
 uint16_t Server::listeningPort() const
 {
     return listenPort_;
+}
+
+void Server::broadcastMatchConfig(const MatchConfig& config)
+{
+    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(MatchConfig));
+    buf[0] = static_cast<uint8_t>(PacketType::MATCH_CONFIG);
+    std::memcpy(buf.data() + 1, &config, sizeof(MatchConfig));
+    enqueueReliableEvent(buf.data(), static_cast<int>(buf.size()));
+}
+
+bool Server::sendMatchConfigToClient(ClientId clientId, const MatchConfig& config)
+{
+    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(MatchConfig));
+    buf[0] = static_cast<uint8_t>(PacketType::MATCH_CONFIG);
+    std::memcpy(buf.data() + 1, &config, sizeof(MatchConfig));
+    return sendToClient(clientId, buf.data(), static_cast<int>(buf.size()));
 }

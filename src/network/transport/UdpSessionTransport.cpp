@@ -26,6 +26,11 @@ bool sameEndpoint(const UdpEndpointAddr& a, const UdpEndpointAddr& b)
     return a.port == b.port && endpointHost(a) == endpointHost(b);
 }
 
+const char* routeName(bool viaRelay)
+{
+    return viaRelay ? "relay" : "direct";
+}
+
 void appendU32(std::vector<std::uint8_t>& out, std::uint32_t value)
 {
     const std::size_t off = out.size();
@@ -374,6 +379,7 @@ bool UdpSessionTransport::sendPacket(Peer& peer, PacketHeader hdr, const void* p
     hdr.ackBits = ch.recvAckBits;
 
     const Uint64 now = SDL_GetTicks();
+    const bool wasRelayRoute = peer.useRelay;
     if (!preferRelay_ && peer.useRelay && peer.hasDirect && peer.lastDirectHeardMs != 0 &&
         now - peer.lastDirectHeardMs <= k_routeUnhealthyMs)
     {
@@ -385,6 +391,12 @@ bool UdpSessionTransport::sendPacket(Peer& peer, PacketHeader hdr, const void* p
     }
 
     hdr.routeId = peer.useRelay ? 1 : 0;
+    stats_.activeRouteId = hdr.routeId;
+    if (wasRelayRoute != peer.useRelay) {
+        SDL_Log("UdpSessionTransport: connection 0x%llx selected %s route for send",
+                static_cast<unsigned long long>(peer.connectionId),
+                routeName(peer.useRelay));
+    }
 
     if (peer.useRelay && peer.hasRelay)
         return sendViaRelay(peer, hdr, payload, payloadLen);
@@ -521,21 +533,38 @@ void UdpSessionTransport::processDatagram(UdpReceivedMessage& msg, bool viaRelay
             return;
         Peer& peer = *maybePeer;
         peer.lastHeardMs = SDL_GetTicks();
+        const bool wasRelayRoute = peer.useRelay;
         if (viaRelay) {
             peer.relayAddr = msg.from;
             peer.hasRelay = true;
             peer.useRelay = true;
             peer.lastRelayHeardMs = peer.lastHeardMs;
+            stats_.relayActive = true;
         } else {
             peer.directAddr = msg.from;
             peer.hasDirect = true;
             peer.lastDirectHeardMs = peer.lastHeardMs;
+            stats_.directActive = true;
             if (!preferRelay_)
                 peer.useRelay = false;
         }
+        stats_.activeRouteId = peer.useRelay ? 1 : 0;
+        if (peer.connectedEventSent && wasRelayRoute != peer.useRelay) {
+            SDL_Log("UdpSessionTransport: server connection 0x%llx switched active route to %s",
+                    static_cast<unsigned long long>(peer.connectionId),
+                    routeName(peer.useRelay));
+        }
         sendConnectionAccepted(peer);
         if (!peer.connectedEventSent) {
-            queueEvent(Event{.type = EventType::Connected, .connectionId = peer.connectionId, .viaRelay = viaRelay});
+            SDL_Log("UdpSessionTransport: server accepted connection 0x%llx via %s",
+                    static_cast<unsigned long long>(peer.connectionId),
+                    routeName(viaRelay));
+            queueEvent(Event{.type = EventType::Connected,
+                             .connectionId = peer.connectionId,
+                             .channel = ChannelId::InputUnreliable,
+                             .payload = {},
+                             .from = {},
+                             .viaRelay = viaRelay});
             peer.connectedEventSent = true;
         }
         return;
@@ -564,15 +593,28 @@ void UdpSessionTransport::processDatagram(UdpReceivedMessage& msg, bool viaRelay
             peer.relayServerId = relayConfig_.serverId;
             peer.relayClientNonce = clientNonce_;
             peer.lastRelayHeardMs = peer.lastHeardMs;
+            stats_.relayActive = true;
         } else {
             peer.directAddr = msg.from;
             peer.hasDirect = true;
             peer.lastDirectHeardMs = peer.lastHeardMs;
             peer.useRelay = preferRelay_;
+            stats_.directActive = true;
         }
+        stats_.activeRouteId = peer.useRelay ? 1 : 0;
         clientConnectionId_ = connId;
-        if (inserted)
-            queueEvent(Event{.type = EventType::Connected, .connectionId = connId, .viaRelay = viaRelay});
+        if (inserted) {
+            SDL_Log("UdpSessionTransport: client connection 0x%llx accepted via %s; active route is %s",
+                    static_cast<unsigned long long>(connId),
+                    routeName(viaRelay),
+                    routeName(peer.useRelay));
+            queueEvent(Event{.type = EventType::Connected,
+                             .connectionId = connId,
+                             .channel = ChannelId::InputUnreliable,
+                             .payload = {},
+                             .from = {},
+                             .viaRelay = viaRelay});
+        }
         return;
     }
 
@@ -581,21 +623,36 @@ void UdpSessionTransport::processDatagram(UdpReceivedMessage& msg, bool viaRelay
         return;
 
     peer->lastHeardMs = SDL_GetTicks();
+    const bool wasRelayRoute = peer->useRelay;
     if (viaRelay) {
         peer->relayAddr = msg.from;
         peer->hasRelay = true;
         peer->useRelay = true;
         peer->lastRelayHeardMs = peer->lastHeardMs;
+        stats_.relayActive = true;
     } else {
         peer->directAddr = msg.from;
         peer->hasDirect = true;
         peer->lastDirectHeardMs = peer->lastHeardMs;
+        stats_.directActive = true;
         if (!preferRelay_)
             peer->useRelay = false;
     }
+    stats_.activeRouteId = peer->useRelay ? 1 : 0;
+    if (wasRelayRoute != peer->useRelay) {
+        SDL_Log("UdpSessionTransport: connection 0x%llx switched active route to %s after receiving %s packet",
+                static_cast<unsigned long long>(peer->connectionId),
+                routeName(peer->useRelay),
+                routeName(viaRelay));
+    }
 
     if (kind == PacketKind::Disconnect) {
-        queueEvent(Event{.type = EventType::Disconnected, .connectionId = peer->connectionId, .viaRelay = viaRelay});
+        queueEvent(Event{.type = EventType::Disconnected,
+                         .connectionId = peer->connectionId,
+                         .channel = ChannelId::InputUnreliable,
+                         .payload = {},
+                         .from = {},
+                         .viaRelay = viaRelay});
         peers_.erase(peer->connectionId);
         return;
     }
@@ -648,6 +705,7 @@ void UdpSessionTransport::processPayload(Peer& peer,
                      .connectionId = peer.connectionId,
                      .channel = channel,
                      .payload = std::move(payload),
+                     .from = {},
                      .viaRelay = viaRelay});
 }
 
@@ -720,6 +778,7 @@ void UdpSessionTransport::deliverReliable(
                          .connectionId = peer.connectionId,
                          .channel = channel,
                          .payload = std::move(payload),
+                         .from = {},
                          .viaRelay = viaRelay});
         ++ch.orderedNext;
         while (true) {
@@ -730,6 +789,7 @@ void UdpSessionTransport::deliverReliable(
                              .connectionId = peer.connectionId,
                              .channel = channel,
                              .payload = std::move(it->second),
+                             .from = {},
                              .viaRelay = viaRelay});
             ch.orderedBuffer.erase(it);
             ++ch.orderedNext;
@@ -768,22 +828,37 @@ void UdpSessionTransport::retransmitReliable(Uint64 nowMs)
 
 void UdpSessionTransport::sendKeepAlives(Uint64 nowMs)
 {
+    // Keepalives carry per-channel ack info in the header.  We must emit one
+    // per reliable channel — sendPacket() only fills hdr.ack/ackBits from the
+    // channel matching hdr.channel, and the receiver's processAcks() reads
+    // them per-channel.  Without an outgoing packet on EventReliableOrdered
+    // the server never learns the client received its particle/kill/match
+    // events; the pending queue grows until k_maxReliablePending and silently
+    // drops further events (manifested as bullet-impact decals vanishing
+    // after ~200 shots).
+    static constexpr ChannelId k_reliableKeepAliveChannels[] = {
+        ChannelId::ControlReliableOrdered,
+        ChannelId::EventReliableOrdered,
+    };
+
     for (auto& [connId, peer] : peers_) {
         if (nowMs - peer.lastKeepAliveMs < k_keepAliveMs)
             continue;
         peer.lastKeepAliveMs = nowMs;
-        PacketHeader hdr{};
-        hdr.kind = static_cast<std::uint8_t>(PacketKind::KeepAlive);
-        hdr.connectionId = connId;
-        hdr.channel = static_cast<std::uint8_t>(ChannelId::ControlReliableOrdered);
-        sendPacket(peer, hdr, nullptr, 0, 1);
+        for (ChannelId channel : k_reliableKeepAliveChannels) {
+            PacketHeader hdr{};
+            hdr.kind = static_cast<std::uint8_t>(PacketKind::KeepAlive);
+            hdr.connectionId = connId;
+            hdr.channel = static_cast<std::uint8_t>(channel);
+            sendPacket(peer, hdr, nullptr, 0, 1);
 
-        if (mode_ == Mode::Client && peer.useRelay && serverAddr_.addr) {
-            ChannelState& ch = peer.channels[channelIndex(ChannelId::ControlReliableOrdered)];
-            hdr.ack = ch.recvHighest;
-            hdr.ackBits = ch.recvAckBits;
-            hdr.routeId = 0;
-            sendDirect(serverAddr_, hdr, nullptr, 0, 1);
+            if (mode_ == Mode::Client && peer.useRelay && serverAddr_.addr) {
+                ChannelState& ch = peer.channels[channelIndex(channel)];
+                hdr.ack = ch.recvHighest;
+                hdr.ackBits = ch.recvAckBits;
+                hdr.routeId = 0;
+                sendDirect(serverAddr_, hdr, nullptr, 0, 1);
+            }
         }
     }
 }
@@ -796,7 +871,12 @@ void UdpSessionTransport::dropTimedOutPeers(Uint64 nowMs)
             dead.push_back(connId);
     }
     for (std::uint64_t connId : dead) {
-        queueEvent(Event{.type = EventType::Disconnected, .connectionId = connId});
+        queueEvent(Event{.type = EventType::Disconnected,
+                         .connectionId = connId,
+                         .channel = ChannelId::InputUnreliable,
+                         .payload = {},
+                         .from = {},
+                         .viaRelay = false});
         peers_.erase(connId);
         if (clientConnectionId_ == connId)
             clientConnectionId_ = 0;

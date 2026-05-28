@@ -430,4 +430,30 @@ void solveJoints(Registry& registry, const SolverConfig& cfg, float dt)
     }
 }
 
+void clampVelocities(Registry& registry, float maxAngular, float maxLinear)
+{
+    if (maxAngular <= 0.0f && maxLinear <= 0.0f)
+        return;
+
+    const float maxAng2 = maxAngular * maxAngular;
+    const float maxLin2 = maxLinear * maxLinear;
+
+    if (maxAngular > 0.0f) {
+        for (auto&& [_, angVel] : registry.view<AngularVelocity>().each()) {
+            const float len2 = glm::dot(angVel.value, angVel.value);
+            if (len2 > maxAng2) {
+                angVel.value *= maxAngular / std::sqrt(len2);
+            }
+        }
+    }
+    if (maxLinear > 0.0f) {
+        for (auto&& [_, vel] : registry.view<Velocity>().each()) {
+            const float len2 = glm::dot(vel.value, vel.value);
+            if (len2 > maxLin2) {
+                vel.value *= maxLinear / std::sqrt(len2);
+            }
+        }
+    }
+}
+
 } // namespace physics

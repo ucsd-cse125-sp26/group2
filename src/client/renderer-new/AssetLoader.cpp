@@ -6,6 +6,7 @@
 #include "Asset.hpp"
 
 #include <filesystem>
+#include <glm/gtc/quaternion.hpp>
 #include <iostream>
 #include <stack>
 #include <stb_image.h>
@@ -56,7 +57,7 @@ bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
 
     for (unsigned int i = 0; i < asimpMeshResult.mNumFaces; i++) {
         aiFace& aiF_i = asimpMeshResult.mFaces[i];
-        unsigned int& aiF_i_NumVertices = aiF_i.mNumIndices;
+        [[maybe_unused]] const unsigned int aiF_i_NumVertices = aiF_i.mNumIndices;
         unsigned int* aiF_i_Indices = aiF_i.mIndices;
 
         assert(aiF_i_NumVertices == 3);
@@ -93,6 +94,21 @@ static bool hasMetadataKey(const aiNode& node, const std::string& keyToFind)
     }
 
     return false;
+}
+
+static bool isWeaponMountPointName(const std::string& nodeName)
+{
+    return nodeName.rfind("ik_", 0) == 0 || nodeName.rfind("socket_", 0) == 0 || nodeName == "is_muzzle";
+}
+
+glm::quat rotationFromTransform(const glm::mat4& transform)
+{
+    glm::mat3 basis(transform);
+    for (int axis = 0; axis < 3; ++axis) {
+        const float len = glm::length(basis[axis]);
+        basis[axis] = len > 0.00001f ? basis[axis] / len : glm::vec3(axis == 0, axis == 1, axis == 2);
+    }
+    return glm::normalize(glm::quat_cast(basis));
 }
 
 bool AssetLoader::loadModel(const ModelIdInt id,
@@ -166,14 +182,26 @@ bool AssetLoader::loadModel(const ModelIdInt id,
         glm::mat4 localTransform = glmFromAiTransform(currentNode.mTransformation);
         glm::mat4 nodeModelTransform = parentTransform * localTransform;
 
-        if (hasMetadataKey(currentNode, "is_muzzle")) {
+        const std::string nodeName(currentNode.mName.C_Str());
+        const glm::vec3 nodeModelPos = glm::vec3(nodeModelTransform * glm::vec4(0, 0, 0, 1));
+        if (isWeaponMountPointName(nodeName)) {
+            newModel.mountPoints[nodeName] =
+                Asset::MountPoint{.position = nodeModelPos, .rotation = rotationFromTransform(nodeModelTransform)};
+            SDL_Log("AssetLoader: found weapon mount '%s' at local pos %.2f %.2f %.2f",
+                    currentNode.mName.C_Str(),
+                    static_cast<double>(nodeModelPos.x),
+                    static_cast<double>(nodeModelPos.y),
+                    static_cast<double>(nodeModelPos.z));
+        }
+
+        if (hasMetadataKey(currentNode, "is_muzzle") || nodeName == "socket_muzzle" || nodeName == "is_muzzle") {
             newModel.hasMuzzle = true;
-            newModel.muzzleLocalPos = glm::vec3(nodeModelTransform * glm::vec4(0, 0, 0, 1));
+            newModel.muzzleLocalPos = nodeModelPos;
             SDL_Log("AssetLoader: found muzzle on node '%s' at local pos %.2f %.2f %.2f",
                     currentNode.mName.C_Str(),
-                    newModel.muzzleLocalPos.x,
-                    newModel.muzzleLocalPos.y,
-                    newModel.muzzleLocalPos.z);
+                    static_cast<double>(newModel.muzzleLocalPos.x),
+                    static_cast<double>(newModel.muzzleLocalPos.y),
+                    static_cast<double>(newModel.muzzleLocalPos.z));
         }
 
         Asset::ModelNode& currentModelNode = newModel.modelNodes_[currentModelNodeIndex];

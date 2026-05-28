@@ -14,6 +14,7 @@ enum class WeaponType : uint8_t
     Rocket,    ///< Slow arcing projectile (ribbon trail)
     RailGun,   ///< Hitscan energy weapon (beam + lightning arcs)
     EnergyGun, ///< Fast hitscan energy burst
+    Shotgun,   ///< Peacekeeper-style pump: 9-pellet star spread, hitscan
     HEGrenade, ///< Bouncy grenade with 3s fuse, lethal explosion
     Molotov,   ///< Impact-detonate, leaves a fire field (damage over time)
     Impulse,   ///< Sticky 1s fuse, big knockback, no damage (movement tool)
@@ -38,9 +39,12 @@ struct GunInstance
     int totalAmmo = 0;
     int currentMagAmmo = 0;
     float fireCooldown = 0.f;
-    float chargeTime = 0.f;   ///< Accumulated charge time (charge weapons only).
-    bool isReloading = false; ///< True while reload is in progress
-    float reloadTime = 0.f;   ///< Time remaining to complete a reload
+    float chargeTime = 0.f;              ///< Accumulated charge time (charge weapons only).
+    bool isReloading = false;            ///< True while reload is in progress
+    float reloadTime = 0.f;              ///< Time remaining to complete a reload
+    float recoilHeat = 0.f;              ///< Recoil heat (decays when not firing).
+    float recoilIdleTime = 0.f;          ///< Time off trigger before decay starts.
+    bool firedSinceTriggerPress = false; ///< Semi-auto gate: blocks re-fire until trigger released.
 };
 
 /// @brief Component attached to armed entities (players).

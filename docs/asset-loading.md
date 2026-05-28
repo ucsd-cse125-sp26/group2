@@ -82,7 +82,7 @@ API: `add(name, filename, role, …)`, `setModelIndex(id, idx)`, `setHasCollisio
 | Definition | Purpose |
 |---|---|
 | `kMapAsset` | `maps/map1.glb` + `loadScale = 39.3701` (m→inches) |
-| `kPropAssets[]` | pallet + bottle (Porsche commented out — too heavy) |
+| `kPropAssets[]` | static placed props (currently empty) |
 | `kRocketProjectile` | rocket projectile model |
 | `kWeaponAssets[]` | rifle / rocket / railgun / energygun |
 | `kEffectAssets[]` | procedural effect names (no filename) |

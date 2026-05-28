@@ -20,21 +20,25 @@ struct InputSnapshot
     uint32_t tick{0}; ///< Physics tick this snapshot was sampled on.
 
     // Movement keys
-    bool forward{false};                                         ///< W key.
-    bool back{false};                                            ///< S key.
-    bool left{false};                                            ///< A key.
-    bool right{false};                                           ///< D key.
-    bool jump{false};                                            ///< Space key.
-    bool crouch{false};                                          ///< Left Ctrl key.
-    bool sprint{false};                                          ///< Left Shift key.
-    bool grapple{false};                                         ///< Middle mouse button / E key.
-    bool shooting{false};                                        ///< Primary fire button.
-    bool scoped{false};                                          ///< Right click.
-    bool reload{false};                                          ///< Reload button.
-    bool pickup{false};                                          ///< Pick Up button (f).
-    bool switchToPrimary{false};                                 ///< Switch to gun in primary slot.
-    bool switchToSecondary{false};                               ///< Switch to gun in secondary slot.
-    bool refillAmmo{false};                                      ///< Debug: refill all weapons to full ammo.
+    bool forward{false};           ///< W key.
+    bool back{false};              ///< S key.
+    bool left{false};              ///< A key.
+    bool right{false};             ///< D key.
+    bool jump{false};              ///< Space key.
+    bool crouch{false};            ///< Left Ctrl key.
+    bool sprint{false};            ///< Left Shift key.
+    bool grapple{false};           ///< Middle mouse button / E key.
+    bool shooting{false};          ///< Primary fire button.
+    bool scoped{false};            ///< Right click.
+    bool reload{false};            ///< Reload button.
+    bool pickup{false};            ///< Pick Up button (f).
+    bool switchToPrimary{false};   ///< Switch to gun in primary slot.
+    bool switchToSecondary{false}; ///< Switch to gun in secondary slot.
+    bool refillAmmo{false};        ///< Debug: refill all weapons to full ammo.
+    /// @brief Debug: replace the weapon in the primary/secondary slot with the given
+    /// `WeaponType` ordinal. -1 = no change. Consumed (reset to -1) by WeaponSystem.
+    std::int8_t debugSetPrimaryWeapon{-1};
+    std::int8_t debugSetSecondaryWeapon{-1};
     bool killSelf{false};                                        ///< Debug: kill self (rising-edge only).
     bool skipRespawn{false};                                     ///< Skip respawn timer (space while dead).
     bool throwGrenade{false};                                    ///< Quick G press: throw the selected grenade.

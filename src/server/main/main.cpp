@@ -6,6 +6,7 @@
 #include "network/DiscoveryServer.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/Server.hpp"
+#include "network/ServerName.hpp"
 #include "perf/Parallel.hpp"
 #include "perf/Profiler.hpp"
 
@@ -169,7 +170,20 @@ int main(int argc, char* argv[])
     argparse::ArgumentParser program("group2_server");
     program.add_argument("--address").help("Address to listen on for game clients (default: 127.0.0.1)");
     program.add_argument("--port").scan<'u', uint16_t>().help("Port to listen on for game clients (default: 9999)");
+    program.add_argument("--server-name").help("Name advertised in LAN/global server browsers");
+    program.add_argument("--no-global-broadcast").flag().help("Do not publish this server to the global directory");
+    program.add_argument("--no-lan-broadcast").flag().help("Do not respond to LAN discovery requests");
     program.add_argument("--legacy-tcp").flag().help("Force legacy TCP transport for hosted-client launches");
+    program.add_argument("--killsToWin")
+        .scan<'i', int>()
+        .default_value(10)
+        .help("Kills required to win a match (default: 10)");
+    program.add_argument("--max-players")
+        .scan<'i', int>()
+        .help("Maximum accepted players, clamped to 2..128 (default: config global-discovery.max-players)");
+    program.add_argument("--idle-shutdown-minutes")
+        .scan<'i', int>()
+        .help("Minutes of idle time before automatic shutdown. Omit to run indefinitely (default)");
 
     try {
         program.parse_args(argc, argv);
@@ -219,7 +233,25 @@ int main(int argc, char* argv[])
         cfg.transport.useUdpSessions = false;
     }
 
+    if (program.is_used("--server-name")) {
+        cfg.discovery.serverName = server_name::sanitize(program.get<std::string>("--server-name"));
+    } else {
+        cfg.discovery.serverName = server_name::sanitize(cfg.discovery.serverName);
+    }
+
+    if (program.get<bool>("--no-global-broadcast")) {
+        cfg.discovery.advertiseServer = false;
+    }
+    if (program.get<bool>("--no-lan-broadcast")) {
+        cfg.discovery.lanBroadcastEnabled = false;
+    }
+
+    if (program.is_used("--max-players")) {
+        cfg.discovery.maxPlayers = static_cast<std::uint8_t>(std::clamp(program.get<int>("--max-players"), 2, 128));
+    }
+
     Server server;
+    server.setMaxPlayers(cfg.discovery.maxPlayers);
     if (!server.init(serverNet.host.c_str(), serverNet.port, cfg.transport, cfg.discovery)) {
         ::group2::perf::stopAggregator();
         closeCsv();
@@ -248,15 +280,75 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    if (program.is_used("--idle-shutdown-minutes")) {
+        int minutes = program.get<int>("--idle-shutdown-minutes");
+        if (!game.setIdleShutdownMinutes(minutes)) {
+            SDL_Log("Invalid idle shutdown minutes: %d", minutes);
+            ::group2::perf::stopAggregator();
+            game.shutdown();
+            server.shutdown();
+            closeCsv();
+            NET_Quit();
+            SDL_Quit();
+            return 1;
+        }
+    }
+
+    const MatchConfig initialMatchConfig{.killsToWin = program.get<int>("--killsToWin"),
+                                         .maxPlayers = static_cast<int>(cfg.discovery.maxPlayers)};
+    if (!game.setMatchConfig(initialMatchConfig)) {
+        SDL_Log("Invalid match config: killsToWin=%d maxPlayers=%d",
+                initialMatchConfig.killsToWin,
+                initialMatchConfig.maxPlayers);
+        game.shutdown();
+        server.shutdown();
+        ::group2::perf::stopAggregator();
+        closeCsv();
+        NET_Quit();
+        SDL_Quit();
+        return 1;
+    }
+
     // start server discovery system
     DiscoveryServer discoveryServer;
-    const DiscoveryServer::ServerInfo serverInfo{
+    DiscoveryServer::ServerInfo serverInfo{
         .serverName = cfg.discovery.serverName,
         .gamePort = actualPort,
         .currentPlayers = 0,
         .maxPlayers = cfg.discovery.maxPlayers,
+        .globalServerId = 0,
     };
-    discoveryServer.start(9998, serverInfo, [&server]() { return server.getClientCount(); });
+    auto playerCountFn = [&server]() { return static_cast<uint8_t>(std::clamp(server.getClientCount(), 0, 255)); };
+    auto globalServerIdFn = [&server]() { return server.globalDirectoryServerId(); };
+
+    bool lanDiscoveryRunning = false;
+    game.onMatchConfigUpdated([&discoveryServer, &serverInfo](const MatchConfig& config) {
+        serverInfo.maxPlayers = static_cast<std::uint8_t>(std::clamp(config.maxPlayers, 2, 128));
+        discoveryServer.updateInfo(serverInfo);
+    });
+
+    // Discovery visibility is host-managed at runtime. Global discovery is
+    // gated in Server; LAN discovery owns a responder thread that must be
+    // started or stopped when the host changes the local-broadcast toggle.
+    game.onDiscoverySettingsUpdated(
+        [&discoveryServer, &serverInfo, &lanDiscoveryRunning, &cfg, playerCountFn, globalServerIdFn](
+            const DiscoverySettings& settings) {
+            cfg.discovery.advertiseServer = settings.advertiseGlobal;
+            cfg.discovery.lanBroadcastEnabled = settings.advertiseLan;
+
+            if (!cfg.discovery.enabled) {
+                return;
+            }
+            if (settings.advertiseLan && !lanDiscoveryRunning) {
+                lanDiscoveryRunning = discoveryServer.start(cfg.discovery.lanBroadcastPort, serverInfo, playerCountFn, globalServerIdFn);
+            } else if (!settings.advertiseLan && lanDiscoveryRunning) {
+                discoveryServer.stop();
+                lanDiscoveryRunning = false;
+            }
+        });
+    if (cfg.discovery.enabled && cfg.discovery.lanBroadcastEnabled) {
+        lanDiscoveryRunning = discoveryServer.start(cfg.discovery.lanBroadcastPort, serverInfo, playerCountFn, globalServerIdFn);
+    }
 
     std::cout << "READY " << actualPort << '\n' << std::flush;
 

@@ -413,6 +413,20 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
     }
 
     drawModel(weaponModelId, weapon_.transform, renderPass, cmd);
+
+    auto drawAttachment = [&](const ViewmodelAttachment& attachment) {
+        if (!attachment.visible)
+            return;
+        if (attachment.modelIndex < 0 || static_cast<size_t>(attachment.modelIndex) >= Asset::modelInstances_.size())
+            return;
+        const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(attachment.modelIndex)).modelId_;
+        if (!Asset::models_.contains(modelId))
+            return;
+        drawModel(modelId, attachment.transform, renderPass, cmd);
+    };
+    drawAttachment(weapon_.hands.right);
+    drawAttachment(weapon_.hands.left);
+    drawAttachment(weapon_.debugPoint);
 }
 
 void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
