@@ -52,6 +52,7 @@ namespace
 {
 
 constexpr float kPi = 3.1415926535f;
+constexpr float kDefaultVoiceChatGain = 2.0f;
 
 bool sequenceNewer(std::uint16_t a, std::uint16_t b) noexcept
 {
@@ -355,7 +356,7 @@ void SfxSystem::submitVoiceFrame(ClientId speaker,
         source->playingId = SfxId::_Count;
         source->handle = handle;
         source->speaker = speaker;
-        source->gain = 1.0f;
+        source->gain = kDefaultVoiceChatGain;
         source->priority = 3.0f;
         source->bus = audio::busId("VoiceChat");
         source->busGain = audioRuntime_.busGain(source->bus);
@@ -368,6 +369,7 @@ void SfxSystem::submitVoiceFrame(ClientId speaker,
     source->newestVoiceSeq = sequence;
     source->hasVoiceSeq = true;
     source->age = 0.0f;
+    source->gain = kDefaultVoiceChatGain;
     source->position = position;
     source->velocity = velocity;
     source->occluded = isOccluded(position);

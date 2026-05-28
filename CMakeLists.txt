@@ -839,6 +839,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AmmoCounter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/HitMarkerWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ShotgunPelletWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ShotgunPelletWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillFeed.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageIndicator.cpp"
@@ -922,6 +924,8 @@ add_executable(group2
         src/ecs/physics/Solver.cpp
         src/ecs/physics/Joints.hpp
         src/ecs/physics/Joints.cpp
+        src/ecs/physics/RagdollPbd.hpp
+        src/ecs/physics/RagdollPbd.cpp
         src/ecs/physics/Sleep.hpp
         src/ecs/physics/Sleep.cpp
         src/ecs/physics/CookedMeshFormat.hpp
@@ -1002,6 +1006,8 @@ add_executable(group2
         src/ecs/components/GrenadeState.hpp
         src/ecs/components/GrenadeConfig.hpp
         src/ecs/components/ViewmodelConfig.hpp
+        src/ecs/components/GripPose.hpp
+        src/ecs/components/GripPose.cpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
         src/ecs/components/Explosion.hpp
@@ -1023,8 +1029,14 @@ add_executable(group2
         src/ecs/components/DeathInfo.hpp
         src/ecs/components/WeaponSpawner.hpp
         src/ecs/components/RespawnPoint.hpp
+        src/ecs/components/JumpPad.hpp
+        src/ecs/components/Killzone.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/ecs/systems/JumpPadSystem.hpp
+        src/ecs/systems/JumpPadSystem.cpp
+        src/ecs/systems/KillzoneSystem.hpp
+        src/ecs/systems/KillzoneSystem.cpp
         src/ecs/systems/DroppedWeaponSystem.hpp
         src/ecs/systems/DroppedWeaponSystem.cpp
         src/ecs/components/AbilityState.hpp
@@ -1253,6 +1265,8 @@ add_executable(server
         src/ecs/physics/Solver.cpp
         src/ecs/physics/Joints.hpp
         src/ecs/physics/Joints.cpp
+        src/ecs/physics/RagdollPbd.hpp
+        src/ecs/physics/RagdollPbd.cpp
         src/ecs/physics/Sleep.hpp
         src/ecs/physics/Sleep.cpp
         src/ecs/physics/CookedMeshFormat.hpp
@@ -1315,6 +1329,8 @@ add_executable(server
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/WeaponConfig.hpp
         src/ecs/components/ViewmodelConfig.hpp
+        src/ecs/components/GripPose.hpp
+        src/ecs/components/GripPose.cpp
         src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
@@ -1336,8 +1352,14 @@ add_executable(server
         src/ecs/components/RespawnTimer.hpp
         src/ecs/components/DeathInfo.hpp
         src/ecs/components/WeaponSpawner.hpp
+        src/ecs/components/JumpPad.hpp
+        src/ecs/components/Killzone.hpp
         src/ecs/systems/WeaponSpawnerSystem.hpp
         src/ecs/systems/WeaponSpawnerSystem.cpp
+        src/ecs/systems/JumpPadSystem.hpp
+        src/ecs/systems/JumpPadSystem.cpp
+        src/ecs/systems/KillzoneSystem.hpp
+        src/ecs/systems/KillzoneSystem.cpp
         src/ecs/systems/DroppedWeaponSystem.hpp
         src/ecs/systems/DroppedWeaponSystem.cpp
         src/ecs/components/Hitbox.hpp
@@ -1481,30 +1503,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/animations")
     )
 endif()
 
-# Copy standalone prop GLBs used by server-side collision. Keep this list
-# explicit so stale local files do not become generated build dependencies.
-set(_server_prop_glbs
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/bottle_a.glb"
-)
-set(_server_existing_prop_glbs)
-foreach(_server_prop_glb IN LISTS _server_prop_glbs)
-    if(EXISTS "${_server_prop_glb}")
-        list(APPEND _server_existing_prop_glbs "${_server_prop_glb}")
-    else()
-        message(WARNING "Server prop asset missing and will not be copied: ${_server_prop_glb}")
-    endif()
-endforeach()
-if(_server_existing_prop_glbs)
-    add_custom_command(TARGET server POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:server>/assets"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${_server_existing_prop_glbs}
-                "$<TARGET_FILE_DIR:server>/assets/"
-        COMMENT "Copying prop GLBs to server binary directory"
-        VERBATIM
-    )
-endif()
-
 # ===========================================================================
 # Global directory executable
 # ===========================================================================
@@ -1641,6 +1639,8 @@ add_executable(clientbot
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Solver.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/RagdollPbd.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/RagdollPbd.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Sleep.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Sleep.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/CookedMeshFormat.hpp"
@@ -1766,6 +1766,9 @@ add_test(NAME physics_trimesh_tests COMMAND physics_trimesh_tests)
 add_executable(ragdoll_system_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/ragdoll_system_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/RagdollSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Joints.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/RagdollPbd.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/physics/Forces.cpp"
 )
 target_include_directories(ragdoll_system_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"

@@ -123,4 +123,12 @@ namespace physics
 /// iterated in stable order (sorted by entity id) for determinism.
 void solveJoints(Registry& registry, const SolverConfig& cfg, float dt);
 
+/// @brief Clamp every dynamic body's angular and linear velocity to a
+/// safe upper bound. PhysX defaults: `maxAngularVelocity = 100 rad/s` for
+/// rigid bodies, ~50 rad/s for articulation links; we target a tighter
+/// 30 rad/s for ragdolls so the corpse never spins like a helicopter when
+/// the joint solver overshoots. Linear is capped at a generous 1500 u/s.
+/// No-op for bodies whose velocity is already within bounds.
+void clampVelocities(Registry& registry, float maxAngular = 30.0f, float maxLinear = 1500.0f);
+
 } // namespace physics

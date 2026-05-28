@@ -88,7 +88,7 @@ bool Server::init(const char* addr,
             return false;
         }
 
-        session_.preferRelay(transportConfig_.forceRelay);
+        session_.preferRelay(transportConfig_.forceRelay && !transportConfig_.noRelay);
 
         if (discoveryConfig_.enabled) {
             NET_Address* dir = NET_ResolveHostname(discoveryConfig_.directoryHost.c_str());
@@ -670,14 +670,17 @@ void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload, cons
     if (kind == net::discovery::DirectoryMessage::RegisterAck) {
         const auto ack = net::discovery::decodeRegisterAck(body, bodyLen);
         if (ack && ack->accepted) {
-            directoryServerId_ = ack->serverId;
-            session_.setRelayConfig(net::UdpSessionTransport::RelayConfig{
-                .host = discoveryConfig_.directoryHost,
-                .port = discoveryConfig_.directoryUdpPort,
-                .serverId = directoryServerId_,
-                .clientNonce = 0,
-                .enabled = true,
-            });
+            directoryServerId_.store(ack->serverId, std::memory_order_relaxed);
+            if (!transportConfig_.noRelay) {
+                session_.setRelayConfig(net::UdpSessionTransport::RelayConfig{
+                    .host = discoveryConfig_.directoryHost,
+                    .port = discoveryConfig_.directoryUdpPort,
+                    .serverId = ack->serverId,
+                    .clientNonce = 0,
+                    .relayToken = {},
+                    .enabled = true,
+                });
+            }
         }
         return;
     }
@@ -686,6 +689,11 @@ void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload, cons
         const auto peer = net::discovery::decodeUdpPunchPeer(body, bodyLen);
         if (!peer || peer->host.empty() || peer->port == 0)
             return;
+
+        SDL_Log("Server: received global punch peer %s:%u for client nonce %u",
+                peer->host.c_str(),
+                peer->port,
+                peer->clientNonce);
 
         NET_Address* rawAddr = NET_ResolveHostname(peer->host.c_str());
         if (!rawAddr)
@@ -698,8 +706,9 @@ void Server::handleDirectoryEvent(const std::vector<std::uint8_t>& payload, cons
         net::UdpEndpointAddr dest;
         dest.addr = rawAddr;
         dest.port = peer->port;
+        const std::uint32_t directoryServerId = directoryServerId_.load(std::memory_order_relaxed);
         const std::vector<std::uint8_t> probe = net::discovery::encodeUdpHello(
-            {.role = net::discovery::UdpRole::Server, .idOrNonce = directoryServerId_, .gamePort = listenPort_});
+            {.role = net::discovery::UdpRole::Server, .idOrNonce = directoryServerId, .gamePort = listenPort_});
         for (int i = 0; i < 4; ++i)
             session_.sendDirectoryControl(dest, probe.data(), static_cast<int>(probe.size()));
     }
@@ -713,11 +722,12 @@ void Server::sendDirectoryHeartbeat(Uint64 nowMs)
     if (lastDirectoryHeartbeatMs_ != 0 && nowMs - lastDirectoryHeartbeatMs_ < 2000)
         return;
 
-    const auto kind = directoryServerId_ == 0 ? net::discovery::DirectoryMessage::RegisterServer
-                                              : net::discovery::DirectoryMessage::Heartbeat;
+    const std::uint32_t directoryServerId = directoryServerId_.load(std::memory_order_relaxed);
+    const auto kind = directoryServerId == 0 ? net::discovery::DirectoryMessage::RegisterServer
+                                             : net::discovery::DirectoryMessage::Heartbeat;
     const int currentPlayers = getClientCount();
     const net::discovery::ServerRegistration reg{
-        .serverId = directoryServerId_,
+        .serverId = directoryServerId,
         .name = discoveryConfig_.serverName,
         .gamePort = listenPort_,
         .currentPlayers = static_cast<std::uint8_t>(std::clamp(currentPlayers, 0, 255)),
@@ -1639,6 +1649,11 @@ int Server::getClientCount()
     // long-running readClients pass; at 200+ bots that put it on the
     // matchController hot path's p99 spike list. Now lock-free.
     return static_cast<int>(clientCountAtomic_.load(std::memory_order_relaxed));
+}
+
+uint32_t Server::globalDirectoryServerId() const noexcept
+{
+    return directoryServerId_.load(std::memory_order_relaxed);
 }
 
 uint16_t Server::getClientRttMs(ClientId clientId)

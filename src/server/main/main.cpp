@@ -316,7 +316,11 @@ int main(int argc, char* argv[])
         .gamePort = actualPort,
         .currentPlayers = 0,
         .maxPlayers = cfg.discovery.maxPlayers,
+        .globalServerId = 0,
     };
+    auto playerCountFn = [&server]() { return static_cast<uint8_t>(std::clamp(server.getClientCount(), 0, 255)); };
+    auto globalServerIdFn = [&server]() { return server.globalDirectoryServerId(); };
+
     bool lanDiscoveryRunning = false;
     game.onMatchConfigUpdated([&discoveryServer, &serverInfo](const MatchConfig& config) {
         serverInfo.maxPlayers = static_cast<std::uint8_t>(std::clamp(config.maxPlayers, 2, 128));
@@ -327,7 +331,8 @@ int main(int argc, char* argv[])
     // gated in Server; LAN discovery owns a responder thread that must be
     // started or stopped when the host changes the local-broadcast toggle.
     game.onDiscoverySettingsUpdated(
-        [&discoveryServer, &server, &serverInfo, &lanDiscoveryRunning, &cfg](const DiscoverySettings& settings) {
+        [&discoveryServer, &serverInfo, &lanDiscoveryRunning, &cfg, playerCountFn, globalServerIdFn](
+            const DiscoverySettings& settings) {
             cfg.discovery.advertiseServer = settings.advertiseGlobal;
             cfg.discovery.lanBroadcastEnabled = settings.advertiseLan;
 
@@ -335,15 +340,14 @@ int main(int argc, char* argv[])
                 return;
             }
             if (settings.advertiseLan && !lanDiscoveryRunning) {
-                lanDiscoveryRunning =
-                    discoveryServer.start(9998, serverInfo, [&server]() { return server.getClientCount(); });
+                lanDiscoveryRunning = discoveryServer.start(9998, serverInfo, playerCountFn, globalServerIdFn);
             } else if (!settings.advertiseLan && lanDiscoveryRunning) {
                 discoveryServer.stop();
                 lanDiscoveryRunning = false;
             }
         });
     if (cfg.discovery.enabled && cfg.discovery.lanBroadcastEnabled) {
-        lanDiscoveryRunning = discoveryServer.start(9998, serverInfo, [&server]() { return server.getClientCount(); });
+        lanDiscoveryRunning = discoveryServer.start(9998, serverInfo, playerCountFn, globalServerIdFn);
     }
 
     std::cout << "READY " << actualPort << '\n' << std::flush;

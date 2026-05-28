@@ -2,11 +2,11 @@
 # All keys are optional; missing keys fall back to compiled-in defaults.
 
 [client-network]
-host = "127.0.0.1"
+host = "0.0.0.0"
 port = 9999
 
 [server-network]
-host = "127.0.0.1"
+host = "0.0.0.0"
 port = 9999
 
 [server-replication]
@@ -37,9 +37,9 @@ snapshot-hz = 128
 enabled = true
 advertise-server = true
 lan-broadcast-enabled = true
-directory-host = "cse125.ucsd.edu"
+directory-host = "157.245.233.91"
 directory-udp-port = 10081
-server-name = "Group 2 Server"
+server-name = "Palantir"
 # Default authoritative player cap for locally hosted servers.
 max-players = 8
 refresh-seconds = 5
@@ -52,6 +52,9 @@ relay-fallback-delay-ms = 450
 use-udp-sessions = true
 allow-legacy-tcp-fallback = true
 force-relay = false
+# Default to real UDP punch-through. Set false only when you explicitly want
+# the global directory to relay gameplay traffic as a last-resort backup.
+no-relay = true
 enable-udp-sidecar = true
 inputs-over-udp = true
 ping-over-udp = true
@@ -70,4 +73,4 @@ backend = "auto"
 [developer]
 # When true, the client starts directly in-game and the server automatically
 # advances lobby phases into countdowns. Intended for local gameplay iteration.
-skip_lobby = true
+skip_lobby = false

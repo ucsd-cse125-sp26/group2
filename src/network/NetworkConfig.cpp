@@ -54,6 +54,8 @@ NetworkConfig loadNetworkConfig(const char* path)
         cfg.transport.allowLegacyTcpFallback = *v;
     if (auto v = transport["force-relay"].value<bool>())
         cfg.transport.forceRelay = *v;
+    if (auto v = transport["no-relay"].value<bool>())
+        cfg.transport.noRelay = *v;
     if (auto v = transport["enable-udp-sidecar"].value<bool>())
         cfg.transport.enableUdpSidecar = *v;
     if (auto v = transport["inputs-over-udp"].value<bool>())

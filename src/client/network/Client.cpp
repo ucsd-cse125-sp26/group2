@@ -59,8 +59,8 @@ ConnectError Client::init(const char* addr,
 
     if (transportConfig_.useUdpSessions) {
         usingUdpSession_ = true;
-        session_.preferRelay(transportConfig_.forceRelay);
-        if (relay)
+        session_.preferRelay(transportConfig_.forceRelay && !transportConfig_.noRelay);
+        if (relay && !transportConfig_.noRelay)
             session_.setRelayConfig(*relay);
         if (!session_.connectClient(addr, port, timeoutMs)) {
             SDL_Log("Client: UDP session connection to %s:%u failed", addr, port);

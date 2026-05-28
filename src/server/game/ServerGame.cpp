@@ -19,6 +19,8 @@
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/JumpPad.hpp"
+#include "ecs/components/Killzone.hpp"
 #include "ecs/components/LagCompTarget.hpp"
 #include "ecs/components/Player.hpp"
 #include "ecs/components/PlayerColor.hpp"
@@ -49,6 +51,8 @@
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/FireSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
+#include "ecs/systems/JumpPadSystem.hpp"
+#include "ecs/systems/KillzoneSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
@@ -225,6 +229,26 @@ void ServerGame::run()
         registry.emplace<Position>(spawner, centeredPos);
         registry.emplace<CollisionShape>(spawner, shape);
         registry.emplace<CollisionShape>(spawner);
+    }
+
+    // Jump pads — invisible AABB triggers placed in Blender that launch
+    // any overlapping player. Position is used verbatim from the map
+    // transform; the trigger box is centred on it so the pad's pivot
+    // should sit at the pad's surface centre.
+    for (const gamemap::JumpPadSpawner& jp : gamemap::jumpPadSpawner_) {
+        const entt::entity pad = registry.create();
+        registry.emplace<JumpPad>(pad, JumpPad{.velocity = jp.velocity});
+        registry.emplace<Position>(pad, jp.pos);
+        registry.emplace<CollisionShape>(pad, CollisionShape{.halfExtents = jp.halfExtents});
+    }
+
+    // Killzones — invisible AABB triggers, typically placed over lava or
+    // bottomless pits. Any overlapping player is killed on the next tick.
+    for (const gamemap::KillzoneSpawner& kz : gamemap::killzoneSpawner_) {
+        const entt::entity zone = registry.create();
+        registry.emplace<Killzone>(zone);
+        registry.emplace<Position>(zone, kz.pos);
+        registry.emplace<CollisionShape>(zone, CollisionShape{.halfExtents = kz.halfExtents});
     }
 
     while (running) {
@@ -722,6 +746,17 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         GROUP2_PROF_SCOPE("PowerupSpawners");
         systems::runPowerupSpawners(registry, dt);
+    }
+    {
+        GROUP2_PROF_SCOPE("jumpPads");
+        systems::runJumpPads(registry, dt);
+    }
+    {
+        // Killzones run after PlayerStatus so a dead player's lingering
+        // overlap on a lava pit doesn't double-charge their death
+        // (RespawnTimer is checked first inside applyDamage).
+        GROUP2_PROF_SCOPE("killzones");
+        systems::runKillzones(registry, pendingKillEvents);
     }
     {
         GROUP2_PROF_SCOPE("powerup");

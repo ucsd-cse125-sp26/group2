@@ -124,7 +124,9 @@ void EnemyWorldHealthBar::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/
         if (std::abs(ndcX) > 1.2f || std::abs(ndcY) > 1.2f)
             continue;
         float sx = std::round((ndcX * 0.5f + 0.5f) * screenW_);
-        float sy = std::round((ndcY * 0.5f + 0.5f) * screenH_);
+        // NDC Y grows up, screen Y grows down — flip the Y axis. Without this
+        // flip, looking up makes the bar drift downward and vice versa.
+        float sy = std::round((1.0f - (ndcY * 0.5f + 0.5f)) * screenH_);
         sy -= yOffsetPx * s;
 
         // Fade alpha during the last `fadeOutSecs` of the visibility window.

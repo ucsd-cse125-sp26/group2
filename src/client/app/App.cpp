@@ -211,16 +211,25 @@ SDL_AppResult App::iterate()
                                                networkConfig.discovery.connectPunchTimeoutMs,
                                                &relayToken))
                 {
-                    serverIp = punchedServer.host;
-                    serverPort = punchedServer.gamePort;
-                    relayConfig = net::UdpSessionTransport::RelayConfig{
-                        .host = networkConfig.discovery.directoryHost,
-                        .port = networkConfig.discovery.directoryUdpPort,
-                        .serverId = joinRequest->globalServerId,
-                        .clientNonce = clientNonce,
-                        .relayToken = relayToken,
-                        .enabled = true,
-                    };
+                    serverIp = punchedServer.udpHost.empty() ? punchedServer.host : punchedServer.udpHost;
+                    serverPort = punchedServer.udpPort != 0 ? punchedServer.udpPort : punchedServer.gamePort;
+                    SDL_Log("Global punch assist selected public UDP endpoint %s:%u for server %u",
+                            serverIp.c_str(),
+                            serverPort,
+                            joinRequest->globalServerId);
+                    if (!networkConfig.transport.noRelay) {
+                        relayConfig = net::UdpSessionTransport::RelayConfig{
+                            .host = networkConfig.discovery.directoryHost,
+                            .port = networkConfig.discovery.directoryUdpPort,
+                            .serverId = joinRequest->globalServerId,
+                            .clientNonce = clientNonce,
+                            .relayToken = relayToken,
+                            .enabled = true,
+                        };
+                    } else {
+                        SDL_Log("Global punch assist succeeded for server %u; relay disabled, trying direct UDP only",
+                                joinRequest->globalServerId);
+                    }
                 } else if (!punchError.empty()) {
                     SDL_Log("Global punch assist failed for server %u: %s",
                             joinRequest->globalServerId,

@@ -96,6 +96,9 @@ public:
     /// @return The client count.
     int getClientCount();
 
+    /// @brief Directory-assigned global server id, or 0 before registration succeeds.
+    uint32_t globalDirectoryServerId() const noexcept;
+
     /// @brief Phase 6: get this client's most-recently-reported smoothed RTT.
     /// @param clientId Network client identifier.
     /// @return RTT in milliseconds, or 0 if the client isn't connected
@@ -411,7 +414,7 @@ private:
     TransportConfig transportConfig_;
     GlobalDiscoveryConfig discoveryConfig_;
     net::UdpEndpointAddr directoryAddr_;
-    std::uint32_t directoryServerId_ = 0;
+    std::atomic<std::uint32_t> directoryServerId_{0};
     Uint64 lastDirectoryHeartbeatMs_ = 0;
     std::uint32_t nextChatServerSeq_ = 0;
     std::atomic<int> maxPlayers_{128};

@@ -82,15 +82,32 @@ struct PointLight
     float range = 500.0f;     ///< Attenuation range (world units); falloff = 1 - (d²/r²).
 };
 
+/// @brief Extra first-person models drawn in the weapon pass, after the gun.
+struct ViewmodelAttachment
+{
+    int32_t modelIndex = -1;   ///< Renderer-side model handle.
+    glm::mat4 transform{1.0f}; ///< World transform, already camera/viewmodel-relative.
+    bool visible = false;      ///< False = skip drawing this attachment.
+};
+
+/// @brief First-person hand attachments driven by weapon-authored mount points.
+struct ViewmodelHands
+{
+    ViewmodelAttachment left;
+    ViewmodelAttachment right;
+};
+
 /// @brief First-person weapon viewmodel descriptor sent per frame.
 ///
 /// Game.cpp computes the viewmodel transform from camera state + sway/recoil
 /// each frame and hands it off via `setWeaponViewmodel()`.
 struct WeaponViewmodel
 {
-    int32_t modelIndex = -1;   ///< Renderer-side model handle.
-    glm::mat4 transform{1.0f}; ///< Transform in viewmodel space (relative to camera).
-    bool visible = false;      ///< False = skip drawing this frame (e.g. weapon hidden).
+    int32_t modelIndex = -1;          ///< Renderer-side model handle.
+    glm::mat4 transform{1.0f};        ///< Transform in viewmodel space (relative to camera).
+    ViewmodelHands hands{};           ///< Optional first-person hands attached to weapon grip mounts.
+    ViewmodelAttachment debugPoint{}; ///< Optional red debug marker for live mount tweaking.
+    bool visible = false;             ///< False = skip drawing this frame (e.g. weapon hidden).
 };
 
 // ─── Skinned-character types (NEW) ───────────────────────────────────────────

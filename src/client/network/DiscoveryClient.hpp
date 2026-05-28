@@ -2,6 +2,7 @@
 
 #include "SDL3_net/SDL_net.h"
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -16,6 +17,7 @@ public:
         uint16_t gamePort;
         uint8_t currentPlayers;
         uint8_t maxPlayers;
+        uint32_t globalServerId = 0;
         uint64_t lastSeenMs;
     };
 
@@ -30,6 +32,7 @@ public:
 private:
     uint16_t discoveryPort = 0;
     NET_Address* broadcastAddr = nullptr;
+    NET_Address* loopbackAddr = nullptr;
     uint64_t lastRequestMs = 0;
 
     NET_DatagramSocket* socket = nullptr;

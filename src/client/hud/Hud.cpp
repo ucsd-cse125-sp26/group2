@@ -24,6 +24,7 @@
 #include "widgets/PickupPrompt.hpp"
 #include "widgets/RailgunScopeWidget.hpp"
 #include "widgets/Scoreboard.hpp"
+#include "widgets/ShotgunPelletWidget.hpp"
 #include "widgets/VignetteWidget.hpp"
 
 bool Hud::init(SDL_GPUDevice* device,
@@ -185,6 +186,7 @@ void Hud::createWidgets()
     // Center reticle + hit-confirm + accumulated-damage stack.
     widgets_.push_back(std::make_unique<CrosshairWidget>());
     widgets_.push_back(std::make_unique<HitMarkerWidget>());
+    widgets_.push_back(std::make_unique<ShotgunPelletWidget>());
     widgets_.push_back(std::make_unique<DamageAccumWidget>());
 
     // Directional damage arcs around the reticle.

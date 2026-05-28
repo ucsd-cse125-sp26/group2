@@ -43,10 +43,8 @@ void SmokeEffect::spawn(glm::vec3 pos, float radius, bool isFire)
         p->normalizedAge = 0.f;
         p->rotation = randRange(-0.3f, 0.3f);
 
-        if (isFire)
-            p->color = glm::vec4{0.9f, 0.4f, 0.05f, 0.f}; // fire orange, premul starts 0
-        else
-            p->color = glm::vec4{0.4f, 0.4f, 0.4f, 0.f};  // grey smoke
+        p->color = glm::vec4{0.f}; // Premultiplied alpha starts transparent.
+        p->kind = isFire ? 1.f : 0.f;
     }
 }
 
@@ -81,8 +79,7 @@ void SmokeEffect::update(float dt, Registry& registry, glm::vec3 camPos, glm::ve
         else
             alpha = 0.35f;
 
-        // Pre-multiply
-        const glm::vec3 baseRgb = glm::vec3(p.color) / std::max(p.color.a, 0.001f);
+        const glm::vec3 baseRgb = p.kind > 0.5f ? glm::vec3{0.9f, 0.4f, 0.05f} : glm::vec3{0.4f};
         p.color = glm::vec4(baseRgb * alpha, alpha);
         return true;
     });
