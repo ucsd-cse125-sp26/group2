@@ -45,19 +45,19 @@ void applyHeal(float amount, Health& playerHealth)
     if (amount < 0)
         return;
 
-    if (playerHealth.health < systems::healthMax) {
-        if ((playerHealth.health + amount) > systems::healthMax) {
-            amount -= systems::healthMax - playerHealth.health;
-            playerHealth.health = systems::healthMax;
+    if (playerHealth.health < healthMax) {
+        if ((playerHealth.health + amount) > healthMax) {
+            amount -= healthMax - playerHealth.health;
+            playerHealth.health = healthMax;
             playerHealth.armor = amount;
         } else {
             playerHealth.health += amount;
         }
 
-    } else if ((playerHealth.armor + amount) <= systems::armorMax) {
+    } else if ((playerHealth.armor + amount) <= armorMax) {
         playerHealth.armor += amount;
     } else {
-        playerHealth.armor = systems::armorMax;
+        playerHealth.armor = armorMax;
     }
 }
 

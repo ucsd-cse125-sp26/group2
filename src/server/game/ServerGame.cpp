@@ -50,6 +50,7 @@
 #include "ecs/systems/DynamicsSystem.hpp"
 #include "ecs/systems/ExplosionSystem.hpp"
 #include "ecs/systems/FireSystem.hpp"
+#include "ecs/systems/HealthPackSpawnerSystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/JumpPadSystem.hpp"
 #include "ecs/systems/KillzoneSystem.hpp"
@@ -689,6 +690,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         GROUP2_PROF_SCOPE("weaponSpawners");
         systems::runWeaponSpawners(registry, dt);
+    }
+    {
+        GROUP2_PROF_SCOPE("HealthPackSpawners");
+        systems::runHealthPackSpawners(registry, dt);
     }
     {
         GROUP2_PROF_SCOPE("droppedWeapons");
