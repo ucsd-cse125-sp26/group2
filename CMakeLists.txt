@@ -1092,6 +1092,9 @@ add_executable(group2
         src/client/menus/host/ui/HostConfigUI.cpp
         src/client/util/LocalAddress.hpp
         src/client/util/LocalAddress.cpp
+        src/ecs/systems/HealthPackSpawnerSystem.hpp
+        src/ecs/systems/HealthPackSpawnerSystem.cpp
+        src/ecs/components/HealthPackSpawner.hpp
         src/network/MatchConfig.hpp
 )
 
@@ -1408,6 +1411,9 @@ add_executable(server
         src/ecs/systems/PowerupSpawnerSystem.hpp
         src/ecs/systems/PowerupSystem.cpp
         src/ecs/systems/PowerupSystem.hpp
+        src/ecs/systems/HealthPackSpawnerSystem.hpp
+        src/ecs/systems/HealthPackSpawnerSystem.cpp
+        src/ecs/components/HealthPackSpawner.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)
@@ -1853,6 +1859,9 @@ add_executable(audio_math_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/audio_math_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/sfx/AudioMath.hpp"
+        src/ecs/systems/HealthPackSpawnerSystem.hpp
+        src/ecs/systems/HealthPackSpawnerSystem.cpp
+        src/ecs/components/HealthPackSpawner.hpp
 )
 target_include_directories(audio_math_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
