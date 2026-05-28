@@ -42,7 +42,7 @@ inline const AssetDefinition kRocketProjectile{
 
 inline const std::array<AssetDefinition, 4> kWeaponAssets{{
     {.name = "weapon_rifle",
-     .filename = "assault_rifle_with_mountpoints.glb",
+     .filename = "assault_rifle.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
      .renderScale = {20.0f, 20.0f, 20.0f}},

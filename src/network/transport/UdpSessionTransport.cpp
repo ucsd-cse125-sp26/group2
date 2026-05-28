@@ -828,22 +828,37 @@ void UdpSessionTransport::retransmitReliable(Uint64 nowMs)
 
 void UdpSessionTransport::sendKeepAlives(Uint64 nowMs)
 {
+    // Keepalives carry per-channel ack info in the header.  We must emit one
+    // per reliable channel — sendPacket() only fills hdr.ack/ackBits from the
+    // channel matching hdr.channel, and the receiver's processAcks() reads
+    // them per-channel.  Without an outgoing packet on EventReliableOrdered
+    // the server never learns the client received its particle/kill/match
+    // events; the pending queue grows until k_maxReliablePending and silently
+    // drops further events (manifested as bullet-impact decals vanishing
+    // after ~200 shots).
+    static constexpr ChannelId k_reliableKeepAliveChannels[] = {
+        ChannelId::ControlReliableOrdered,
+        ChannelId::EventReliableOrdered,
+    };
+
     for (auto& [connId, peer] : peers_) {
         if (nowMs - peer.lastKeepAliveMs < k_keepAliveMs)
             continue;
         peer.lastKeepAliveMs = nowMs;
-        PacketHeader hdr{};
-        hdr.kind = static_cast<std::uint8_t>(PacketKind::KeepAlive);
-        hdr.connectionId = connId;
-        hdr.channel = static_cast<std::uint8_t>(ChannelId::ControlReliableOrdered);
-        sendPacket(peer, hdr, nullptr, 0, 1);
+        for (ChannelId channel : k_reliableKeepAliveChannels) {
+            PacketHeader hdr{};
+            hdr.kind = static_cast<std::uint8_t>(PacketKind::KeepAlive);
+            hdr.connectionId = connId;
+            hdr.channel = static_cast<std::uint8_t>(channel);
+            sendPacket(peer, hdr, nullptr, 0, 1);
 
-        if (mode_ == Mode::Client && peer.useRelay && serverAddr_.addr) {
-            ChannelState& ch = peer.channels[channelIndex(ChannelId::ControlReliableOrdered)];
-            hdr.ack = ch.recvHighest;
-            hdr.ackBits = ch.recvAckBits;
-            hdr.routeId = 0;
-            sendDirect(serverAddr_, hdr, nullptr, 0, 1);
+            if (mode_ == Mode::Client && peer.useRelay && serverAddr_.addr) {
+                ChannelState& ch = peer.channels[channelIndex(channel)];
+                hdr.ack = ch.recvHighest;
+                hdr.ackBits = ch.recvAckBits;
+                hdr.routeId = 0;
+                sendDirect(serverAddr_, hdr, nullptr, 0, 1);
+            }
         }
     }
 }
