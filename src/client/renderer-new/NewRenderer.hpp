@@ -30,14 +30,15 @@ class ParticleSystem; ///< Forward-declared — owned by Game, registered via se
 
 /// @brief Vertex attribute layout for the static geometry pipeline.
 ///
-/// 32 bytes: position (12) + normal (12) + texUV (8).  NOTE: this is DISTINCT
-/// from `ModelVertex` (48 bytes, includes tangent) used by the skinned-rig
-/// pipeline.  Static meshes use this; skinned characters use `ModelVertex`.
+/// 48 bytes: position (12) + normal (12) + texUV (8) + tangent (16).
+/// Layout matches `ModelVertex`'s static attributes but remains a distinct
+/// type because static meshes do not carry skinning data.
 struct Vertex
 {
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 texUV;
+    glm::vec4 tangent;
 };
 
 /// @brief Graphics-team's work-in-progress SDL3 GPU renderer.

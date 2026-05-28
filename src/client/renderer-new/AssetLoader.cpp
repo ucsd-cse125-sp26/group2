@@ -12,10 +12,55 @@
 #include <stb_image.h>
 #include <vector>
 
+namespace
+{
+bool g_loggedMissingTangents = false;
+
+bool getMaterialTexturePath(aiMaterial& material, aiTextureType type, aiString& outPath)
+{
+    return material.GetTexture(type, 0, &outPath) == AI_SUCCESS && outPath.length > 0;
+}
+
+TexIdInt
+loadEmbeddedMaterialTexture(const aiScene& sceneAi, const std::string& assetIdNameSpace, const aiString& texPath)
+{
+    const TexIdInt texId = Asset::getTexIdFromString(assetIdNameSpace + "texture_" + std::string(texPath.C_Str()));
+    Asset::Texture& texture = Asset::textures_[texId];
+
+    if (texture.tex_raw != nullptr || texture.tex != nullptr)
+        return texId;
+
+    const aiTexture* embeddedTexture = sceneAi.GetEmbeddedTexture(texPath.C_Str());
+    if (!embeddedTexture || embeddedTexture->mHeight != 0) {
+        SDL_Log("AssetLoader: skipping unsupported material texture '%s' "
+                "(expected compressed embedded texture, embedded=%s, height=%u)",
+                texPath.C_Str(),
+                embeddedTexture ? "true" : "false",
+                embeddedTexture ? embeddedTexture->mHeight : 0);
+        return 0;
+    }
+
+    stbi_uc* pixels = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(embeddedTexture->pcData),
+                                            static_cast<int>(embeddedTexture->mWidth),
+                                            &texture.width,
+                                            &texture.height,
+                                            &texture.channels,
+                                            4);
+
+    if (!pixels) {
+        std::cout << "stbi failed for " << texPath.C_Str() << ": " << stbi_failure_reason() << std::endl;
+        return 0;
+    }
+
+    texture.tex_raw = pixels;
+    return texId;
+}
+} // namespace
+
 const aiScene* AssetLoader::loadAsset(Assimp::Importer& importer, const std::string& fileName, const bool flipUVs)
 {
     SDL_Log("Working dir: %s", std::filesystem::current_path().string().c_str());
-    unsigned int flags = aiProcess_Triangulate | aiProcess_GenNormals;
+    unsigned int flags = aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace;
     if (flipUVs)
         flags |= aiProcess_FlipUVs;
 
@@ -33,6 +78,12 @@ bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
 
     mesh.indexData_.reserve(asimpMeshResult.mNumFaces);
     mesh.vertexData_.reserve(asimpMeshResult.mNumVertices);
+    const bool hasTangents = asimpMeshResult.HasTangentsAndBitangents();
+    if (!hasTangents && !g_loggedMissingTangents) {
+        SDL_Log(
+            "AssetLoader: mesh tangents missing after aiProcess_CalcTangentSpace; normal maps will use vertex normals");
+        g_loggedMissingTangents = true;
+    }
 
     for (unsigned int i = 0; i < asimpMeshResult.mNumVertices; i++) {
         Asset::Vertex v{};
@@ -50,6 +101,19 @@ bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
             v.texUV = glm::vec2(asimpMeshResult.mTextureCoords[0][i].x, asimpMeshResult.mTextureCoords[0][i].y);
         } else {
             v.texUV = glm::vec2(0.0f, 0.0f);
+        }
+
+        if (hasTangents) {
+            const glm::vec3 tangent{
+                asimpMeshResult.mTangents[i].x, asimpMeshResult.mTangents[i].y, asimpMeshResult.mTangents[i].z};
+            const glm::vec3 bitangent{
+                asimpMeshResult.mBitangents[i].x, asimpMeshResult.mBitangents[i].y, asimpMeshResult.mBitangents[i].z};
+            const float handedness = glm::dot(glm::cross(v.normal, tangent), bitangent) < 0.0f ? -1.0f : 1.0f;
+            const float tangentLength = glm::length(tangent);
+            v.tangent =
+                glm::vec4(tangentLength > 0.00001f ? tangent / tangentLength : glm::vec3(1.0f, 0.0f, 0.0f), handedness);
+        } else {
+            v.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
         }
 
         mesh.vertexData_.push_back(v);
@@ -257,45 +321,34 @@ bool AssetLoader::loadModel(const ModelIdInt id,
             }
 
             aiString texPath;
-            if (mat->GetTexture(aiTextureType_BASE_COLOR, 0, &texPath) != AI_SUCCESS &&
-                mat->GetTexture(aiTextureType_DIFFUSE, 0, &texPath) != AI_SUCCESS)
-            {
-                continue; // no texture for this material
+            const bool hasBaseColor = getMaterialTexturePath(*mat, aiTextureType_BASE_COLOR, texPath);
+            if (hasBaseColor || getMaterialTexturePath(*mat, aiTextureType_DIFFUSE, texPath)) {
+                mat_.texId_[0] = loadEmbeddedMaterialTexture(*asimpSceneStructurePtr, assetIdNameSpace, texPath);
             }
 
-            TexIdInt texId = Asset::getTexIdFromString(assetIdNameSpace + "texture_" + std::string(texPath.C_Str()));
+            if (getMaterialTexturePath(*mat, aiTextureType_NORMALS, texPath))
+                mat_.normalTexture = loadEmbeddedMaterialTexture(*asimpSceneStructurePtr, assetIdNameSpace, texPath);
 
-            mat_.texId_[0] = texId;
+            aiString metalPath;
+            aiString roughnessPath;
+            aiString unknownPath;
+            const bool hasMetal = getMaterialTexturePath(*mat, aiTextureType_METALNESS, metalPath);
+            const bool hasRoughness = getMaterialTexturePath(*mat, aiTextureType_DIFFUSE_ROUGHNESS, roughnessPath);
+            const bool hasUnknown = getMaterialTexturePath(*mat, aiTextureType_UNKNOWN, unknownPath);
 
-            Asset::Texture& tex_ = Asset::textures_[texId];
-
-            if (tex_.tex_raw != nullptr) {
-                continue; // already decoded this texture
+            if (hasMetal && hasRoughness && std::string(metalPath.C_Str()) == std::string(roughnessPath.C_Str())) {
+                mat_.metallicRoughnessTexture =
+                    loadEmbeddedMaterialTexture(*asimpSceneStructurePtr, assetIdNameSpace, metalPath);
+            } else if (hasMetal) {
+                mat_.metallicRoughnessTexture =
+                    loadEmbeddedMaterialTexture(*asimpSceneStructurePtr, assetIdNameSpace, metalPath);
+            } else if (hasRoughness) {
+                mat_.metallicRoughnessTexture =
+                    loadEmbeddedMaterialTexture(*asimpSceneStructurePtr, assetIdNameSpace, roughnessPath);
+            } else if (hasUnknown) {
+                mat_.metallicRoughnessTexture =
+                    loadEmbeddedMaterialTexture(*asimpSceneStructurePtr, assetIdNameSpace, unknownPath);
             }
-
-            const aiTexture* embeddedTexture = asimpSceneStructurePtr->GetEmbeddedTexture(texPath.C_Str());
-            if (!embeddedTexture || embeddedTexture->mHeight != 0) {
-                SDL_Log("AssetLoader: skipping unsupported material texture '%s' "
-                        "(expected compressed embedded texture, embedded=%s, height=%u)",
-                        texPath.C_Str(),
-                        embeddedTexture ? "true" : "false",
-                        embeddedTexture ? embeddedTexture->mHeight : 0);
-                continue;
-            }
-
-            stbi_uc* pixels = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(embeddedTexture->pcData),
-                                                    static_cast<int>(embeddedTexture->mWidth),
-                                                    &tex_.width,
-                                                    &tex_.height,
-                                                    &tex_.channels,
-                                                    4);
-
-            if (!pixels) {
-                std::cout << "stbi failed for " << texPath.C_Str() << ": " << stbi_failure_reason() << std::endl;
-                continue;
-            }
-
-            tex_.tex_raw = pixels;
         }
     }
 

@@ -34,12 +34,13 @@ struct GeoBufferInfo
     Uint32 bufferSize;
 };
 
-/// @brief Per-vertex attributes: position, normal, and texture coordinates.
+/// @brief Per-vertex attributes: position, normal, texture coordinates, and tangent.
 struct Vertex
 {
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 texUV;
+    glm::vec4 tangent;
 };
 
 /// @brief A single mesh: CPU-side vertex/index data plus GPU buffer info.
@@ -73,6 +74,8 @@ struct Material
     float nIor = 1.0f;
     bool hasPhongData_ = false;
     TexIdInt texId_[TEX_CHANNELS] = {};
+    TexIdInt normalTexture = 0;
+    TexIdInt metallicRoughnessTexture = 0;
 };
 
 struct Texture

@@ -67,7 +67,6 @@ bool NewRenderer::init(SDL_Window* window)
     }
 
     SDL_Log("NewRenderer: GPU driver = %s", SDL_GetGPUDeviceDriver(device_));
-
     if (!SDL_ClaimWindowForGPUDevice(device_, window_)) {
         SDL_Log("NewRenderer: SDL_ClaimWindowForGPUDevice failed: %s", SDL_GetError());
         return false;
@@ -184,7 +183,7 @@ bool NewRenderer::createGeometryPipeline()
     Boilerplate::ShaderInfo fragmentShader{};
     fragmentShader.path = "shaders-new/geometry.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    fragmentShader.samplerCount = 1;
+    fragmentShader.samplerCount = 3;
     fragmentShader.uniformBufferCount = 2;
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
@@ -200,6 +199,7 @@ bool NewRenderer::createGeometryPipeline()
         Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, position)),
         Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, normal)),
         Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, texUV)),
+        Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Vertex, tangent)),
     };
 
     geometryPipeline_ = Boilerplate::createGraphicsPipeline(
@@ -471,25 +471,48 @@ void NewRenderer::drawModel(ModelIdInt modelId,
             material = &Asset::materials_.at(element.materialId_);
 
         SDL_GPUTexture* texture = nullptr;
+        SDL_GPUTexture* normalTexture = nullptr;
+        SDL_GPUTexture* metallicRoughnessTexture = nullptr;
         if (material != nullptr) {
             const TexIdInt texId = material->texId_[0];
             if (Asset::textures_.contains(texId))
                 texture = Asset::textures_.at(texId).tex;
+            if (Asset::textures_.contains(material->normalTexture))
+                normalTexture = Asset::textures_.at(material->normalTexture).tex;
+            if (Asset::textures_.contains(material->metallicRoughnessTexture))
+                metallicRoughnessTexture = Asset::textures_.at(material->metallicRoughnessTexture).tex;
         }
 
         const bool useTexture = texture != nullptr || material == nullptr || !material->hasPhongData_;
         if (texture == nullptr)
             texture = texture_;
+        if (normalTexture == nullptr)
+            normalTexture = texture_;
+        if (metallicRoughnessTexture == nullptr)
+            metallicRoughnessTexture = texture_;
 
-        SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture, sampler_);
-        SDL_BindGPUFragmentSamplers(renderPass, 0, &textureBinding, 1);
+        SDL_GPUTextureSamplerBinding textureBindings[] = {
+            Boilerplate::makeTextureSamplerBinding(texture, sampler_),
+            Boilerplate::makeTextureSamplerBinding(normalTexture, sampler_),
+            Boilerplate::makeTextureSamplerBinding(metallicRoughnessTexture, sampler_),
+        };
+        SDL_BindGPUFragmentSamplers(renderPass, 0, textureBindings, 3);
 
         glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
         if (material != nullptr)
             materialDiffuse = glm::vec4(material->kDiffuse_, 1.0f);
-        Uint32 useTextureUniform = useTexture ? 1u : 0u;
+        struct MaterialFlags
+        {
+            Uint32 useTexture;
+            Uint32 useNormalTexture;
+            Uint32 useMetallicRoughnessTexture;
+        } materialFlags{
+            useTexture ? 1u : 0u,
+            normalTexture != texture_ ? 1u : 0u,
+            metallicRoughnessTexture != texture_ ? 1u : 0u,
+        };
         SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
-        SDL_PushGPUFragmentUniformData(cmd, 1, &useTextureUniform, sizeof(useTextureUniform));
+        SDL_PushGPUFragmentUniformData(cmd, 1, &materialFlags, sizeof(materialFlags));
 
         glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
         SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
@@ -695,6 +718,19 @@ int NewRenderer::loadSceneModel(
     Asset::modelInstances_.push_back(sceneInstance);
 
     std::vector<Boilerplate::BufferUpload> uploads;
+    auto uploadTexture = [&](TexIdInt texId, SDL_GPUTextureFormat format) {
+        if (texId == 0 || !Asset::textures_.contains(texId))
+            return;
+
+        Asset::Texture& tex = Asset::textures_.at(texId);
+        if (tex.tex == nullptr && tex.tex_raw != nullptr && tex.width > 0 && tex.height > 0) {
+            tex.tex = Boilerplate::createTextureRGBA8(
+                device_, static_cast<Uint32>(tex.width), static_cast<Uint32>(tex.height), tex.tex_raw, format);
+            stbi_image_free(tex.tex_raw);
+            tex.tex_raw = nullptr;
+        }
+    };
+
     for (auto& element : model.modelElements_) {
         createMeshBuffers(element.meshId_);
         Asset::Mesh& mesh = Asset::meshes_[element.meshId_];
@@ -706,18 +742,9 @@ int NewRenderer::loadSceneModel(
             continue;
 
         Asset::Material& mat = Asset::materials_.at(matId);
-        TexIdInt texId = mat.texId_[0];
-
-        if (texId == 0 || !Asset::textures_.contains(texId))
-            continue;
-
-        Asset::Texture& tex = Asset::textures_.at(texId);
-        if (tex.tex == nullptr && tex.tex_raw != nullptr && tex.width > 0 && tex.height > 0) {
-            tex.tex = Boilerplate::createTextureRGBA8(
-                device_, static_cast<Uint32>(tex.width), static_cast<Uint32>(tex.height), tex.tex_raw);
-            stbi_image_free(tex.tex_raw);
-            tex.tex_raw = nullptr;
-        }
+        uploadTexture(mat.texId_[0], SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB);
+        uploadTexture(mat.normalTexture, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM);
+        uploadTexture(mat.metallicRoughnessTexture, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM);
     }
 
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);

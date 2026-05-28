@@ -291,11 +291,12 @@ void uploadBuffers(SDL_GPUDevice* device, SDL_GPUCommandBuffer* cmd, const std::
     SDL_ReleaseGPUTransferBuffer(device, transferBuffer);
 }
 
-SDL_GPUTexture* createTextureRGBA8(SDL_GPUDevice* device, Uint32 width, Uint32 height, const void* data)
+SDL_GPUTexture*
+createTextureRGBA8(SDL_GPUDevice* device, Uint32 width, Uint32 height, const void* data, SDL_GPUTextureFormat format)
 {
     SDL_GPUTextureCreateInfo textureInfo{};
     textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
-    textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    textureInfo.format = format;
     textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
     textureInfo.width = width;
     textureInfo.height = height;
@@ -366,8 +367,11 @@ SDL_GPUTexture* loadTexture(SDL_GPUDevice* device, const char* path)
         return nullptr;
     }
 
-    SDL_GPUTexture* texture =
-        createTextureRGBA8(device, static_cast<Uint32>(width), static_cast<Uint32>(height), pixels);
+    SDL_GPUTexture* texture = createTextureRGBA8(device,
+                                                 static_cast<Uint32>(width),
+                                                 static_cast<Uint32>(height),
+                                                 pixels,
+                                                 SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB);
     stbi_image_free(pixels);
 
     return texture;
@@ -392,10 +396,8 @@ SDL_GPUTexture* createDepthTexture(SDL_GPUDevice* device, Uint32 width, Uint32 h
     return texture;
 }
 
-SDL_GPUTexture* createSampledColorTarget(SDL_GPUDevice* device,
-                                         Uint32 width,
-                                         Uint32 height,
-                                         SDL_GPUTextureFormat format)
+SDL_GPUTexture*
+createSampledColorTarget(SDL_GPUDevice* device, Uint32 width, Uint32 height, SDL_GPUTextureFormat format)
 {
     SDL_GPUTextureCreateInfo info{};
     info.type = SDL_GPU_TEXTURETYPE_2D;
