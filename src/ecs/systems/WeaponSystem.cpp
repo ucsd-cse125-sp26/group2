@@ -71,11 +71,15 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
         auto& gun = getEquippedGun(weapon);
         gun.isReloading = false;
         gun.reloadTime = 0.0f;
+        gun.recoilHeat = 0.0f;
+        gun.recoilIdleTime = 0.0f;
         weapon.current = WeaponSlot::PRIMARY;
     } else if (input.switchToSecondary && weapon.current != WeaponSlot::SECONDARY) {
         auto& gun = getEquippedGun(weapon);
         gun.isReloading = false;
         gun.reloadTime = 0.0f;
+        gun.recoilHeat = 0.0f;
+        gun.recoilIdleTime = 0.0f;
         weapon.current = WeaponSlot::SECONDARY;
     }
 }
@@ -555,6 +559,8 @@ inline void handleFire(Registry& registry,
     const WeaponConfig& config = getWeaponConfig(gun.type);
 
     if (gun.isReloading) {
+        gun.recoilHeat = 0.0f;
+        gun.recoilIdleTime = 0.0f;
         if (auto* beam = registry.try_get<BeamState>(shooter)) {
             beam->active = false; // turn off beam visuals during reload
         }
@@ -622,8 +628,15 @@ inline void handleFire(Registry& registry,
 
     // ── Discrete weapon path ──
     if (!input.shooting) {
+        gun.recoilIdleTime += dt;
+        if (gun.recoilIdleTime > 0.2f) {
+            gun.recoilHeat -= config.recoilRecovery * dt;
+            if (gun.recoilHeat <= float(config.recoilFreeShots))
+                gun.recoilHeat = 0.0f;
+        }
         return;
     }
+    gun.recoilIdleTime = 0.0f;
 
     if (gun.fireCooldown > 0.0f) {
         return;
@@ -634,6 +647,7 @@ inline void handleFire(Registry& registry,
     }
 
     gun.fireCooldown = config.fireCooldown;
+    gun.recoilHeat += 1.0f;
 
     // Railgun handling
     if (config.isCharge) {
