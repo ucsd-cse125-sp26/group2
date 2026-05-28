@@ -2632,37 +2632,75 @@ SDL_AppResult Game::iterate()
                 recoilPushBack_ += rp.pushBack;
                 recoilRoll_ += rp.rollKick * ((std::rand() % 2 == 0) ? 1.0f : -1.0f);
 
-                // Camera recoil pattern
-                if (wpnCfg.recoilPitchPerShot > 0.0f && localShooter != entt::null) {
-                    float heat = std::max(0.0f, localRecoilHeat_ - float(wpnCfg.recoilFreeShots));
-                    if (heat > 0.0f) {
-                        float dk = 1.5f / wpnCfg.recoilRampShots;
-                        float ok = 2.0f / wpnCfg.recoilRampShots;
-                        float stem = wpnCfg.recoilRampShots * 0.5f;
+                // Camera recoil.
+                //
+                // PATTERN PATH (preferred when wpnCfg.recoilPatternScale > 0):
+                //   Closed-form R-301 pattern is defined over n in [1, 28].
+                //   We resample across the magazine — shot 1 → n=1, shot magSize → n=28
+                //   — so a full mag walks the entire pattern domain at finer
+                //   granularity than the original 28-shot Apex pattern. Per-shot
+                //   delta = sample(s) - sample(s-1), where sample(s) = (H(n), V(n))
+                //   at the s-th resampled point.
+                //
+                // LEGACY FORMULA PATH (only if recoilPatternScale == 0 and
+                //   recoilPitchPerShot > 0): the old sin+exp formula.
+                const bool usePattern =
+                    wpnCfg.recoilPatternScale > 0.0f && wpnCfg.magazineSize > 1;
+                const bool useLegacy =
+                    !usePattern && wpnCfg.recoilPitchPerShot > 0.0f;
 
-                        float pHeat = std::max(0.0f, heat - stem);
-                        float pitchKick = wpnCfg.recoilPitchPerShot * std::exp(-dk * pHeat);
+                if ((usePattern || useLegacy) && localShooter != entt::null) {
+                    float pitchKick = 0.0f;
+                    float yawKick = 0.0f;
 
-                        float hNow = std::max(0.0f, heat - stem);
-                        float hPrev = std::max(0.0f, heat - 1.0f - stem);
-                        float oNow = 1.0f - std::exp(-ok * hNow);
-                        float oPrev = 1.0f - std::exp(-ok * hPrev);
-                        float yawKick =
-                            wpnCfg.recoilYawPerShot * (oNow * std::sin(hNow * 0.35f) - oPrev * std::sin(hPrev * 0.35f));
+                    if (usePattern) {
+                        const int magShots = wpnCfg.magazineSize;
+                        const float scale = wpnCfg.recoilPatternScale * recoilPatternScaleMultiplier_;
+                        const auto sampleAt = [&](int s) -> glm::vec2 {
+                            if (s <= 0)
+                                return {0.0f, 0.0f};
+                            const int clamped = std::min(s, magShots);
+                            const float n =
+                                1.0f + static_cast<float>(clamped - 1) * 27.0f /
+                                           static_cast<float>(magShots - 1);
+                            return {recoilPatternH_R301(n), recoilPatternV_R301(n)};
+                        };
 
+                        const int shotNum = static_cast<int>(localRecoilHeat_) + 1;
+                        const glm::vec2 delta = sampleAt(shotNum) - sampleAt(shotNum - 1);
+                        yawKick = delta.x * scale;   // H positive = right
+                        pitchKick = delta.y * scale; // V positive = up
+                    } else {
+                        // Legacy sin+exp formula.
+                        const float heat =
+                            std::max(0.0f, localRecoilHeat_ - float(wpnCfg.recoilFreeShots));
+                        if (heat > 0.0f) {
+                            const float dk = 1.5f / wpnCfg.recoilRampShots;
+                            const float ok = 2.0f / wpnCfg.recoilRampShots;
+                            const float stem = wpnCfg.recoilRampShots * 0.5f;
+                            const float pHeat = std::max(0.0f, heat - stem);
+                            pitchKick = wpnCfg.recoilPitchPerShot * std::exp(-dk * pHeat);
+
+                            const float hNow = std::max(0.0f, heat - stem);
+                            const float hPrev = std::max(0.0f, heat - 1.0f - stem);
+                            const float oNow = 1.0f - std::exp(-ok * hNow);
+                            const float oPrev = 1.0f - std::exp(-ok * hPrev);
+                            yawKick = wpnCfg.recoilYawPerShot *
+                                      (oNow * std::sin(hNow * 0.35f) -
+                                       oPrev * std::sin(hPrev * 0.35f));
+                        }
+                    }
+
+                    if (pitchKick != 0.0f || yawKick != 0.0f) {
                         if (useSpringCameraRecoil_) {
-                            // Apex-style: push the spring target. The integrator in the
-                            // per-frame recoil-decay block chases this each frame, and
-                            // the offset is added to the view AFTER cachedCamFwd_ is
-                            // computed — so bullets fly along the un-punched aim.
                             cameraRecoilTargetPitch_ -= pitchKick;
                             cameraRecoilTargetYaw_ += yawKick;
                         } else {
-                            // Legacy: directly mutate the replicated input snapshot.
                             auto& snap = registry.get<InputSnapshot>(localShooter);
                             snap.pitch -= pitchKick;
                             snap.yaw += yawKick;
-                            snap.pitch = std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
+                            snap.pitch =
+                                std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
                         }
                     }
                     localRecoilHeat_ += 1.0f;
@@ -4309,22 +4347,44 @@ SDL_AppResult Game::iterate()
                     mouseDeltaYaw = currentSnapYaw - lastSnapYawAfterCommit_;
                 }
 
-                // 2) Approach B only — during active fire, subtract player's
-                //    counter-mouse from the target. Movement in the OPPOSITE
-                //    direction of the displacement reduces what's owed back.
-                //    Capped so it can only drive target toward zero, never past.
-                if (useRecoilCompensation_ && recoilIdleTime_ < cameraRecoilIdleThreshold_) {
-                    auto compensate = [](float& target, float playerDelta) {
-                        if (target == 0.0f || playerDelta == 0.0f)
+                // 2) Approach B — credit-accumulator compensation. Runs on EVERY
+                //    frame (firing, recovery, idle) so post-release pull-down is
+                //    still credited. Each frame's mouse delta is banked into a
+                //    signed credit (clamped + slowly decaying), then consumed
+                //    against target. This fixes two bugs of the naive
+                //    "cap-at-current-target" comp:
+                //      • Excess player input is no longer wasted — it pre-pays
+                //        the next shot's kick instead of being thrown away.
+                //      • Compensation still tracks while the recovery is running,
+                //        so the refund doesn't add to the player's continued
+                //        pull-down (the "overdoes it" bug).
+                if (useRecoilCompensation_) {
+                    const float creditDecay = std::exp(-compensationCreditDecay_ * dt);
+                    compensationCreditPitch_ *= creditDecay;
+                    compensationCreditYaw_ *= creditDecay;
+
+                    compensationCreditPitch_ = std::clamp(compensationCreditPitch_ + mouseDeltaPitch,
+                                                          -compensationCreditCap_,
+                                                          compensationCreditCap_);
+                    compensationCreditYaw_ = std::clamp(compensationCreditYaw_ + mouseDeltaYaw,
+                                                        -compensationCreditCap_,
+                                                        compensationCreditCap_);
+
+                    auto consume = [](float& target, float& credit) {
+                        if (target == 0.0f)
                             return;
-                        if ((target < 0.0f && playerDelta > 0.0f) ||
-                            (target > 0.0f && playerDelta < 0.0f)) {
-                            const float maxComp = std::min(std::abs(playerDelta), std::abs(target));
-                            target += (target < 0.0f) ? maxComp : -maxComp;
+                        if (target < 0.0f && credit > 0.0f) {
+                            const float pay = std::min(credit, -target);
+                            target += pay;
+                            credit -= pay;
+                        } else if (target > 0.0f && credit < 0.0f) {
+                            const float pay = std::min(-credit, target);
+                            target -= pay;
+                            credit += pay;
                         }
                     };
-                    compensate(cameraRecoilTargetPitch_, mouseDeltaPitch);
-                    compensate(cameraRecoilTargetYaw_, mouseDeltaYaw);
+                    consume(cameraRecoilTargetPitch_, compensationCreditPitch_);
+                    consume(cameraRecoilTargetYaw_, compensationCreditYaw_);
                 }
 
                 // 3) Approach B only — idle target decay (the recovery itself).
@@ -4770,6 +4830,7 @@ SDL_AppResult Game::iterate()
                         static_cast<double>(recoilRoll_));
 
             ImGui::SeparatorText("Camera Recoil (Apex spring — commits to aim)");
+            ImGui::DragFloat("Pattern strength ×", &recoilPatternScaleMultiplier_, 0.05f, 0.0f, 10.0f, "%.2f");
             ImGui::Checkbox("Spring path (un-check = legacy instant snap-pitch)", &useSpringCameraRecoil_);
             {
                 static const char* k_modes[] = {
@@ -4783,6 +4844,11 @@ SDL_AppResult Game::iterate()
             ImGui::DragFloat("Spring omega (rad/s)", &cameraRecoilOmega_, 0.5f, 4.0f, 80.0f, "%.1f");
             ImGui::DragFloat("Recovery decay (1/s)", &cameraRecoilTargetDecay_, 0.25f, 0.5f, 30.0f, "%.2f");
             ImGui::DragFloat("Idle threshold (s)", &cameraRecoilIdleThreshold_, 0.01f, 0.0f, 1.5f, "%.2f");
+            ImGui::DragFloat("Credit cap (rad)", &compensationCreditCap_, 0.005f, 0.0f, 0.5f, "%.3f");
+            ImGui::DragFloat("Credit decay (1/s)", &compensationCreditDecay_, 0.05f, 0.0f, 10.0f, "%.2f");
+            ImGui::Text("Credit: pitch=%.3f° yaw=%.3f°",
+                        static_cast<double>(glm::degrees(compensationCreditPitch_)),
+                        static_cast<double>(glm::degrees(compensationCreditYaw_)));
             ImGui::Text("Pitch:  cur=%.3f° tgt=%.3f° vel=%.3f",
                         static_cast<double>(glm::degrees(cameraRecoilPitch_)),
                         static_cast<double>(glm::degrees(cameraRecoilTargetPitch_)),

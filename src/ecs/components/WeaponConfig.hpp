@@ -27,12 +27,69 @@ struct WeaponConfig
     float maxChargeTime = 0.0f;      ///< in seconds
     float reloadTime = 0.0f;         ///< Time to complete a reload, in seconds.
 
-    int recoilFreeShots = 0;         ///< Shots before recoil kicks in.
-    float recoilPitchPerShot = 0.0f; ///< Upward kick per shot.
-    float recoilYawPerShot = 0.0f;   ///< Horizontal swing strength.
-    float recoilRampShots = 1.0f;    ///< Curve shape / stem length.
-    float recoilRecovery = 0.0f;     ///< Heat decay per second.
+    int recoilFreeShots = 0;         ///< Shots before recoil kicks in (legacy formula path).
+    float recoilPitchPerShot = 0.0f; ///< Upward kick per shot (legacy formula path).
+    float recoilYawPerShot = 0.0f;   ///< Horizontal swing strength (legacy formula path).
+    float recoilRampShots = 1.0f;    ///< Curve shape / stem length (legacy formula path).
+    float recoilRecovery = 0.0f;     ///< Heat decay per second (shared by both paths).
+
+    /// @brief Closed-form pattern (R-301-style) scale; rad per pattern unit.
+    /// When > 0, the fire path evaluates the closed-form H(n)/V(n) function below
+    /// instead of the legacy `sin+exp` formula. The pattern's domain is [1, 28]
+    /// (user-provided shape), and we resample it across `magazineSize` shots — so
+    /// firing the full mag walks the entire pattern from n=1 → n=28 with finer
+    /// granularity than the original 28-shot Apex pattern. Pattern V units total
+    /// 100 across the mag, so total vertical climb = 100 * scale radians.
+    float recoilPatternScale = 0.0f;
 };
+
+/// @brief Closed-form 5-segment R-301 recoil pattern (horizontal, right-positive).
+/// Defined over n in [1, 28]; returns cumulative H in pattern units.
+inline float recoilPatternH_R301(float n)
+{
+    if (n <= 10.0f) {
+        const float q = n - 1.0f;
+        return 3.4047f * q - 0.2173f * q * q;
+    }
+    if (n <= 15.0f) {
+        const float q = n - 10.0f;
+        return 13.0435f + 2.1919f * q + 0.2681f * q * q;
+    }
+    if (n <= 20.0f) {
+        const float q = n - 15.0f;
+        return 30.7065f - 2.1566f * q - 0.3404f * q * q;
+    }
+    if (n <= 22.0f) {
+        const float q = n - 20.0f;
+        return 11.4130f - 2.6123f * q;
+    }
+    const float q = n - 22.0f;
+    return 6.1885f + 1.9224f * q + 0.2776f * q * q;
+}
+
+/// @brief Closed-form 5-segment R-301 recoil pattern (vertical, up-positive).
+/// Defined over n in [1, 28]; returns cumulative V in pattern units.
+inline float recoilPatternV_R301(float n)
+{
+    if (n <= 10.0f) {
+        const float q = n - 1.0f;
+        return 4.0792f * q + 0.09485f * q * q;
+    }
+    if (n <= 15.0f) {
+        const float q = n - 10.0f;
+        return 44.3954f + 5.0237f * q - 0.2764f * q * q;
+    }
+    if (n <= 20.0f) {
+        const float q = n - 15.0f;
+        return 62.6046f + 4.5740f * q - 0.5132f * q * q;
+    }
+    if (n <= 22.0f) {
+        const float q = n - 20.0f;
+        return 72.6457f + 4.4688f * q;
+    }
+    const float q = n - 22.0f;
+    return 81.5833f + 4.1890f * q - 0.1866f * q * q;
+}
 
 struct ProjectileConfig
 {
@@ -71,16 +128,18 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .reloadTime = 1.25f,
-            // Apex R-99-ish: kicks from shot 1, strong vertical, mild horizontal walk.
-            // Per-shot pitch ~1.1° base ramping under the heat curve; per-shot yaw
-            // ~0.45° modulated by the sin envelope so the pattern walks right-then-
-            // left over ~18 shots. Recovery slightly slower to give the auto-spring
-            // a noticeable settle window after fire-off.
+            // R-301 closed-form pattern (user-provided 5-segment polynomial in
+            // WeaponConfig.hpp). Resampled across the 50-bullet mag so the full
+            // pattern domain [1, 28] walks shot 1 → 50. recoilRecovery still
+            // controls heat decay between bursts (resets the pattern).
+            // The legacy per-shot fields are zeroed; the pattern path takes
+            // priority when recoilPatternScale > 0.
             .recoilFreeShots = 0,
-            .recoilPitchPerShot = 0.020f,
-            .recoilYawPerShot = 0.008f,
-            .recoilRampShots = 10.0f,
+            .recoilPitchPerShot = 0.0f,
+            .recoilYawPerShot = 0.0f,
+            .recoilRampShots = 1.0f,
             .recoilRecovery = 30.0f,
+            .recoilPatternScale = 0.0025f, // ~14.3° total vertical at full mag (100 units).
         }, // Rifle
         WeaponConfig{
             .fireCooldown = 1.0f,

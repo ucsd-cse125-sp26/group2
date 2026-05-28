@@ -477,6 +477,8 @@ private:
     float cameraRecoilTargetYaw_ = 0.0f;
     float committedRecoilPitch_ = 0.0f;     ///< Portion of `cameraRecoilPitch_` already added to snap.pitch.
     float committedRecoilYaw_ = 0.0f;       ///< Each frame we commit `(current - committed)` and update.
+    float recoilPatternScaleMultiplier_ = 2.0f; ///< Live multiplier on WeaponConfig.recoilPatternScale.
+                                                ///< 1.0 = nominal; 2.0 = double recoil. Tune in debug UI.
     float cameraRecoilOmega_ = 35.0f;       ///< Spring angular frequency (rad/s). Higher = snappier kick.
     float cameraRecoilTargetDecay_ = 5.0f;  ///< Idle-recovery decay rate (1/s). Higher = faster snap-back.
     float cameraRecoilIdleThreshold_ = 0.18f; ///< Seconds off-trigger before target starts decaying.
@@ -492,6 +494,17 @@ private:
     float lastSnapPitchAfterCommit_ = 0.0f; ///< snap.pitch saved at end of last spring tick — diff against
     float lastSnapYawAfterCommit_ = 0.0f;   ///< current to recover the player's mouse delta this frame.
     bool haveLastSnap_ = false;             ///< Becomes true after the first frame the local player exists.
+
+    // Credit accumulator (Approach B). Each frame, the player's counter-mouse is
+    // banked into a signed credit (capped + slowly-decaying). The credit is then
+    // consumed against target — pre-payment of future kicks is preserved, and
+    // continued pull after fire-off still cancels recovery debt. Without this
+    // (cap-at-current-target naive comp), excess mouse input was wasted and the
+    // recovery refund overcompensated whatever debt remained.
+    float compensationCreditPitch_ = 0.0f;
+    float compensationCreditYaw_ = 0.0f;
+    float compensationCreditCap_ = 0.10f;   ///< Max banked credit (rad). ~5.7° per axis.
+    float compensationCreditDecay_ = 1.0f;  ///< Credit decay rate (1/s); stale credit fades.
 
     // Visual reload state
     float reloadDownwardOffset_ = 0.0f; ///< Downward offset for the reload animation
