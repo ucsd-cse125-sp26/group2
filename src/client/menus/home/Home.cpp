@@ -51,7 +51,7 @@ bool Home::init(AppContext& ctx)
     discoveryConfig = ctx.networkConfig.discovery;
     startGlobalRefresh(true);
 
-    localDiscoveryClient->start(9998);
+    localDiscoveryClient->start(discoveryConfig.lanBroadcastPort);
 
     return true;
 }

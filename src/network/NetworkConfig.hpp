@@ -122,6 +122,7 @@ struct GlobalDiscoveryConfig
     bool enabled = true;                           ///< Client browser and server publishing toggle.
     bool advertiseServer = true;                   ///< Initial server publishing state for the global directory.
     bool lanBroadcastEnabled = true;               ///< Initial server response state for LAN discovery requests.
+    uint16_t lanBroadcastPort = 2311;
     std::string directoryHost = "cse125.ucsd.edu"; ///< Central directory host.
     uint16_t directoryTcpPort = 10080;             ///< Legacy directory TCP API port.
     uint16_t directoryUdpPort = 10081;             ///< UDP directory/relay port.
