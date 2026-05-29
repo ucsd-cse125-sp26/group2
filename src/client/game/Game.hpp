@@ -307,6 +307,16 @@ private:
     Uint64 softLimitPeriod = 0;            ///< Target frame period in perf-counter ticks (0 = disabled).
     Uint64 softLimitNextFrame = 0;         ///< Performance counter target for next frame deadline.
 
+    /// Render-cadence decoupling. When > 0, render-prep + drawFrame are gated to
+    /// this many Hz while the update loop (input / network / physics / client-side
+    /// prediction) keeps running every iterate(). 0 = render on every iterate()
+    /// (legacy behavior). Set via GROUP2_RENDER_HZ; bench mode enables it so the
+    /// measured loop reflects update throughput rather than the swapchain present
+    /// ceiling. Render phases receive the wall time since the last actual render
+    /// (renderDt) so vfx / particles / animation advance at the correct rate.
+    double renderTargetHz_ = 0.0;
+    Uint64 lastRenderTime_ = 0; ///< Perf counter at last render-iterate (renderTargetHz_ gate).
+
     /// @brief Apply FPS-limit strategy based on limitFPSToMonitor, monitor Hz, and physics Hz.
     /// When monitor refresh >= physics Hz, uses VSync. Otherwise falls back to a
     /// software frame limiter at physics Hz with mailbox/immediate presentation.
