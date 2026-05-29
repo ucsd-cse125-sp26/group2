@@ -23,6 +23,8 @@
 namespace
 {
 constexpr int k_joinConnectionTimeoutMs = 5000;
+constexpr int k_hostedShutdownPollMs = 25;
+constexpr int k_hostedShutdownTimeoutMs = 1000;
 
 /// @brief Return a short log-friendly string for a ConnectError value.
 const char* connectErrorLogName(ConnectError error)
@@ -264,6 +266,10 @@ SDL_AppResult App::iterate()
             break;
 
         if (hostConfig->consumeLaunchRequest()) {
+            if (client.isConnected()) {
+                client.shutdown();
+            }
+
             HostConfigState config = hostConfig->draftConfig();
             hostConfigState = config;
 
@@ -295,16 +301,8 @@ SDL_AppResult App::iterate()
         }
 
         if (hostConfig->consumeShutdownRequest()) {
-            if (client.isConnected()) {
-                if (!client.sendServerShutdown()) {
-                    hostConfig->setLaunchError("Failed to request server shutdown");
-                } else {
-                    hostedServer.clearSession();
-                }
-            } else if (hostedServer.isRunning()) {
-                hostedServer.shutdown();
-                hostedServer.clearSession();
-            }
+            shutdownHostedServerGracefully();
+            client.shutdown();
         }
 
         if (hostConfig->consumeGoToLobbyRequest() && (hostedServer.isRunning() || client.isConnected())) {
@@ -313,6 +311,9 @@ SDL_AppResult App::iterate()
         }
 
         if (hostConfig->consumeBackToHomeRequest()) {
+            if (hostedServer.isRunning()) {
+                shutdownHostedServerGracefully();
+            }
             client.shutdown();
             transitionTo(Screen::Home);
         }
@@ -330,10 +331,10 @@ SDL_AppResult App::iterate()
 
         if (lobby->consumeReturnToMenu()) {
             const bool showServerShutdownNotice = lobby->consumeServerShutdownNotice();
-            client.shutdown();
             if (hostedServer.isRunning()) {
-                hostedServer.shutdown();
+                shutdownHostedServerGracefully();
             }
+            client.shutdown();
 
             transitionTo(Screen::Home);
             if (showServerShutdownNotice) {
@@ -355,6 +356,9 @@ SDL_AppResult App::iterate()
 
         if (game->consumeReturnToMainMenu()) {
             const bool showServerShutdownNotice = game->consumeServerShutdownNotice();
+            if (hostedServer.isRunning()) {
+                shutdownHostedServerGracefully();
+            }
             client.shutdown();
             transitionTo(Screen::Home);
             if (showServerShutdownNotice) {
@@ -448,7 +452,7 @@ void App::cleanup()
         user_settings::save(userSettingsPath, userSettings);
     }
     if (hostedServer.isRunning()) {
-        hostedServer.shutdown();
+        shutdownHostedServerGracefully();
     }
     client.shutdown();
     renderer.quit();
@@ -492,4 +496,28 @@ void App::showHomePopupMessage(const std::string& message)
     if (home) {
         home->setPopupMessage(message);
     }
+}
+
+bool App::shutdownHostedServerGracefully()
+{
+    if (!hostedServer.isRunning()) {
+        hostedServer.clearSession();
+        return true;
+    }
+
+    const bool requested = client.isConnected() && client.sendServerShutdown();
+    if (requested) {
+        for (int waitedMs = 0; waitedMs < k_hostedShutdownTimeoutMs; waitedMs += k_hostedShutdownPollMs) {
+            if (!hostedServer.isRunning()) {
+                hostedServer.clearSession();
+                return true;
+            }
+            client.poll();
+            SDL_Delay(k_hostedShutdownPollMs);
+        }
+    }
+
+    hostedServer.shutdown();
+    hostedServer.clearSession();
+    return false;
 }

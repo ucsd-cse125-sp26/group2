@@ -358,7 +358,16 @@ bool UdpSessionTransport::disconnect(std::uint64_t connectionId)
     hdr.kind = static_cast<std::uint8_t>(PacketKind::Disconnect);
     hdr.connectionId = connectionId;
     hdr.channel = static_cast<std::uint8_t>(ChannelId::ControlReliableOrdered);
-    const bool ok = sendPacket(*peer, hdr, nullptr, 0, 3);
+    bool ok = false;
+    if (peer->hasDirect) {
+        hdr.routeId = 0;
+        ok = sendDirect(peer->directAddr, hdr, nullptr, 0, 3) || ok;
+    }
+    if (peer->hasRelay) {
+        hdr.routeId = 1;
+        for (int i = 0; i < 3; ++i)
+            ok = sendViaRelay(*peer, hdr, nullptr, 0) || ok;
+    }
     peers_.erase(connectionId);
     return ok;
 }

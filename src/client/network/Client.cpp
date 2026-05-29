@@ -48,6 +48,10 @@ ConnectError Client::init(const char* addr,
                           int timeoutMs,
                           const std::optional<net::UdpSessionTransport::RelayConfig>& relay)
 {
+    if (networkThread_.joinable() || msgStream.socket != nullptr || usingUdpSession_) {
+        shutdown();
+    }
+
     transportConfig_ = transport;
 
     if (const char* envDelay = SDL_getenv("GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS")) {

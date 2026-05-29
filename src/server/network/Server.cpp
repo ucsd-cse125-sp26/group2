@@ -850,6 +850,18 @@ void Server::networkLoop()
             }
             SDL_Delay(1);
         }
+
+        std::vector<std::uint64_t> connectionIds;
+        {
+            std::shared_lock<std::shared_mutex> lock(stateMutex_);
+            connectionIds.reserve(clients.size());
+            for (const auto& [_, conn] : clients) {
+                if (conn.connectionId != 0)
+                    connectionIds.push_back(conn.connectionId);
+            }
+        }
+        for (std::uint64_t connectionId : connectionIds)
+            session_.disconnect(connectionId);
         return;
     }
 
