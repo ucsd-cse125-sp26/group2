@@ -1234,13 +1234,15 @@ bool Game::init(AppContext& ctx)
         authoredWeaponHandMountParams_[i] = getWeaponHandMountParams(static_cast<WeaponType>(i));
         authoredFPHandMountParams_[i] = getFirstPersonHandMountParams(static_cast<WeaponType>(i));
         makeFingerOffsetsPalmRelative(authoredFPHandMountParams_[i]);
-        applyAuthoredFirstPersonHandMountDefaults(modelFromRendererIndex(weaponModelIndices_[i]),
-                                                  getViewmodelParams(static_cast<WeaponType>(i)),
-                                                  authoredFPHandMountParams_[i]);
+        applyAuthoredFirstPersonHandMountDefaults(
+            modelFromRendererIndex(weaponModelIndices_[static_cast<std::size_t>(i)]),
+            getViewmodelParams(static_cast<WeaponType>(i)),
+            authoredFPHandMountParams_[i]);
         weaponHandMountParams_[i] = authoredWeaponHandMountParams_[i];
         fpHandMountParams_[i] = authoredFPHandMountParams_[i];
-        spawnerWeaponParams_[i] = defaultSpawnerModelParams(static_cast<WeaponType>(i));
     }
+    for (std::size_t i = 0; i < kWeaponAssets.size(); ++i)
+        spawnerWeaponParams_[i] = defaultSpawnerModelParams(static_cast<WeaponType>(i));
 
     // Grab the mouse into relative mode so camera look works immediately.
     // Goes through the shared helper so a fresh Game instance entering after a
@@ -3343,7 +3345,7 @@ SDL_AppResult Game::iterate()
                             // Capture per-weapon authoring data needed to derive the weaponWorld
                             // matrix from the right-hand bone matrix in the writeback loop.
                             c.hasWeapon = true;
-                            c.weaponModelIdx = weaponModelIndices_[static_cast<int>(gun.type)];
+                            c.weaponModelIdx = weaponModelIndices_[static_cast<std::size_t>(gun.type)];
                             c.weaponScale = tp.scale;
                             c.rightPalmAuthored = mounts.rightHand.palm;
                             // Identity fallback. The worker always overwrites this with the
@@ -4256,7 +4258,7 @@ SDL_AppResult Game::iterate()
         viewmodelDefaultsApplied_ = true;
     }
 
-    const int currentWeaponModelIdx = weaponModelIndices_[static_cast<int>(currentEquippedType_)];
+    const int currentWeaponModelIdx = weaponModelIndices_[static_cast<std::size_t>(currentEquippedType_)];
 
     // Build weapon viewmodel
     {
@@ -5439,10 +5441,10 @@ SDL_AppResult Game::iterate()
     // Weapon spawner model tweaker — per-weapon tuning for world pickup models.
     if (showWeaponSpawnerModelUI_) {
         if (ImGui::Begin("Weapon Spawner Tweaker", &showWeaponSpawnerModelUI_)) {
-            const char* spawnerWeaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
-            ImGui::Combo("Weapon", &spawnerTuneWeaponIdx_, spawnerWeaponNames, 4);
+            const char* spawnerWeaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun", "Shotgun"};
+            ImGui::Combo("Weapon", &spawnerTuneWeaponIdx_, spawnerWeaponNames, static_cast<int>(kWeaponAssets.size()));
 
-            auto& params = spawnerWeaponParams_[spawnerTuneWeaponIdx_];
+            auto& params = spawnerWeaponParams_[static_cast<std::size_t>(spawnerTuneWeaponIdx_)];
 
             ImGui::SeparatorText("Translation");
             ImGui::DragFloat("Right", &params.translation.x, 0.5f, -200.0f, 200.0f, "%.1f");
@@ -6376,16 +6378,17 @@ void Game::refreshRemoteRespawnRenderables()
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
             const int weaponIndex = static_cast<int>(spawner.type);
             if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
-                weaponAssetIds_[weaponIndex] < 0)
+                weaponAssetIds_[static_cast<std::size_t>(weaponIndex)] < 0)
             {
                 rend.modelIndex = -1;
                 rend.visible = false;
                 return;
             }
 
-            const int assetId = weaponAssetIds_[weaponIndex];
+            const auto weaponIdx = static_cast<std::size_t>(weaponIndex);
+            const int assetId = weaponAssetIds_[weaponIdx];
             const AssetEntry& asset = assets_.entry(assetId);
-            const WeaponSpawnerModelParams& params = spawnerWeaponParams_[weaponIndex];
+            const WeaponSpawnerModelParams& params = spawnerWeaponParams_[weaponIdx];
 
             rend.modelIndex = asset.modelIndex;
             rend.scale = params.scale;
@@ -6426,14 +6429,14 @@ void Game::refreshDroppedWeaponRenderables()
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
             const int weaponIndex = static_cast<int>(dw.type);
             if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
-                weaponAssetIds_[weaponIndex] < 0)
+                weaponAssetIds_[static_cast<std::size_t>(weaponIndex)] < 0)
             {
                 rend.modelIndex = -1;
                 rend.visible = false;
                 return;
             }
 
-            const int assetId = weaponAssetIds_[weaponIndex];
+            const int assetId = weaponAssetIds_[static_cast<std::size_t>(weaponIndex)];
             const AssetEntry& asset = assets_.entry(assetId);
 
             rend.modelIndex = asset.modelIndex;

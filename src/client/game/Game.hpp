@@ -12,6 +12,7 @@
 #include "debug/ClientPerfRecorder.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
+#include "ecs/AssetCatalog.hpp"
 #include "ecs/AssetRegistry.hpp"
 #include "ecs/components/GripPose.hpp"
 #include "ecs/components/Hitbox.hpp"
@@ -329,8 +330,16 @@ private:
 
     // Legacy model index aliases (for code that still uses raw indices).
     // TODO: migrate all call sites to assets_.modelIndex("name") and remove these.
-    int weaponModelIndices_[4] = {-1, -1, -1, -1};
-    int weaponAssetIds_[4] = {-1, -1, -1, -1};
+    std::array<int, kWeaponAssets.size()> weaponModelIndices_ = [] {
+        std::array<int, kWeaponAssets.size()> values{};
+        values.fill(-1);
+        return values;
+    }();
+    std::array<int, kWeaponAssets.size()> weaponAssetIds_ = [] {
+        std::array<int, kWeaponAssets.size()> values{};
+        values.fill(-1);
+        return values;
+    }();
     int viewmodelLeftHandModelIdx_ = -1;
     int viewmodelRightHandModelIdx_ = -1;
     int handMountDebugMarkerModelIdx_ = -1;
@@ -585,9 +594,10 @@ private:
     HandMountDebugTarget handMountDebugTarget_{};
 
     // Weapon spawner model tuning (per weapon type, live-adjustable via ImGui)
-    WeaponSpawnerModelParams spawnerWeaponParams_[4]; ///< Runtime-tunable copy; initialised from spawner defaults.
-    int spawnerTuneWeaponIdx_ = 0;                    ///< Which weapon type is being tuned.
-    bool showWeaponSpawnerModelUI_ = false;           ///< Show the Weapon Spawner Model Tweaker window.
+    std::array<WeaponSpawnerModelParams, kWeaponAssets.size()>
+        spawnerWeaponParams_{};             ///< Runtime-tunable copy; initialised from spawner defaults.
+    int spawnerTuneWeaponIdx_ = 0;          ///< Which weapon type is being tuned.
+    bool showWeaponSpawnerModelUI_ = false; ///< Show the Weapon Spawner Model Tweaker window.
 
     // Animation subsystem — shared rig + clip library + skinning backend.
     // CharacterAnimators (one per animated entity) hold non-owning refs.
