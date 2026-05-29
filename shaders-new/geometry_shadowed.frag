@@ -103,10 +103,11 @@ void main()
 
         float shadow_i = dynamicShadow_i * staticShadow_i;
 
-        float attenutaion = 1.0f / (r * r);
+        //float attenutaion = 1.0f / (r * r);
+        float attenutaion = 1.0f / (r);
 
         float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
-        irradiance += shadow_i * pLight_i.color * pLight_i.intensity * attenutaion * cosT_i;
+        irradiance += shadow_i * pLight_i.color * (.001f * pLight_i.intensity) * attenutaion * cosT_i;
 
     }
 
