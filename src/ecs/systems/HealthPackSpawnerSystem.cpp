@@ -27,8 +27,10 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
     view.each([&](entt::entity /*player*/,
                   const Position& pos,
                   const CollisionShape& shape,
-                  Health playerHealth) {
-        if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasPack)
+                  Health& playerHealth) {
+        const bool canHeal = playerHealth.health < healthMax || playerHealth.armor < armorMax;
+        if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasPack &&
+            canHeal)
         {
             spawner.hasPack = false;
             spawner.spawnCooldown = healthPackCooldownTime;

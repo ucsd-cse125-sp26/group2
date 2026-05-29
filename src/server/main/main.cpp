@@ -176,8 +176,8 @@ int main(int argc, char* argv[])
     program.add_argument("--legacy-tcp").flag().help("Force legacy TCP transport for hosted-client launches");
     program.add_argument("--killsToWin")
         .scan<'i', int>()
-        .default_value(10)
-        .help("Kills required to win a match (default: 10)");
+        .default_value(25)
+        .help("Kills required to win a match (default: 25)");
     program.add_argument("--max-players")
         .scan<'i', int>()
         .help("Maximum accepted players, clamped to 2..128 (default: config global-discovery.max-players)");

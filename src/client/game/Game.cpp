@@ -29,6 +29,7 @@
 #include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/FireField.hpp"
 #include "ecs/components/GrenadeState.hpp"
+#include "ecs/components/HealthPackSpawner.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -1056,6 +1057,18 @@ bool Game::init(AppContext& ctx)
                 SDL_Log("[client] WARNING: grenade model '%s' failed to load", kGrenadeModel.filename);
         }
 
+        {
+            const int id = addAssetDefinition(assets_, kMedkitModel);
+            medkitModelIdx_ = renderer->loadSceneModel(kMedkitModel.filename,
+                                                       kMedkitModel.loadTranslation,
+                                                       kMedkitModel.loadScale,
+                                                       kMedkitModel.flipUVs);
+            assets_.setModelIndex(id, medkitModelIdx_);
+
+            if (medkitModelIdx_ < 0)
+                SDL_Log("[client] WARNING: medkit model '%s' failed to load", kMedkitModel.filename);
+        }
+
         viewmodelLeftHandModelIdx_ = renderer->loadSceneModel("viewmodel_hand_left.glb", glm::vec3{0.0f}, 1.0f, false);
         viewmodelRightHandModelIdx_ =
             renderer->loadSceneModel("viewmodel_hand_right.glb", glm::vec3{0.0f}, 1.0f, false);
@@ -2045,6 +2058,7 @@ SDL_AppResult Game::iterate()
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
         refreshDroppedWeaponRenderables();
+        refreshRemoteHealthPackRenderables();
         // Fall through to render the current frame normally.
     } else {
         frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
@@ -2565,6 +2579,7 @@ SDL_AppResult Game::iterate()
         refreshDroppedWeaponRenderables();
         phaseSnap(phaseStats.refreshDroppedWeaponsMs);
         refreshRemotePowerupRenderables();
+        refreshRemoteHealthPackRenderables();
         phaseSnap(phaseStats.refreshPowerupsMs);
     }
 
@@ -6585,6 +6600,38 @@ void Game::refreshRemotePowerupRenderables()
             rend.modelIndex = powerupIndex;
             rend.scale = glm::vec3(kRocketProjectile.loadScale);
             rend.visible = spawner.hasPowerup;
+        });
+}
+
+void Game::refreshRemoteHealthPackRenderables()
+{
+    registry.view<Position, HealthPackSpawner, CollisionShape>().each(
+        [&](entt::entity e, const Position&, const HealthPackSpawner& spawner, const CollisionShape&) {
+            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            const WeaponSpawnerModelParams params{
+                .scale = kMedkitModel.renderScale,
+                .translation = kMedkitModel.renderTranslation,
+                .yawOffset = 0.0f,
+                .pitchOffset = 0.0f,
+                .rollOffset = 0.0f,
+                .spinDegreesPerSecond = 45.0f,
+                .bobAmplitude = 6.0f,
+                .bobHz = 0.6f,
+            };
+            const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+
+            rend.modelIndex = medkitModelIdx_;
+            rend.scale = params.scale;
+            if (spawner.hasPack) {
+                static constexpr float k_twoPi = 6.28318530718f;
+                rend.translation =
+                    params.translation +
+                    glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
+            } else {
+                rend.translation = params.translation;
+            }
+            rend.orientation = spawnerModelRotation(params, t, spawner.hasPack);
+            rend.visible = spawner.hasPack && medkitModelIdx_ >= 0;
         });
 }
 

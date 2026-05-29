@@ -49,6 +49,14 @@ inline const AssetDefinition kGrenadeModel{
     .renderScale = {20.0f, 20.0f, 20.0f},
 };
 
+inline const AssetDefinition kMedkitModel{
+    .name = "medkit",
+    .filename = "medkit.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {20.0f, 20.0f, 20.0f},
+};
+
 inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAssets{{
     {.name = "weapon_rifle",
      .filename = "assault_rifle.glb",

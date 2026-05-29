@@ -258,7 +258,7 @@ void ServerGame::run()
         glm::vec3 pos = healthPackSpawner.pos;
 
         const entt::entity spawner = registry.create();
-        registry.emplace<WeaponSpawner>(
+        registry.emplace<HealthPackSpawner>(
             spawner,
             HealthPackSpawner{.spawnCooldown = systems::healthPackCooldownTime, .hasPack = true});
         CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};

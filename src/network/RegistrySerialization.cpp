@@ -13,6 +13,7 @@
 #include "ecs/components/FireField.hpp"
 #include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
+#include "ecs/components/HealthPackSpawner.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/Orientation.hpp"
 #include "ecs/components/PlayerColor.hpp"
@@ -170,7 +171,8 @@ using Synced = std::tuple<entt::entity,
                           FireField,
                           PlayerColor,
                           PlayerName,
-                          PowerupSpawner>;
+                          PowerupSpawner,
+                          HealthPackSpawner>;
 
 // ── PR-10: snapshot delta encoding ──────────────────────────────────────
 
