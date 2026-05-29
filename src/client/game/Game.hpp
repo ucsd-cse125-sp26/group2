@@ -300,7 +300,7 @@ private:
     std::unique_ptr<WorkerPool> workerPool_;
 
     // Runtime-tunable loop settings (exposed via ImGui)
-    float mouseSensitivity = 0.0007f;      ///< Radians per pixel of mouse movement.
+    float mouseSensitivity = user_settings::kDefaultMouseSensitivity; ///< Radians per pixel of mouse movement.
     float horizontalFovDegrees = 90.0f;    ///< Player-facing horizontal camera field of view in degrees.
     bool renderSeparateFromPhysics = true; ///< Render every iterate() with interpolation (true)
                                            ///  vs only after a physics tick (false).

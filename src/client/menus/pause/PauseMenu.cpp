@@ -7,8 +7,6 @@
 
 namespace
 {
-constexpr float k_minMouseSensitivity = 0.0001f;
-constexpr float k_maxMouseSensitivity = 0.005f;
 constexpr float k_minFovDegrees = 50.0f;
 constexpr float k_maxFovDegrees = 120.0f;
 constexpr float k_minGamepadSensitivity = 1.0f;
@@ -284,9 +282,19 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             ImGui::Separator();
 
             const float previousSensitivity = draftMouseSensitivity;
-            ImGui::SliderFloat(
-                "Mouse Sensitivity", &draftMouseSensitivity, k_minMouseSensitivity, k_maxMouseSensitivity, "%.4f");
-            draftMouseSensitivity = std::clamp(draftMouseSensitivity, k_minMouseSensitivity, k_maxMouseSensitivity);
+            float displayedMouseSensitivity =
+                draftMouseSensitivity * user_settings::kMouseSensitivityDisplayScale;
+            ImGui::SliderFloat("Mouse Sensitivity",
+                               &displayedMouseSensitivity,
+                               user_settings::kMinMouseSensitivity *
+                                   user_settings::kMouseSensitivityDisplayScale,
+                               user_settings::kMaxMouseSensitivity *
+                                   user_settings::kMouseSensitivityDisplayScale,
+                               "%.3f");
+            draftMouseSensitivity = displayedMouseSensitivity / user_settings::kMouseSensitivityDisplayScale;
+            draftMouseSensitivity = std::clamp(draftMouseSensitivity,
+                                               user_settings::kMinMouseSensitivity,
+                                               user_settings::kMaxMouseSensitivity);
             if (draftMouseSensitivity != previousSensitivity)
                 dirty = true;
 

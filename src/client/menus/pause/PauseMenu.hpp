@@ -71,7 +71,8 @@ private:
     bool menuOpen = false;                                   ///< True when any pause overlay page is open.
     bool settingsOpen = false;                               ///< True when the settings page is active.
     InputBindings draftBindings = InputBindings::defaults(); ///< Editable binding draft.
-    float draftMouseSensitivity = 0.0007f;                   ///< Editable mouse-sensitivity draft.
+    float draftMouseSensitivity =
+        user_settings::kDefaultMouseSensitivity;           ///< Editable mouse-sensitivity draft.
     float draftHorizontalFovDegrees = 90.0f;                 ///< Editable horizontal-FOV draft.
     bool draftShowControllerBindings = false;                ///< Editable binding device selector.
     float draftGamepadYawSensitivity = 6.0f;                 ///< Editable gamepad yaw-sensitivity draft.
