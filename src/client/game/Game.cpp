@@ -831,6 +831,7 @@ bool Game::init(AppContext& ctx)
         currentMatchPhase = latestMatchState->phase;
         countdownTimer = latestMatchState->countdownTimer;
     }
+    client->resetInputHistory();
 
     physics::diag::setFilePrefix("client");
     const char* phaseDiagEnv = std::getenv("GROUP2_PHASE_DIAG");

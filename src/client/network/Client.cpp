@@ -465,6 +465,13 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     return send(buf, totalLen);
 }
 
+void Client::resetInputHistory()
+{
+    inputRing_ = {};
+    inputRingHead_ = 0;
+    inputRingCount_ = 0;
+}
+
 bool Client::sendShotIntent(std::uint32_t shotInputTick, std::uint16_t targetClientId, const AnimSnapshot& targetAnim)
 {
     // PR-27 wire format:
