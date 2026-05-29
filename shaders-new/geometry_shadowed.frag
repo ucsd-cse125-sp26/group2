@@ -25,9 +25,12 @@ layout(location = 2) in vec3 frag_worldPos;
 layout(location = 3) in vec4 frag_tangent;
 
 layout(set = 2, binding = 0) uniform sampler2D tex;
-layout(set = 2, binding = 1) uniform samplerCubeArrayShadow pointLightShadowMaps;
-layout(set = 2, binding = 2) uniform sampler2D normalTex;
-layout(set = 2, binding = 3) uniform sampler2D metallicRoughnessTex;
+layout(set = 2, binding = 1) uniform sampler2D normalTex;
+layout(set = 2, binding = 2) uniform sampler2D metallicRoughnessTex;
+
+layout(set = 2, binding = 3) uniform samplerCubeArrayShadow staticPointLightShadowMaps;
+layout(set = 2, binding = 4) uniform samplerCubeArrayShadow dynamicPointLightShadowMaps;
+
 
 layout(set = 3, binding = 0) uniform Material {
     vec4 diffuse;
@@ -95,12 +98,16 @@ void main()
         float depth = depthA - depthB / dominantAxis;
 
 
-        float shadow_i = texture(pointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
+        float staticShadow_i = texture(staticPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
+        float dynamicShadow_i = texture(dynamicPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
 
-        float attenutaion = 1.0f / (r * r);
+        float shadow_i = dynamicShadow_i * staticShadow_i;
+
+        //float attenutaion = 1.0f / (r * r);
+        float attenutaion = 1.0f / (r);
 
         float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
-        irradiance += shadow_i * pLight_i.color * pLight_i.intensity * attenutaion * cosT_i;
+        irradiance += shadow_i * pLight_i.color * (.001f * pLight_i.intensity) * attenutaion * cosT_i;
 
     }
 

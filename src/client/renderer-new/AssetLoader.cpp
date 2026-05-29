@@ -323,7 +323,7 @@ bool AssetLoader::loadModel(const ModelIdInt id,
             aiString texPath;
             const bool hasBaseColor = getMaterialTexturePath(*mat, aiTextureType_BASE_COLOR, texPath);
             if (hasBaseColor || getMaterialTexturePath(*mat, aiTextureType_DIFFUSE, texPath)) {
-                mat_.texId_[0] = loadEmbeddedMaterialTexture(*asimpSceneStructurePtr, assetIdNameSpace, texPath);
+                mat_.diffuseTexture = loadEmbeddedMaterialTexture(*asimpSceneStructurePtr, assetIdNameSpace, texPath);
             }
 
             if (getMaterialTexturePath(*mat, aiTextureType_NORMALS, texPath))

@@ -143,6 +143,25 @@ bool NewRenderer::init(SDL_Window* window)
 
     skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
 
+    dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
+    staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
+
+    cubeFaceTargets_[0] = glm::vec3(1, 0, 0);
+    cubeFaceTargets_[1] = glm::vec3(-1, 0, 0);
+    cubeFaceTargets_[2] = glm::vec3(0, 1, 0);
+    cubeFaceTargets_[3] = glm::vec3(0, -1, 0);
+    cubeFaceTargets_[4] = glm::vec3(0, 0, 1);
+    cubeFaceTargets_[5] = glm::vec3(0, 0, -1);
+
+    cubeFaceUps_[0] = glm::vec3(0, -1, 0);
+    cubeFaceUps_[1] = glm::vec3(0, -1, 0);
+    cubeFaceUps_[2] = glm::vec3(0, 0, 1);
+    cubeFaceUps_[3] = glm::vec3(0, 0, -1);
+    cubeFaceUps_[4] = glm::vec3(0, -1, 0);
+    cubeFaceUps_[5] = glm::vec3(0, -1, 0);
+
+    firstFrame_ = true;
+
     return true;
 }
 
@@ -196,7 +215,7 @@ bool NewRenderer::createGeometryPipeline()
     Boilerplate::ShaderInfo fragmentShader{};
     fragmentShader.path = "shaders-new/geometry_shadowed.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    fragmentShader.samplerCount = 4;
+    fragmentShader.samplerCount = MATERIAL_MAX_TEXTURE_COUNT + 2;
     fragmentShader.uniformBufferCount = 3;
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
@@ -328,29 +347,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         }
     }
 
-    ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
-    // constexpr uint32_t shadowSize = 2048;
-    //  constexpr uint32_t shadowSize = 1024;
-    constexpr uint32_t shadowSize = 1024;
-    constexpr Uint8 numCubeFaces = 6;
-
-    static glm::vec3 cubeFaceTargets[numCubeFaces];
-    static glm::vec3 cubeFaceUps[numCubeFaces];
-
-    cubeFaceTargets[0] = glm::vec3(1, 0, 0);
-    cubeFaceTargets[1] = glm::vec3(-1, 0, 0);
-    cubeFaceTargets[2] = glm::vec3(0, 1, 0);
-    cubeFaceTargets[3] = glm::vec3(0, -1, 0);
-    cubeFaceTargets[4] = glm::vec3(0, 0, 1);
-    cubeFaceTargets[5] = glm::vec3(0, 0, -1);
-
-    cubeFaceUps[0] = glm::vec3(0, -1, 0);
-    cubeFaceUps[1] = glm::vec3(0, -1, 0);
-    cubeFaceUps[2] = glm::vec3(0, 0, 1);
-    cubeFaceUps[3] = glm::vec3(0, 0, -1);
-    cubeFaceUps[4] = glm::vec3(0, -1, 0);
-    cubeFaceUps[5] = glm::vec3(0, -1, 0);
-
     std::vector<PointLight> sampleLights;
     PointLight pl0{};
     pl0.position = glm::vec3(300, 100.0f, 500);
@@ -360,43 +356,13 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     sampleLights.push_back(pl0);
     setPointLights(sampleLights);
 
-    SDL_GPUTexture* shadowMap = nullptr;
-
-    // SDL_Log("farPlane=%f numLights=%u",
-    //     sceneLightInfo_.pointLightFarPlane,
-    //     sceneLightInfo_.numPointLights);
-
-    if (sceneLightInfo_.numPointLights < 1) {
-        shadowMap = Boilerplate::createEmptyTextureD32F(device_, 1, 1, true, MAX_POINT_LIGHTS);
-    } else {
-        // std::cout << "NewRenderer::drawFrame: sceneLightInfo_.numPointLights = " << sceneLightInfo_.numPointLights <<
-        // std::endl;
-        shadowMap = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
-
-        glm::mat4 shadowProjection = glm::perspective(
-            glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
-        shadowProjection[1][1] *= -1;
-        for (Uint8 iLight = 0; iLight < sceneLightInfo_.numPointLights; iLight++) {
-            PointLight& light = sceneLightInfo_.pointLights[iLight];
-            glm::vec3 yNegatedLightPosition = light.position;
-            // yNegatedLightPosition.y *= -1.0f;
-
-            for (int face = 0; face < numCubeFaces; face++) {
-                glm::vec3& iCubeFaceTarget = cubeFaceTargets[face];
-                glm::vec3& iCubeFaceUp = cubeFaceUps[face];
-
-                glm::mat4 shadowView =
-                    glm::lookAt(yNegatedLightPosition, yNegatedLightPosition + iCubeFaceTarget, iCubeFaceUp);
-                const glm::mat4 shadowViewProjection = shadowProjection * shadowView;
-
-                drawGeometryDepthPass(shadowMap, iLight * 6 + face, cmd, shadowViewProjection);
-            }
-        }
+    if (firstFrame_ && !Asset::modelInstances_.empty()) {
+        onFirstFrame(cmd);
+        std::cout << "FIRST FRAME" << std::endl;
+        firstFrame_ = false;
     }
 
-    ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
-    // shadowMapBindings_.push({shadowMap, depthSampler_});
-    shadowMapTextureDeletionQueue.push(shadowMap);
+    drawToShadowMap(cmd,dynamicShadowMaps_,false,true,true);
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
@@ -415,15 +381,9 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     const Uint64 t3 = SDL_GetPerformanceCounter();
     lastSubmitMs_ = ticksToMs(t3 - t2, freq);
 
-    // for (auto smb : shadowMapBindings_) {
-    // for (auto smb : shadowMapBindings_) {
-    if (shadowMapTextureDeletionQueue.size() > 1) {
-        SDL_ReleaseGPUTexture(device_, shadowMapTextureDeletionQueue.front());
-        shadowMapTextureDeletionQueue.pop();
-    }
-
     // TODO(graphics): if `pendingScreenshotPath_` is non-empty, schedule a
     // swapchain readback and write a PNG.  See `requestScreenshot` doc.
+
 }
 
 void NewRenderer::setMainCamera(
@@ -447,29 +407,73 @@ void NewRenderer::setMainCamera(
 void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
                                         Uint8 layer,
                                         SDL_GPUCommandBuffer* cmd,
-                                        const glm::mat4& shadowViewProjection)
+                                        const glm::mat4& shadowViewProjection,
+                                        bool staticGeometry,
+                                        bool entityGeometry,
+                                        bool skinnedGeometry)
 {
+    if (!staticGeometry && !entityGeometry && !skinnedGeometry) {
+        return;
+    }
     SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture, layer, true);
 
-    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
-    SDL_BindGPUGraphicsPipeline(geometryPass, depthPipeline_);
+    SDL_GPURenderPass* geometryDepthPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
+    SDL_BindGPUGraphicsPipeline(geometryDepthPass, depthPipeline_);
 
     SDL_PushGPUVertexUniformData(cmd, 0, &shadowViewProjection, sizeof(glm::mat4));
 
-    drawWorldModelInstances(geometryPass, cmd, true);
-    drawEntityModels(geometryPass, cmd, true);
+    if (staticGeometry)
+        drawWorldModelInstances(geometryDepthPass, cmd, true);
+    if (entityGeometry)
+        drawEntityModels(geometryDepthPass, cmd, true);
+    if (skinnedGeometry)
+        skinnedRenderer_.drawDepth(geometryDepthPass, cmd);
 
-    // Rasterise the skinned player rig into the shadow map so the player
-    // casts a shadow (the shadow view-projection is already at vertex slot 0).
-    skinnedRenderer_.drawDepth(geometryPass, cmd);
-
-    SDL_EndGPURenderPass(geometryPass);
+    SDL_EndGPURenderPass(geometryDepthPass);
 }
+
+void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *shadowMapTexture, bool staticGeometry, bool entityGeometry, bool skinnedGeometry)
+{
+    glm::mat4 shadowProjection = glm::perspective(
+    glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
+    shadowProjection[1][1] *= -1;
+    for (Uint8 iLight = 0; iLight < sceneLightInfo_.numPointLights; iLight++) {
+        PointLight& light = sceneLightInfo_.pointLights[iLight];
+
+        for (int face = 0; face < NUM_CUBE_FACES; face++) {
+            glm::vec3& iCubeFaceTarget = cubeFaceTargets_[face];
+            glm::vec3& iCubeFaceUp = cubeFaceUps_[face];
+
+            glm::mat4 shadowView =
+                glm::lookAt(light.position, light.position + iCubeFaceTarget, iCubeFaceUp);
+            const glm::mat4 shadowViewProjection = shadowProjection * shadowView;
+
+            drawGeometryDepthPass(shadowMapTexture,
+                            iLight * NUM_CUBE_FACES + face,
+                                 cmd,
+                                 shadowViewProjection,
+                                staticGeometry,
+                                entityGeometry,
+                                skinnedGeometry
+                );
+        }
+    }
+
+}
+
+void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer *cmd)
+{
+    drawToShadowMap(cmd,staticShadowMaps_,true,false,false);
+}
+
 
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUTextureSamplerBinding shadowMapBinding{shadowMapTextureDeletionQueue.back(), depthSampler_};
-    SDL_BindGPUFragmentSamplers(renderPass, 1, &shadowMapBinding, 1);
+    SDL_GPUTextureSamplerBinding shadowBindings[2];
+    shadowBindings[0] = {staticShadowMaps_, depthSampler_};
+    shadowBindings[1] = {dynamicShadowMaps_, depthSampler_};
+
+    SDL_BindGPUFragmentSamplers(renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings, 2);
 
     SDL_PushGPUFragmentUniformData(cmd, 2, &sceneLightInfo_, sizeof(LightUBO));
 }
@@ -657,7 +661,7 @@ void NewRenderer::drawModel(ModelIdInt modelId,
         SDL_GPUTexture* normalTexture = nullptr;
         SDL_GPUTexture* metallicRoughnessTexture = nullptr;
         if (material != nullptr) {
-            const TexIdInt texId = material->texId_[0];
+            const TexIdInt texId = material->diffuseTexture;
             if (Asset::textures_.contains(texId))
                 texture = Asset::textures_.at(texId).tex;
             if (Asset::textures_.contains(material->normalTexture))
@@ -674,14 +678,12 @@ void NewRenderer::drawModel(ModelIdInt modelId,
         if (metallicRoughnessTexture == nullptr)
             metallicRoughnessTexture = texture_;
 
-        SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(texture, sampler_);
-        SDL_BindGPUFragmentSamplers(renderPass, 0, &textureBinding, 1);
-
         SDL_GPUTextureSamplerBinding pbrTextureBindings[] = {
+            Boilerplate::makeTextureSamplerBinding(texture, sampler_),
             Boilerplate::makeTextureSamplerBinding(normalTexture, sampler_),
             Boilerplate::makeTextureSamplerBinding(metallicRoughnessTexture, sampler_),
         };
-        SDL_BindGPUFragmentSamplers(renderPass, 2, pbrTextureBindings, 2);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, pbrTextureBindings, MATERIAL_MAX_TEXTURE_COUNT);
 
         glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
         if (material != nullptr)
@@ -948,7 +950,7 @@ int NewRenderer::loadSceneModel(
             continue;
 
         Asset::Material& mat = Asset::materials_.at(matId);
-        uploadTexture(mat.texId_[0], SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB);
+        uploadTexture(mat.diffuseTexture, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB);
         uploadTexture(mat.normalTexture, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM);
         uploadTexture(mat.metallicRoughnessTexture, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM);
     }

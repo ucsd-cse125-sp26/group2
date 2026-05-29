@@ -7,7 +7,7 @@
 
 #pragma once
 
-#define TEX_CHANNELS 1
+#define MATERIAL_MAX_TEXTURE_COUNT 3
 #define MODEL_ROOT_NODE_INDEX 0
 #define ASSETS_DIR "assets"
 #include "glm/glm.hpp"
@@ -73,7 +73,7 @@ struct Material
     float nSpecular = 32.0f;
     float nIor = 1.0f;
     bool hasPhongData_ = false;
-    TexIdInt texId_[TEX_CHANNELS] = {};
+    TexIdInt diffuseTexture = 0;
     TexIdInt normalTexture = 0;
     TexIdInt metallicRoughnessTexture = 0;
 };
