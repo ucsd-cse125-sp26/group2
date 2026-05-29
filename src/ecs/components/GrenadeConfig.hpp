@@ -53,7 +53,7 @@ struct GrenadeConfig
     float fireDps = 0.0f;
 
     // Cosmetic
-    int modelId = 1;                     ///< Reuses rocket model for v1.
+    int modelId = 1;                     ///< Legacy model id; client rendering resolves grenade.glb by WeaponType.
     glm::vec3 tint = {1.0f, 1.0f, 1.0f}; ///< RGB multiplier for projectile rendering.
 };
 

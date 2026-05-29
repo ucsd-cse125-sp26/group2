@@ -519,6 +519,20 @@ inline const FirstPersonHandMountParams& getFirstPersonHandMountParams(WeaponTyp
 /// @brief Returns world weapon pickup/spawner model params for a weapon type.
 inline const WeaponSpawnerModelParams& getWeaponSpawnerModelParams(WeaponType type)
 {
+    static const WeaponSpawnerModelParams k_grenadeParams{
+        .scale = {20.0f, 20.0f, 20.0f},
+        .translation = {0.0f, 10.0f, 0.0f},
+        .yawOffset = 0.0f,
+        .pitchOffset = 0.0f,
+        .rollOffset = 0.0f,
+        .spinDegreesPerSecond = 45.0f,
+        .bobAmplitude = 6.0f,
+        .bobHz = 0.6f,
+    };
+    if (type == WeaponType::HEGrenade || type == WeaponType::Molotov || type == WeaponType::Sticky) {
+        return k_grenadeParams;
+    }
+
     static const std::array<WeaponSpawnerModelParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle
         {.scale = {16.0f, 16.0f, 16.0f},

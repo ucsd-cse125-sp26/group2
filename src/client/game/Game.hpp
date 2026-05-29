@@ -336,6 +336,7 @@ private:
     int handMountDebugMarkerModelIdx_ = -1;
 
     int rocketProjectileModelIdx_ = -1;
+    int grenadeModelIdx_ = -1;
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
