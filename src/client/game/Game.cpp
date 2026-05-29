@@ -963,7 +963,9 @@ bool Game::init(AppContext& ctx)
                 weaponModelIndices_[i] =
                     renderer->loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
                 assets_.setModelIndex(id, weaponModelIndices_[i]);
-                if (weaponModelIndices_[i] < 0)
+                if (weaponModelIndices_[i] >= 0)
+                    renderer->setModelScenePass(weaponModelIndices_[i], false);
+                else
                     SDL_Log("[client] WARNING: weapon model '%s' failed to load", def.filename);
             }
         }
@@ -977,7 +979,9 @@ bool Game::init(AppContext& ctx)
                                                                  kRocketProjectile.flipUVs);
             assets_.setModelIndex(id, rocketProjectileModelIdx_);
 
-            if (rocketProjectileModelIdx_ < 0)
+            if (rocketProjectileModelIdx_ >= 0)
+                renderer->setModelScenePass(rocketProjectileModelIdx_, false);
+            else
                 SDL_Log("[client] WARNING: rocket projectile model '%s' failed to load", kRocketProjectile.filename);
         }
 
@@ -6277,6 +6281,14 @@ void Game::quit()
     particleSystem.quit();
     hud_.quit();
     if (renderer) {
+        for (const AssetEntry& asset : assets_.entries()) {
+            if (asset.modelIndex >= 0)
+                renderer->setModelScenePass(asset.modelIndex, false);
+        }
+        renderer->setEntityRenderList({});
+        renderer->setWeaponViewmodel({});
+        renderer->setPointLights({});
+        renderer->setSkinnedFrame({}, {});
         // TODO(renderer-migration): renderer->setParticleSystem(nullptr);
         renderer->setParticleSystem(nullptr);
         renderer->setHudTexture(nullptr);
