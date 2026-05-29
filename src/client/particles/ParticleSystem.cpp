@@ -17,18 +17,24 @@ bool ParticleSystem::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL
         return false;
     }
 
-    // SDF font — scan common system font paths; silently skip if none found
-    const char* fontPaths[] = {"/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf",       // Fedora / modern GNOME
-                               "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",        // Debian/Ubuntu
-                               "/usr/share/fonts/TTF/DejaVuSans.ttf",                    // Arch
-                               "/usr/share/fonts/noto/NotoSans-Regular.ttf",             // Noto (various distros)
-                               "/usr/share/fonts/liberation/LiberationSans-Regular.ttf", // Liberation
-                               "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                               "/System/Library/Fonts/Supplemental/Arial.ttf",           // macOS (Supplemental)
-                               "/Library/Fonts/Arial.ttf",                               // macOS (Library)
-                               "/System/Library/Fonts/SFNS.ttf",                         // macOS (San Francisco)
-                               "C:/Windows/Fonts/segoeui.ttf",                           // Windows
-                               nullptr};
+    const char* base = SDL_GetBasePath();
+    const std::string customFont =
+        std::string(base ? base : "") + "assets/fonts/SpaceGrotesk.ttf";
+
+    const char* fontPaths[] = {
+        customFont.c_str(),
+        "/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
+        "/System/Library/Fonts/SFNS.ttf",
+        "C:/Windows/Fonts/segoeui.ttf",
+        nullptr
+    };
     for (int i = 0; fontPaths[i]; ++i) {
         if (sdf_.init(dev, fontPaths[i]))
             break;
