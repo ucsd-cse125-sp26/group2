@@ -366,12 +366,16 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     //     sceneLightInfo_.pointLightFarPlane,
     //     sceneLightInfo_.numPointLights);
 
+    const Uint64 tShadowAlloc0 = SDL_GetPerformanceCounter();
     if (sceneLightInfo_.numPointLights < 1) {
         shadowMap = Boilerplate::createEmptyTextureD32F(device_, 1, 1, true, MAX_POINT_LIGHTS);
     } else {
         // std::cout << "NewRenderer::drawFrame: sceneLightInfo_.numPointLights = " << sceneLightInfo_.numPointLights <<
         // std::endl;
         shadowMap = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
+    }
+    const Uint64 tShadowAlloc1 = SDL_GetPerformanceCounter();
+    if (sceneLightInfo_.numPointLights >= 1) {
 
         glm::mat4 shadowProjection = glm::perspective(
             glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
@@ -394,6 +398,8 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         }
     }
 
+    const Uint64 tShadowPasses1 = SDL_GetPerformanceCounter();
+
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
     // shadowMapBindings_.push({shadowMap, depthSampler_});
     shadowMapTextureDeletionQueue.push(shadowMap);
@@ -401,7 +407,9 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
 
+    const Uint64 tGeom0 = SDL_GetPerformanceCounter();
     drawGeometryPass(sceneColor_, cmd);
+    const Uint64 tGeom1 = SDL_GetPerformanceCounter();
     drawWeaponPass(sceneColor_, cmd);
     drawFxaaPass(sceneColor_, swapchain, cmd);
     drawHudPass(swapchain, cmd);
@@ -409,6 +417,27 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     const Uint64 t2 = SDL_GetPerformanceCounter();
     lastRecordMs_ = ticksToMs(t2 - t1, freq);
+
+    // TEMP attribution: accumulate sub-pass costs and log averages periodically.
+    {
+        static double accShadowAlloc = 0.0, accShadowPasses = 0.0, accGeom = 0.0, accRest = 0.0, accRec = 0.0;
+        static int accN = 0;
+        const double msShadowAlloc = ticksToMs(tShadowAlloc1 - tShadowAlloc0, freq);
+        const double msShadowPasses = ticksToMs(tShadowPasses1 - tShadowAlloc1, freq);
+        const double msGeom = ticksToMs(tGeom1 - tGeom0, freq);
+        const double msRest = ticksToMs(t2 - tGeom1, freq);
+        accShadowAlloc += msShadowAlloc;
+        accShadowPasses += msShadowPasses;
+        accGeom += msGeom;
+        accRest += msRest;
+        accRec += lastRecordMs_;
+        if (++accN >= 300) {
+            SDL_Log("[attr] rec=%.3f | shadowAlloc=%.3f shadowPasses=%.3f geometry=%.3f rest(weapon+fxaa+hud+ui)=%.3f",
+                    accRec / accN, accShadowAlloc / accN, accShadowPasses / accN, accGeom / accN, accRest / accN);
+            accShadowAlloc = accShadowPasses = accGeom = accRest = accRec = 0.0;
+            accN = 0;
+        }
+    }
 
     SDL_SubmitGPUCommandBuffer(cmd);
 
