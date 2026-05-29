@@ -179,7 +179,7 @@ HostConfigState HostConfig::draftConfig() const
             .advertiseGlobal = true,
             .advertiseLan = true,
             .serverName = std::string(server_name::k_default),
-            .killsToWin = 10,
+            .killsToWin = 25,
             .maxPlayers = 8,
         };
 

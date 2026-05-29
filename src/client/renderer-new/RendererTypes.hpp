@@ -18,14 +18,6 @@
 
 // ─── Existing types ──────────────────────────────────────────────────────────
 
-/// @brief Anti-aliasing mode selection — exposed to ImGui.
-enum class AAMode : int
-{
-    Off = 0,      ///< No anti-aliasing.
-    SMAA_1x = 1,  ///< Spatial SMAA only, zero ghosting.
-    SMAA_T2x = 2, ///< 2-sample temporal + spatial SMAA (recommended).
-};
-
 /// @brief Live toggles for every render system — exposed to ImGui.
 ///
 /// All default to true (everything on).  The renderer checks these each
@@ -77,9 +69,9 @@ struct EntityRenderCmd
 struct PointLight
 {
     glm::vec3 position{0.0f}; ///< World-space position.
-    glm::vec3 color{1.0f};    ///< Light colour (linear RGB).
     float intensity = 1.0f;   ///< Brightness multiplier.
-    float range = 500.0f;     ///< Attenuation range (world units); falloff = 1 - (d²/r²).
+    glm::vec3 color{1.0f};    ///< Light colour (linear RGB).
+    float range = 5000.0f;    ///< Attenuation range (world units); falloff = 1 - (d²/r²).
 };
 
 /// @brief Extra first-person models drawn in the weapon pass, after the gun.

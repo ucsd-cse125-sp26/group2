@@ -42,22 +42,16 @@ namespace systems
 /// @copydoc applyHeal
 void applyHeal(float amount, Health& playerHealth)
 {
-    if (amount < 0)
+    if (amount <= 0.0f)
         return;
 
-    if (playerHealth.health < systems::healthMax) {
-        if ((playerHealth.health + amount) > systems::healthMax) {
-            amount -= systems::healthMax - playerHealth.health;
-            playerHealth.health = systems::healthMax;
-            playerHealth.armor = amount;
-        } else {
-            playerHealth.health += amount;
-        }
+    const float healthMissing = std::max(0.0f, healthMax - playerHealth.health);
+    const float healthRestored = std::min(amount, healthMissing);
+    playerHealth.health += healthRestored;
+    amount -= healthRestored;
 
-    } else if ((playerHealth.armor + amount) <= systems::armorMax) {
-        playerHealth.armor += amount;
-    } else {
-        playerHealth.armor = systems::armorMax;
+    if (amount > 0.0f) {
+        playerHealth.armor = std::min(armorMax, playerHealth.armor + amount);
     }
 }
 

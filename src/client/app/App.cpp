@@ -143,7 +143,8 @@ bool App::init()
     // Developer skip
     if (developerConfig.skipLobby) {
         const NetworkAddress clientNet = networkConfig.clientNetwork;
-        const ConnectError connectError = client.init(clientNet.host.c_str(), clientNet.port, networkConfig.transport);
+        const ConnectError connectError =
+            client.init(clientNet.host.c_str(), clientNet.port, networkConfig.transport, k_joinConnectionTimeoutMs);
         if (connectError != ConnectError::None) {
             SDL_Log("Failed to connect to server: %s", connectErrorLogName(connectError));
             cleanup();

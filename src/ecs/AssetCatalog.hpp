@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ecs/AssetRegistry.hpp"
+#include "ecs/components/WeaponState.hpp"
 
 #include <array>
 #include <glm/vec3.hpp>
@@ -40,7 +41,23 @@ inline const AssetDefinition kRocketProjectile{
     .flipUVs = true,
 };
 
-inline const std::array<AssetDefinition, 5> kWeaponAssets{{
+inline const AssetDefinition kGrenadeModel{
+    .name = "grenade",
+    .filename = "grenade.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {20.0f, 20.0f, 20.0f},
+};
+
+inline const AssetDefinition kMedkitModel{
+    .name = "medkit",
+    .filename = "medkit.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {20.0f, 20.0f, 20.0f},
+};
+
+inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAssets{{
     {.name = "weapon_rifle",
      .filename = "assault_rifle.glb",
      .role = AssetRole::Entity,
@@ -50,7 +67,7 @@ inline const std::array<AssetDefinition, 5> kWeaponAssets{{
      .filename = "rocket_launcher.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
-     .renderScale = {20.0f, 20.0f, 20.0f}},
+     .renderScale = {200.0f, 200.0f, 200.0f}},
     {.name = "weapon_railgun",
      .filename = "rail_gun.glb",
      .role = AssetRole::Entity,

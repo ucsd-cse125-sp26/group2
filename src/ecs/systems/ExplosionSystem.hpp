@@ -27,6 +27,8 @@ namespace systems
 /// @param selfDamageMultiplier     Damage scale when victim == owner (e.g. 0.4 for rocket jumps).
 /// @param maxKnockback             Peak knockback velocity (u/s) imparted at the epicenter.
 /// @param knockbackFalloffExponent Knockback curve exponent (same form as damage falloff).
+/// @param directKillTarget         If valid, this entity takes guaranteed lethal damage regardless
+///                                 of radius/falloff (used by a grenade stuck to a player).
 void queueExplosion(Registry& registry,
                     glm::vec3 position,
                     float radius,
@@ -35,7 +37,8 @@ void queueExplosion(Registry& registry,
                     float falloffExponent = 1.0f,
                     float selfDamageMultiplier = 1.0f,
                     float maxKnockback = 0.0f,
-                    float knockbackFalloffExponent = 1.0f);
+                    float knockbackFalloffExponent = 1.0f,
+                    entt::entity directKillTarget = entt::null);
 
 /// @brief Process all pending explosions: apply radial damage and emit particle events.
 ///

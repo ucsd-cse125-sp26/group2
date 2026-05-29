@@ -76,6 +76,19 @@ constexpr float k_emergencyUnstickRadius = 64.0f;
 /// before falling through to emergency unstick.
 constexpr int k_maxDepenPasses = 6;
 
+// Explosion knockback (grounded launch)
+// A grounded victim otherwise barely reacts to a nearby blast: ground friction
+// eats the horizontal impulse next tick and a foot-level explosion imparts
+// almost no vertical velocity. These give standing players a deliberate pop so
+// the knockback is felt. Both scale with the same falloff as the impulse, so a
+// near-miss nudges while a close blast launches. Only applied when grounded.
+constexpr float k_explosionGroundPopOffset = 10.0f; ///< Upward teleport (units) at epicenter; lifts the victim
+                                                    ///< past k_groundSnapDistance so the KCC won't re-anchor
+                                                    ///< them this tick.
+constexpr float k_explosionGroundVerticalBoost =
+    250.0f; ///< Minimum upward velocity (units/s) at epicenter. Floored, not added — never reduces a stronger
+            ///< existing vertical knockback.
+
 // Gravity flip
 constexpr float k_gravityFlipCooldown = 0.5f; ///< Minimum time between gravity flips (s).
 

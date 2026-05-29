@@ -691,9 +691,13 @@ set(SHADER_NEW_OUT_DIR "${CMAKE_BINARY_DIR}/shaders-new")
 file(MAKE_DIRECTORY "${SHADER_NEW_OUT_DIR}")
 
 set(SHADER_NEW_SOURCES
-        skinned_geometry.vert debug.frag
+        geometry_depth.vert emtpy.frag
+        skinned_geometry.vert skinned_geometry_depth.vert debug.frag
         geometry.vert geometry.frag
+        geometry_shadowed.frag
+        debug_depth.vert debug_depth.frag
         hud.vert hud.frag
+        fxaa.frag
 )
 
 foreach(SHADER_SRC ${SHADER_NEW_SOURCES})
@@ -1090,6 +1094,9 @@ add_executable(group2
         src/client/util/LocalAddress.cpp
         src/client/util/InputCapture.hpp
         src/client/util/InputCapture.cpp
+        src/ecs/systems/HealthPackSpawnerSystem.hpp
+        src/ecs/systems/HealthPackSpawnerSystem.cpp
+        src/ecs/components/HealthPackSpawner.hpp
         src/network/MatchConfig.hpp
 )
 
@@ -1406,6 +1413,9 @@ add_executable(server
         src/ecs/systems/PowerupSpawnerSystem.hpp
         src/ecs/systems/PowerupSystem.cpp
         src/ecs/systems/PowerupSystem.hpp
+        src/ecs/systems/HealthPackSpawnerSystem.hpp
+        src/ecs/systems/HealthPackSpawnerSystem.cpp
+        src/ecs/components/HealthPackSpawner.hpp
 )
 
 # src/        — for shared headers (ecs/registry/Registry.hpp, etc.)

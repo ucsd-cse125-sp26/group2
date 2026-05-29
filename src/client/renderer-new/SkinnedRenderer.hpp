@@ -111,6 +111,17 @@ public:
     /// Currently a no-op placeholder — see cpp for the algorithm sketch.
     void draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
 
+    /// @brief Issue the instanced draws for every visible skinned character
+    /// into a depth-only shadow pass.
+    /// @param renderPass  The active shadow depth render pass.
+    /// @param cmd         The frame command buffer.
+    ///
+    /// Mirrors `draw()` but binds the depth-only pipeline so the player rig
+    /// is rasterised into the shadow map (and thus casts shadows).  Relies on
+    /// the caller having already pushed the shadow view-projection at vertex
+    /// UBO slot 0 (NewRenderer::drawGeometryDepthPass does this).
+    void drawDepth(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+
     /// @brief Release all GPU resources owned by this subsystem.
     /// Called from `NewRenderer::quit` (BEFORE the device is destroyed).
     void shutdown();
@@ -154,6 +165,8 @@ private:
 
     bool createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat);
 
+    bool createSkinnedDepthPipeline(const SDL_GPUShaderFormat& shaderFormat);
+
     // ─── Borrowed ────────────────────────────────────────────────────────────
     SDL_GPUDevice* device_ = nullptr;
 
@@ -163,6 +176,10 @@ private:
     /// BoneInfluence), two vertex storage buffers (palette, instances), one
     /// vertex UBO (view-projection), depth test on, cull mode NONE.
     SDL_GPUGraphicsPipeline* pipeline_ = nullptr;
+
+    /// @brief Depth-only variant of the skinned pipeline, used to rasterise
+    /// the rig into the shadow map so the player casts a shadow.
+    SDL_GPUGraphicsPipeline* depthPipeline_ = nullptr;
 
     // ─── Owned: rig (set once via setRig) ────────────────────────────────────
     bool rigInstalled_ = false;

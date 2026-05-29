@@ -30,6 +30,7 @@
 #include "ecs/components/FireField.hpp"
 #include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
+#include "ecs/components/HealthPackSpawner.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -84,6 +85,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
@@ -106,6 +108,13 @@
 namespace
 {
 constexpr float kMinFootstepIntervalSeconds = 0.14f;
+constexpr std::array<const char*, 2> kOptionalTestModelFilenames{{"test_model.glb", "test model.glb"}};
+constexpr glm::vec3 kOptionalTestModelRifleSpawnerOffset{0.0f, 50.0f, 0.0f};
+constexpr float kOptionalTestModelLoadScale = 10.0f;
+constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponNames{
+    "Rifle", "Rocket", "RailGun", "EnergyGun", "Shotgun"};
+constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponDisplayNames{
+    "Rifle (R-301)", "Rocket", "RailGun (Triple Take)", "EnergyGun (Wingman)", "Shotgun"};
 // (kThirdPersonWeaponPitchMax was used by the removed buildThirdPersonWeaponAttachment;
 // the bone-parented weapon path doesn't pitch-clamp the weapon — the spine bend
 // max-pitch in CharacterAnimator handles that.)
@@ -118,6 +127,34 @@ int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
 {
     return assets.add(
         def.name, def.filename, def.role, def.renderScale, def.renderTranslation, def.renderRotationDegrees);
+}
+
+std::filesystem::path assetPathFor(const char* filename)
+{
+    const char* const base = SDL_GetBasePath();
+    std::filesystem::path path = base ? base : "";
+    path /= ASSETS_DIR;
+    path /= filename;
+    return path;
+}
+
+const char* findExistingOptionalTestModelFilename()
+{
+    for (const char* filename : kOptionalTestModelFilenames) {
+        std::error_code ec;
+        if (std::filesystem::exists(assetPathFor(filename), ec))
+            return filename;
+    }
+    return nullptr;
+}
+
+std::optional<glm::vec3> findOptionalTestModelPosition()
+{
+    for (const gamemap::WeaponSpawner& spawner : gamemap::weaponSpawner_) {
+        if (spawner.type == WeaponType::Rifle)
+            return spawner.pos + kOptionalTestModelRifleSpawnerOffset;
+    }
+    return std::nullopt;
 }
 
 glm::quat assetRotation(const AssetEntry& asset)
@@ -135,6 +172,36 @@ WeaponSpawnerModelParams defaultSpawnerModelParams(WeaponType type)
 bool isRenderableGunType(WeaponType type)
 {
     return static_cast<std::size_t>(type) < kWeaponAssets.size();
+}
+
+/// @brief Apply a recoil aim delta to a player's look angles safely.
+///
+/// Guarantees `snap.pitch`/`snap.yaw` stay finite and that pitch stays inside
+/// the gimbal-lock-safe range, regardless of the delta or the pre-existing
+/// value. A non-finite delta is ignored, and a non-finite base self-heals to 0.
+/// This makes it impossible for a single inf/NaN from any recoil source to
+/// permanently wedge the aim — the failure that previously showed up as pitch
+/// pinned to a huge number and yaw = NaN.
+void applyRecoilAimDelta(InputSnapshot& snap, float dPitch, float dYaw)
+{
+    float pitch = std::isfinite(snap.pitch) ? snap.pitch : 0.0f;
+    if (std::isfinite(dPitch))
+        pitch += dPitch;
+    snap.pitch = std::clamp(pitch, -glm::radians(89.0f), glm::radians(89.0f));
+
+    float yaw = std::isfinite(snap.yaw) ? snap.yaw : 0.0f;
+    if (std::isfinite(dYaw))
+        yaw += dYaw;
+    // Keep yaw bounded so it can never drift toward the limits of float range.
+    snap.yaw = std::remainder(yaw, glm::two_pi<float>());
+}
+
+const char* renderableWeaponDisplayName(WeaponType type)
+{
+    const std::size_t idx = static_cast<std::size_t>(type);
+    if (idx >= kRenderableWeaponDisplayNames.size())
+        return "Unsupported";
+    return kRenderableWeaponDisplayNames[idx];
 }
 
 /// @brief Translate CharacterAnimator's internal Mode enum value into the
@@ -328,18 +395,17 @@ void copyHandMountSet(std::ostringstream& out, const char* label, const HandMoun
 std::string buildHandMountClipboardText(const WeaponHandMountParams* mountParams,
                                         const ThirdPersonWeaponParams* tpParams)
 {
-    static constexpr const char* k_weaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
     std::ostringstream out;
     out << std::fixed << std::setprecision(3);
     out << "// Current third-person weapon scales\n";
-    for (int i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < kRenderableWeaponTypeCount; ++i) {
         const auto& tp = tpParams[i];
-        out << "// " << k_weaponNames[i] << ": scale=" << tp.scale << "f\n";
+        out << "// " << kRenderableWeaponNames[i] << ": scale=" << tp.scale << "f\n";
     }
     out << "\n// Current WeaponHandMountParams entries\n";
-    out << "static const std::array<WeaponHandMountParams, 4> k_params{{\n";
-    for (int i = 0; i < 4; ++i) {
-        out << "    // " << k_weaponNames[i] << "\n";
+    out << "static const std::array<WeaponHandMountParams, kRenderableWeaponTypeCount> k_params{{\n";
+    for (std::size_t i = 0; i < kRenderableWeaponTypeCount; ++i) {
+        out << "    // " << kRenderableWeaponNames[i] << "\n";
         out << "    {";
         copyHandMountSet(out, "rightHand", mountParams[i].rightHand);
         out << ",\n     ";
@@ -369,13 +435,12 @@ void copyFirstPersonArmMountSet(std::ostringstream& out, const char* label, cons
 
 std::string buildFirstPersonHandMountClipboardText(const FirstPersonHandMountParams* mountParams)
 {
-    static constexpr const char* k_weaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
     std::ostringstream out;
     out << std::fixed << std::setprecision(3);
     out << "// Current FirstPersonHandMountParams entries\n";
-    out << "static const std::array<FirstPersonHandMountParams, 4> k_params{{\n";
-    for (int i = 0; i < 4; ++i) {
-        out << "    // " << k_weaponNames[i] << "\n";
+    out << "static const std::array<FirstPersonHandMountParams, kRenderableWeaponTypeCount> k_params{{\n";
+    for (std::size_t i = 0; i < kRenderableWeaponTypeCount; ++i) {
+        out << "    // " << kRenderableWeaponNames[i] << "\n";
         out << "    {";
         copyFirstPersonArmMountSet(out, "rightArm", mountParams[i].rightArm);
         out << ",\n     ";
@@ -591,7 +656,7 @@ std::string_view fireAudioEventForWeapon(WeaponType type) noexcept
         return "weapon.shotgun.fire"; // falls back gracefully if SFX bank lacks this event.
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
-    case WeaponType::Impulse:
+    case WeaponType::Sticky:
         return "weapon.grenade.throw";
     }
     return {};
@@ -918,6 +983,29 @@ bool Game::init(AppContext& ctx)
         }
     }
 
+    // Optional art-check GLB. Drop assets/test_model.glb into the copied assets
+    // directory to see it 50 units above the authored rifle spawner.
+    if (const char* testModelFilename = findExistingOptionalTestModelFilename(); testModelFilename != nullptr) {
+        if (const std::optional<glm::vec3> testModelPos = findOptionalTestModelPosition(); testModelPos.has_value()) {
+            const int id = assets_.add("test_model", testModelFilename, AssetRole::Prop);
+            const int modelIdx =
+                renderer->loadSceneModel(testModelFilename, *testModelPos, kOptionalTestModelLoadScale, false);
+            assets_.setModelIndex(id, modelIdx);
+            if (modelIdx >= 0) {
+                renderer->setModelScenePass(modelIdx, true);
+                SDL_Log("[client] test model '%s' loaded at (%.1f, %.1f, %.1f)",
+                        testModelFilename,
+                        static_cast<double>(testModelPos->x),
+                        static_cast<double>(testModelPos->y),
+                        static_cast<double>(testModelPos->z));
+            } else {
+                SDL_Log("[client] WARNING: test model '%s' failed to load", testModelFilename);
+            }
+        } else {
+            SDL_Log("[client] test model '%s' present, but no rifle spawner was loaded", testModelFilename);
+        }
+    }
+
     // ── Load props (render + collision) ───────────────────────────────────
     // These are standalone GLB models placed at fixed world positions.
     // Both visual and collision are loaded so players/projectiles interact.
@@ -983,6 +1071,26 @@ bool Game::init(AppContext& ctx)
                 renderer->setModelScenePass(rocketProjectileModelIdx_, false);
             else
                 SDL_Log("[client] WARNING: rocket projectile model '%s' failed to load", kRocketProjectile.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kGrenadeModel);
+            grenadeModelIdx_ = renderer->loadSceneModel(
+                kGrenadeModel.filename, kGrenadeModel.loadTranslation, kGrenadeModel.loadScale, kGrenadeModel.flipUVs);
+            assets_.setModelIndex(id, grenadeModelIdx_);
+
+            if (grenadeModelIdx_ < 0)
+                SDL_Log("[client] WARNING: grenade model '%s' failed to load", kGrenadeModel.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kMedkitModel);
+            medkitModelIdx_ = renderer->loadSceneModel(
+                kMedkitModel.filename, kMedkitModel.loadTranslation, kMedkitModel.loadScale, kMedkitModel.flipUVs);
+            assets_.setModelIndex(id, medkitModelIdx_);
+
+            if (medkitModelIdx_ < 0)
+                SDL_Log("[client] WARNING: medkit model '%s' failed to load", kMedkitModel.filename);
         }
 
         viewmodelLeftHandModelIdx_ = renderer->loadSceneModel("viewmodel_hand_left.glb", glm::vec3{0.0f}, 1.0f, false);
@@ -1233,7 +1341,7 @@ bool Game::init(AppContext& ctx)
     client->onShotDebugReport([this](const net::shotdebug::ShotDebugCapture& cap) { debugUI.pushServerShot(cap); });
 
     // Initialize runtime 3P weapon params from defaults
-    for (int i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < kRenderableWeaponTypeCount; ++i) {
         tpWeaponParams_[i] = getThirdPersonWeaponParams(static_cast<WeaponType>(i));
         authoredWeaponHandMountParams_[i] = getWeaponHandMountParams(static_cast<WeaponType>(i));
         authoredFPHandMountParams_[i] = getFirstPersonHandMountParams(static_cast<WeaponType>(i));
@@ -1337,10 +1445,11 @@ bool Game::init(AppContext& ctx)
             // files are non-fatal — the animator falls back to the idle finger pose
             // for any (weapon, hand) pair without authored data.
             const std::string weaponsDir = std::string(base ? base : "") + "assets/weapons/";
-            static constexpr std::array<const char*, 4> k_weaponGripFiles{
+            static constexpr std::array<const char*, kRenderableWeaponTypeCount> k_weaponGripFiles{
                 "rifle.grip.toml",
                 "rocket_launcher.grip.toml",
                 "rail_gun.grip.toml",
+                "energy_gun.grip.toml",
                 "energy_gun.grip.toml",
             };
             for (std::size_t i = 0; i < k_weaponGripFiles.size(); ++i) {
@@ -1978,6 +2087,7 @@ SDL_AppResult Game::iterate()
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
         refreshDroppedWeaponRenderables();
+        refreshRemoteHealthPackRenderables();
         // Fall through to render the current frame normally.
     } else {
         frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
@@ -2498,6 +2608,7 @@ SDL_AppResult Game::iterate()
         refreshDroppedWeaponRenderables();
         phaseSnap(phaseStats.refreshDroppedWeaponsMs);
         refreshRemotePowerupRenderables();
+        refreshRemoteHealthPackRenderables();
         phaseSnap(phaseStats.refreshPowerupsMs);
     }
 
@@ -2584,11 +2695,18 @@ SDL_AppResult Game::iterate()
                 });
             }
 
-            // Check ammo — don't spawn VFX if the magazine is empty.
+            // Grenade throw locks out fire VFX for its wind-up, exactly like reload.
+            bool grenadeThrowActive = false;
+            registry.view<LocalPlayer, GrenadeState>().each([&](const GrenadeState& grenades) {
+                const float elapsed = getGrenadeConfig(grenades.selected).throwCooldown - grenades.cooldown;
+                grenadeThrowActive = grenades.cooldown > 0.0f && elapsed >= 0.0f && elapsed < kGrenadeThrowAnimTime;
+            });
+
+            // Check ammo — don't spawn VFX if the magazine is empty or mid-reload/throw.
             bool hasAmmo = false;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
                 const GunInstance& gun = getEquippedGun(ws);
-                hasAmmo = gun.currentMagAmmo > 0 && !gun.isReloading;
+                hasAmmo = gun.currentMagAmmo > 0 && !gun.isReloading && !grenadeThrowActive;
                 if (gun.recoilHeat == 0.0f) {
                     localRecoilHeat_ = 0.0f;
                     recoilIdleTime_ = 0.0f;
@@ -2618,6 +2736,8 @@ SDL_AppResult Game::iterate()
                     return;
                 auto* ac = registry.try_get<AnimatedCharacter>(localShooter);
                 if (ac == nullptr || !ac->animator)
+                    return;
+                if (!isRenderableGunType(currentEquippedType_))
                     return;
                 const auto& tpRecoil = tpWeaponParams_[static_cast<int>(currentEquippedType_)];
                 ac->animator->applyRecoilImpulse(tpRecoil.recoilKickRad);
@@ -2749,9 +2869,7 @@ SDL_AppResult Game::iterate()
                             cameraRecoilTargetYaw_ += yawKick;
                         } else {
                             auto& snap = registry.get<InputSnapshot>(localShooter);
-                            snap.pitch -= pitchKick;
-                            snap.yaw += yawKick;
-                            snap.pitch = std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
+                            applyRecoilAimDelta(snap, -pitchKick, yawKick);
                         }
                     }
                     localRecoilHeat_ += 1.0f;
@@ -3862,8 +3980,16 @@ SDL_AppResult Game::iterate()
                     // path uses it directly so blue tracers always
                     // terminate on whatever the client believed was
                     // in the way (a wall, a capsule, or 5000 u of air).
-                    const physics::HitboxHit localHit =
-                        physics::resolveHitscanHitbox(registry, localEntity, cap.origin, cap.direction);
+                    // Match the server's "cylinder hitreg": sweep the local
+                    // resolve with the equipped weapon's hitscanRadius so the
+                    // blue debug tracer terminates on the same fattened capsule
+                    // the server will test against.
+                    float localHitscanRadius = 0.0f;
+                    if (const auto* ws = registry.try_get<WeaponState>(localEntity)) {
+                        localHitscanRadius = getWeaponConfig(getEquippedGun(*ws).type).hitscanRadius;
+                    }
+                    const physics::HitboxHit localHit = physics::resolveHitscanHitbox(
+                        registry, localEntity, cap.origin, cap.direction, localHitscanRadius);
                     cap.hitPoint = localHit.point;
                     cap.hitTargetClientId = net::shotdebug::k_missClientId;
                     cap.hitRegion = 0;
@@ -4048,8 +4174,7 @@ SDL_AppResult Game::iterate()
             world = glm::scale(world, rend.scale);
 
             // Projectile entities carry a per-grenade tint (HE = green,
-            // Molotov = orange, Impulse = blue) so the shared rocket model
-            // is visually distinct in flight.  Non-projectile entities use
+            // Molotov = orange, Sticky = blue). Non-projectile entities use
             // the default white tint (no recolor).
             glm::vec4 tint{1.0f};
             if (const auto* proj = registry.try_get<Projectile>(e)) {
@@ -4220,8 +4345,8 @@ SDL_AppResult Game::iterate()
                 const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
                 dynLights.push_back(PointLight{
                     .position = lightStart + delta * t,
-                    .color = lightColor,
                     .intensity = 3.0f,
+                    .color = lightColor,
                     .range = 200.0f,
                 });
                 ++beamPointLights;
@@ -4248,8 +4373,10 @@ SDL_AppResult Game::iterate()
         hideRailgunViewmodelForScope = currentEquippedType_ == WeaponType::RailGun && input.scoped;
     });
 
+    const bool currentWeaponRenderable = isRenderableGunType(currentEquippedType_);
+
     // Auto-apply per-weapon viewmodel defaults when weapon changes
-    if (currentEquippedType_ != lastEquippedType_ || !viewmodelDefaultsApplied_) {
+    if (currentWeaponRenderable && (currentEquippedType_ != lastEquippedType_ || !viewmodelDefaultsApplied_)) {
         const auto& vp = getViewmodelParams(currentEquippedType_);
         vmScale = vp.scale;
         vmForward = vp.forward;
@@ -4262,7 +4389,8 @@ SDL_AppResult Game::iterate()
         viewmodelDefaultsApplied_ = true;
     }
 
-    const int currentWeaponModelIdx = weaponModelIndices_[static_cast<std::size_t>(currentEquippedType_)];
+    const int currentWeaponModelIdx =
+        currentWeaponRenderable ? weaponModelIndices_[static_cast<std::size_t>(currentEquippedType_)] : -1;
 
     // Build weapon viewmodel
     {
@@ -4276,7 +4404,11 @@ SDL_AppResult Game::iterate()
             const float cosPitch = std::cos(renderPitch);
             const glm::vec3 forward{
                 std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
-            glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3{0, 1, 0}));
+            // Guard the degenerate forward∥up case so normalize can't divide by
+            // ~0 and feed the viewmodel transform a NaN basis.
+            const glm::vec3 rightRaw = glm::cross(forward, glm::vec3{0, 1, 0});
+            const float rightLen = glm::length(rightRaw);
+            glm::vec3 right = (rightLen > 1e-4f) ? (rightRaw / rightLen) : glm::vec3{1.0f, 0.0f, 0.0f};
             glm::vec3 up = glm::normalize(glm::cross(right, forward));
 
             // Apply camera roll to the viewmodel basis so the weapon follows
@@ -4429,10 +4561,40 @@ SDL_AppResult Game::iterate()
                 }
 
                 // 4) Spring step (always — drives `current → target`).
+                //
+                // Self-heal first: a single NaN is absorbing, so if any spring
+                // state ever went non-finite (e.g. a pre-fix corrupted value, or
+                // some unforeseen overflow) it would wedge the aim forever. Reset
+                // to rest instead of propagating the poison.
+                if (!std::isfinite(cameraRecoilPitch_) || !std::isfinite(cameraRecoilPitchVel_) ||
+                    !std::isfinite(cameraRecoilYaw_) || !std::isfinite(cameraRecoilYawVel_) ||
+                    !std::isfinite(cameraRecoilTargetPitch_) || !std::isfinite(cameraRecoilTargetYaw_))
+                {
+                    cameraRecoilPitch_ = cameraRecoilPitchVel_ = 0.0f;
+                    cameraRecoilYaw_ = cameraRecoilYawVel_ = 0.0f;
+                    cameraRecoilTargetPitch_ = cameraRecoilTargetYaw_ = 0.0f;
+                    committedRecoilPitch_ = committedRecoilYaw_ = 0.0f;
+                }
+
+                // Semi-implicit Euler is only stable while the damping step obeys
+                // c*dt < 2 (here c = 2*omega, so dt < 1/omega ≈ 0.029s at the
+                // default omega). `frameTime` is capped at 0.25s upstream, so a
+                // single frame hitch / alt-tab / sub-30-FPS stall feeds the raw dt
+                // straight past the stability limit, the integrator diverges to
+                // ±inf within a few frames, and the next step computes inf - inf =
+                // NaN — which then gets committed into snap.pitch/yaw and never
+                // recovers. Substep so every integration step stays well inside
+                // the stability region (c*subDt = 1, k*subDt² = 0.25) no matter
+                // how big the frame time is.
+                const float maxSubDt = (omega > 1e-3f) ? (0.5f / omega) : dt;
+                const int subSteps = (maxSubDt > 0.0f) ? std::max(1, static_cast<int>(std::ceil(dt / maxSubDt))) : 1;
+                const float subDt = dt / static_cast<float>(subSteps);
                 auto stepSpring = [&](float& x, float& v, float target) {
-                    const float a = -k * (x - target) - c * v;
-                    v += a * dt;
-                    x += v * dt;
+                    for (int i = 0; i < subSteps; ++i) {
+                        const float a = -k * (x - target) - c * v;
+                        v += a * subDt;
+                        x += v * subDt;
+                    }
                 };
                 stepSpring(cameraRecoilPitch_, cameraRecoilPitchVel_, cameraRecoilTargetPitch_);
                 stepSpring(cameraRecoilYaw_, cameraRecoilYawVel_, cameraRecoilTargetYaw_);
@@ -4444,11 +4606,10 @@ SDL_AppResult Game::iterate()
                     const float dPitch = cameraRecoilPitch_ - committedRecoilPitch_;
                     const float dYaw = cameraRecoilYaw_ - committedRecoilYaw_;
                     registry.view<LocalPlayer, InputSnapshot>().each([&](InputSnapshot& snap) {
-                        if (std::abs(dPitch) > 0.0f || std::abs(dYaw) > 0.0f) {
-                            snap.pitch += dPitch;
-                            snap.yaw += dYaw;
-                            snap.pitch = std::clamp(snap.pitch, -glm::radians(89.0f), glm::radians(89.0f));
-                        }
+                        // Always route through applyRecoilAimDelta (even for a zero
+                        // delta) so a snap that is somehow already non-finite gets
+                        // sanitized rather than persisting.
+                        applyRecoilAimDelta(snap, dPitch, dYaw);
                         lastSnapPitchAfterCommit_ = snap.pitch;
                         lastSnapYawAfterCommit_ = snap.yaw;
                         haveLastSnap_ = true;
@@ -4500,6 +4661,37 @@ SDL_AppResult Game::iterate()
                 reloadDownwardOffset_ = reloadOffset;
             }
 
+            // --- Grenade throw animation ---
+            // Same dip as the reload, but on a fixed 0.3s window. The throw cooldown is
+            // longer than the animation, so drive progress off elapsed time since the
+            // throw rather than the remaining cooldown.
+            {
+                auto smooth = [](float e0, float e1, float x) {
+                    float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+                    return t * t * (3.0f - 2.0f * t);
+                };
+
+                float throwOffset = 0.0f;
+                registry.view<LocalPlayer, GrenadeState>().each([&](const GrenadeState& grenades) {
+                    const float throwCooldown = getGrenadeConfig(grenades.selected).throwCooldown;
+                    const float elapsed = throwCooldown - grenades.cooldown;
+                    if (grenades.cooldown > 0.0f && elapsed >= 0.0f && elapsed < kGrenadeThrowAnimTime) {
+                        float t = elapsed / kGrenadeThrowAnimTime;
+                        constexpr float kThrowMaxDrop = 80.0f;
+                        constexpr float kThrowMovePercent = 0.15f;
+                        if (t < kThrowMovePercent) {
+                            throwOffset = kThrowMaxDrop * smooth(0.0f, kThrowMovePercent, t);
+                        } else if (t < 1.0f - kThrowMovePercent) {
+                            throwOffset = kThrowMaxDrop;
+                        } else {
+                            throwOffset = kThrowMaxDrop * (1.0f - smooth(1.0f - kThrowMovePercent, 1.0f, t));
+                        }
+                    }
+                });
+
+                grenadeThrowDownwardOffset_ = throwOffset;
+            }
+
             // --- Velocity-direction-dependent bobbing ---
             float bobPhase = 0.0f;
             float bobAmpFwd = 0.0f;
@@ -4545,6 +4737,8 @@ SDL_AppResult Game::iterate()
             weaponPos -= forward * recoilPushBack_;
             // Apply reload downward offset
             weaponPos -= up * reloadDownwardOffset_;
+            // Apply grenade throw downward offset
+            weaponPos -= up * grenadeThrowDownwardOffset_;
 
             // Build world transform: translate -> local-rotate -> camera-orient -> scale.
             //
@@ -4850,8 +5044,7 @@ SDL_AppResult Game::iterate()
             ImGui::DragFloat("Scale", &vmScale, 0.001f, 0.001f, 10.0f, "%.4f");
 
             ImGui::Separator();
-            const char* weaponNames[] = {"Rifle (R-301)", "Rocket", "RailGun (Triple Take)", "EnergyGun (Wingman)"};
-            ImGui::Text("Equipped: %s", weaponNames[static_cast<int>(currentEquippedType_)]);
+            ImGui::Text("Equipped: %s", renderableWeaponDisplayName(currentEquippedType_));
 
             if (ImGui::Button("Load weapon defaults")) {
                 const auto& vp = getViewmodelParams(currentEquippedType_);
@@ -4981,8 +5174,10 @@ SDL_AppResult Game::iterate()
     // Third-person weapon tweaker — per-weapon tuning for remote player weapons.
     if (showTPWeaponUI_) {
         if (ImGui::Begin("3P Weapon Tweaker", &showTPWeaponUI_)) {
-            const char* tpWeaponNames[] = {"Rifle (R-301)", "Rocket", "RailGun (Triple Take)", "EnergyGun (Wingman)"};
-            ImGui::Combo("Weapon", &tpTuneWeaponIdx_, tpWeaponNames, 4);
+            ImGui::Combo("Weapon",
+                         &tpTuneWeaponIdx_,
+                         kRenderableWeaponDisplayNames.data(),
+                         static_cast<int>(kRenderableWeaponDisplayNames.size()));
 
             auto& tp = tpWeaponParams_[tpTuneWeaponIdx_];
 
@@ -5218,8 +5413,10 @@ SDL_AppResult Game::iterate()
     // Hand mount tweaker — weapon grip table used by third-person IK.
     if (showHandMountUI_) {
         if (ImGui::Begin("Hand Mount Tweaker", &showHandMountUI_)) {
-            const char* weaponNames[] = {"Rifle (R-301)", "Rocket", "RailGun / Charge Rifle", "EnergyGun"};
-            ImGui::Combo("Weapon", &handMountTuneWeaponIdx_, weaponNames, 4);
+            ImGui::Combo("Weapon",
+                         &handMountTuneWeaponIdx_,
+                         kRenderableWeaponDisplayNames.data(),
+                         static_cast<int>(kRenderableWeaponDisplayNames.size()));
 
             auto& mounts = weaponHandMountParams_[handMountTuneWeaponIdx_];
             ImGui::DragFloat("Viewmodel Hand Scale", &mounts.viewmodelHandScale, 0.25f, 1.0f, 120.0f, "%.2f");
@@ -5280,11 +5477,14 @@ SDL_AppResult Game::iterate()
     // First-person arm tweaker — independent shoulder/elbow/palm/finger controls.
     if (showFPHandMountUI_) {
         if (ImGui::Begin("FP Arm Tweaker", &showFPHandMountUI_)) {
-            const char* weaponNames[] = {"Rifle (R-301)", "Rocket", "RailGun / Charge Rifle", "EnergyGun"};
+            const bool equippedRenderable = isRenderableGunType(currentEquippedType_);
             const int equippedWeaponIdx = static_cast<int>(currentEquippedType_);
-            ImGui::Text("Equipped: %s", weaponNames[equippedWeaponIdx]);
-            ImGui::Combo("Weapon", &fpHandMountTuneWeaponIdx_, weaponNames, 4);
-            if (fpHandMountTuneWeaponIdx_ != equippedWeaponIdx) {
+            ImGui::Text("Equipped: %s", renderableWeaponDisplayName(currentEquippedType_));
+            ImGui::Combo("Weapon",
+                         &fpHandMountTuneWeaponIdx_,
+                         kRenderableWeaponDisplayNames.data(),
+                         static_cast<int>(kRenderableWeaponDisplayNames.size()));
+            if (equippedRenderable && fpHandMountTuneWeaponIdx_ != equippedWeaponIdx) {
                 ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Selected weapon is not currently visible.");
                 ImGui::SameLine();
                 if (ImGui::Button("Select Equipped"))
@@ -5359,8 +5559,10 @@ SDL_AppResult Game::iterate()
     // gimbal lock to worry about, and no impossible-to-pose-mistakenly roll DOF.
     if (showGripPoseUI_) {
         if (ImGui::Begin("Grip Pose Tweaker", &showGripPoseUI_)) {
-            const char* weaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun"};
-            ImGui::Combo("Weapon", &gripPoseTuneWeaponIdx_, weaponNames, 4);
+            ImGui::Combo("Weapon",
+                         &gripPoseTuneWeaponIdx_,
+                         kRenderableWeaponNames.data(),
+                         static_cast<int>(kRenderableWeaponNames.size()));
 
             const std::size_t wIdx = static_cast<std::size_t>(gripPoseTuneWeaponIdx_);
             WeaponGripPose& pose = weaponGripPoses_[wIdx];
@@ -5445,8 +5647,10 @@ SDL_AppResult Game::iterate()
     // Weapon spawner model tweaker — per-weapon tuning for world pickup models.
     if (showWeaponSpawnerModelUI_) {
         if (ImGui::Begin("Weapon Spawner Tweaker", &showWeaponSpawnerModelUI_)) {
-            const char* spawnerWeaponNames[] = {"Rifle", "Rocket", "RailGun", "EnergyGun", "Shotgun"};
-            ImGui::Combo("Weapon", &spawnerTuneWeaponIdx_, spawnerWeaponNames, static_cast<int>(kWeaponAssets.size()));
+            ImGui::Combo("Weapon",
+                         &spawnerTuneWeaponIdx_,
+                         kRenderableWeaponNames.data(),
+                         static_cast<int>(kRenderableWeaponNames.size()));
 
             auto& params = spawnerWeaponParams_[static_cast<std::size_t>(spawnerTuneWeaponIdx_)];
 
@@ -6371,16 +6575,24 @@ void Game::refreshRemotePlayerRenderables()
 
 void Game::refreshRemoteProjectileRenderables()
 {
-    registry.view<Position, Projectile, Velocity, CollisionShape>().each(
-        [&](entt::entity e, const Position&, const Projectile&, const Velocity&, const CollisionShape& /*shape*/) {
-            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+    registry.view<Position, Projectile, Velocity, CollisionShape>().each([&](entt::entity e,
+                                                                             const Position&,
+                                                                             const Projectile& projectile,
+                                                                             const Velocity&,
+                                                                             const CollisionShape& /*shape*/) {
+        auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+        if (isGrenadeType(projectile.type)) {
+            rend.modelIndex = grenadeModelIdx_;
+            rend.scale = kGrenadeModel.renderScale;
+        } else {
             rend.modelIndex = rocketProjectileModelIdx_;
             rend.scale = glm::vec3(kRocketProjectile.loadScale);
-            rend.visible = true;
+        }
+        rend.visible = rend.modelIndex >= 0;
 
-            // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
-            // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-        });
+        // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+        // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+    });
 }
 
 void Game::refreshRemoteRespawnRenderables()
@@ -6389,20 +6601,49 @@ void Game::refreshRemoteRespawnRenderables()
         [&](entt::entity e, const Position&, const WeaponSpawner& spawner, const CollisionShape&) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
             const int weaponIndex = static_cast<int>(spawner.type);
-            if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
-                weaponAssetIds_[static_cast<std::size_t>(weaponIndex)] < 0)
-            {
-                rend.modelIndex = -1;
-                rend.visible = false;
+            const bool grenadeSpawner = isGrenadeType(spawner.type);
+
+            if (grenadeSpawner) {
+                if (grenadeModelIdx_ < 0) {
+                    rend.modelIndex = -1;
+                    rend.visible = false;
+                    return;
+                }
+                rend.modelIndex = grenadeModelIdx_;
+                const WeaponSpawnerModelParams& params = defaultSpawnerModelParams(spawner.type);
+                rend.scale = params.scale;
+
+                const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+
+                rend.visible = spawner.hasWeapon;
+
+                if (spawner.hasWeapon) {
+                    static constexpr float k_twoPi = 6.28318530718f;
+
+                    rend.translation =
+                        params.translation +
+                        glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
+                } else {
+                    rend.translation = params.translation;
+                }
+                rend.orientation = spawnerModelRotation(params, t, spawner.hasWeapon);
                 return;
+            } else {
+                if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
+                    weaponAssetIds_[static_cast<std::size_t>(weaponIndex)] < 0)
+                {
+                    rend.modelIndex = -1;
+                    rend.visible = false;
+                    return;
+                }
+
+                const int assetId = weaponAssetIds_[static_cast<std::size_t>(weaponIndex)];
+                const AssetEntry& asset = assets_.entry(assetId);
+                rend.modelIndex = asset.modelIndex;
             }
 
             const auto weaponIdx = static_cast<std::size_t>(weaponIndex);
-            const int assetId = weaponAssetIds_[weaponIdx];
-            const AssetEntry& asset = assets_.entry(assetId);
             const WeaponSpawnerModelParams& params = spawnerWeaponParams_[weaponIdx];
-
-            rend.modelIndex = asset.modelIndex;
             rend.scale = params.scale;
 
             const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
@@ -6431,6 +6672,37 @@ void Game::refreshRemotePowerupRenderables()
             rend.modelIndex = powerupIndex;
             rend.scale = glm::vec3(kRocketProjectile.loadScale);
             rend.visible = spawner.hasPowerup;
+        });
+}
+
+void Game::refreshRemoteHealthPackRenderables()
+{
+    registry.view<Position, HealthPackSpawner, CollisionShape>().each(
+        [&](entt::entity e, const Position&, const HealthPackSpawner& spawner, const CollisionShape&) {
+            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            const WeaponSpawnerModelParams params{
+                .scale = kMedkitModel.renderScale,
+                .translation = kMedkitModel.renderTranslation,
+                .yawOffset = 0.0f,
+                .pitchOffset = 0.0f,
+                .rollOffset = 0.0f,
+                .spinDegreesPerSecond = 45.0f,
+                .bobAmplitude = 6.0f,
+                .bobHz = 0.6f,
+            };
+            const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+
+            rend.modelIndex = medkitModelIdx_;
+            rend.scale = params.scale;
+            if (spawner.hasPack) {
+                static constexpr float k_twoPi = 6.28318530718f;
+                rend.translation = params.translation +
+                                   glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
+            } else {
+                rend.translation = params.translation;
+            }
+            rend.orientation = spawnerModelRotation(params, t, spawner.hasPack);
+            rend.visible = spawner.hasPack && medkitModelIdx_ >= 0;
         });
 }
 
