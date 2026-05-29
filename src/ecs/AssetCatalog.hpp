@@ -48,7 +48,7 @@ inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAsse
      .flipUVs = true,
      .renderScale = {20.0f, 20.0f, 20.0f}},
     {.name = "weapon_rocket",
-     .filename = "suzanne_substance_v2.glb",
+     .filename = "rocket_launcher.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
      .renderScale = {200.0f, 200.0f, 200.0f}},
