@@ -17,6 +17,7 @@
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
+#include "ecs/components/HealthPackSpawner.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/JumpPad.hpp"
@@ -250,6 +251,21 @@ void ServerGame::run()
         registry.emplace<Killzone>(zone);
         registry.emplace<Position>(zone, kz.pos);
         registry.emplace<CollisionShape>(zone, CollisionShape{.halfExtents = kz.halfExtents});
+    }
+
+    // Health pack spawners
+    for (const gamemap::HealthPackSpawner& healthPackSpawner : gamemap::healthPackSpawner_) {
+        glm::vec3 pos = healthPackSpawner.pos;
+
+        const entt::entity spawner = registry.create();
+        registry.emplace<HealthPackSpawner>(
+            spawner,
+            HealthPackSpawner{.spawnCooldown = systems::healthPackCooldownTime, .hasPack = true});
+        CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
+        glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
+
+        registry.emplace<Position>(spawner, centeredPos);
+        registry.emplace<CollisionShape>(spawner, shape);
     }
 
     while (running) {

@@ -122,6 +122,12 @@ struct PowerupSpawner
 };
 inline std::vector<PowerupSpawner> powerupSpawner_;
 
+struct HealthPackSpawner
+{
+    glm::vec3 pos;
+};
+inline std::vector<HealthPackSpawner> healthPackSpawner_;
+
 /// @brief Jump pad authored in Blender (entity_type = 3).
 /// Optional custom properties: `jump_velocity_x`, `jump_velocity_y`,
 /// `jump_velocity_z` (floats, units/s). If omitted, the runtime default
@@ -308,6 +314,13 @@ inline bool loadConfiguredMap(physics::MapCollisionData& out, const char* tag)
                     kz.halfExtents.y = getMetadataFloat(node->mMetaData, "half_extent_y", kz.halfExtents.y);
                     kz.halfExtents.z = getMetadataFloat(node->mMetaData, "half_extent_z", kz.halfExtents.z);
                     killzoneSpawner_.push_back(kz);
+                    break;
+                }
+                case 5: // Health pack spawn point
+                {
+                    const aiMatrix4x4& t = node->mTransformation;
+                    glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
+                    healthPackSpawner_.push_back(HealthPackSpawner{.pos = pos});
                     break;
                 }
                 default:

@@ -41,6 +41,22 @@ inline const AssetDefinition kRocketProjectile{
     .flipUVs = true,
 };
 
+inline const AssetDefinition kGrenadeModel{
+    .name = "grenade",
+    .filename = "grenade.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {20.0f, 20.0f, 20.0f},
+};
+
+inline const AssetDefinition kMedkitModel{
+    .name = "medkit",
+    .filename = "medkit.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {20.0f, 20.0f, 20.0f},
+};
+
 inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAssets{{
     {.name = "weapon_rifle",
      .filename = "assault_rifle.glb",
@@ -48,7 +64,7 @@ inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAsse
      .flipUVs = true,
      .renderScale = {20.0f, 20.0f, 20.0f}},
     {.name = "weapon_rocket",
-     .filename = "suzanne_substance_v2.glb",
+     .filename = "rocket_launcher.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
      .renderScale = {200.0f, 200.0f, 200.0f}},

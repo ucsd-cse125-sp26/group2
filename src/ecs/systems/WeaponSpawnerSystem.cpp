@@ -42,7 +42,7 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
                 int& currentAmmo = grenadeAmmo(grenade, spawner.type);
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
-                currentAmmo++;
+                currentAmmo += 2;
                 return;
             }
 

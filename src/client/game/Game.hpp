@@ -134,6 +134,9 @@ public:
     /// @brief Assign or update Renderable components for replicated powerup entities.
     void refreshRemotePowerupRenderables();
 
+    /// @brief Assign or update Renderable components for replicated health pack spawner entities.
+    void refreshRemoteHealthPackRenderables();
+
     /// @brief Assign Renderable components to dropped-weapon entities (mirrors spawner visuals).
     void refreshDroppedWeaponRenderables();
 
@@ -336,6 +339,8 @@ private:
     int handMountDebugMarkerModelIdx_ = -1;
 
     int rocketProjectileModelIdx_ = -1;
+    int grenadeModelIdx_ = -1;
+    int medkitModelIdx_ = -1;
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.

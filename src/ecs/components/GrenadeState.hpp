@@ -9,6 +9,8 @@
 #include <array>
 #include <cstddef>
 
+const int defaultGrenadeStartAmount = 2;
+
 struct GrenadeState
 {
     WeaponType selected = WeaponType::HEGrenade;
@@ -21,7 +23,7 @@ inline GrenadeState makeDefaultGrenadeState()
     GrenadeState state{};
     state.selected = WeaponType::HEGrenade;
     for (std::size_t i = 0; i < kGrenadeTypes.size(); ++i) {
-        state.ammo[i] = getWeaponConfig(kGrenadeTypes[i]).defaultAmmoCapacity;
+        state.ammo[i] = defaultGrenadeStartAmount;
     }
     return state;
 }

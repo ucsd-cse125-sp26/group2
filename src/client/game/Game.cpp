@@ -29,6 +29,7 @@
 #include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/FireField.hpp"
 #include "ecs/components/GrenadeState.hpp"
+#include "ecs/components/HealthPackSpawner.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
@@ -1044,6 +1045,30 @@ bool Game::init(AppContext& ctx)
                 SDL_Log("[client] WARNING: rocket projectile model '%s' failed to load", kRocketProjectile.filename);
         }
 
+        {
+            const int id = addAssetDefinition(assets_, kGrenadeModel);
+            grenadeModelIdx_ = renderer->loadSceneModel(kGrenadeModel.filename,
+                                                        kGrenadeModel.loadTranslation,
+                                                        kGrenadeModel.loadScale,
+                                                        kGrenadeModel.flipUVs);
+            assets_.setModelIndex(id, grenadeModelIdx_);
+
+            if (grenadeModelIdx_ < 0)
+                SDL_Log("[client] WARNING: grenade model '%s' failed to load", kGrenadeModel.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kMedkitModel);
+            medkitModelIdx_ = renderer->loadSceneModel(kMedkitModel.filename,
+                                                       kMedkitModel.loadTranslation,
+                                                       kMedkitModel.loadScale,
+                                                       kMedkitModel.flipUVs);
+            assets_.setModelIndex(id, medkitModelIdx_);
+
+            if (medkitModelIdx_ < 0)
+                SDL_Log("[client] WARNING: medkit model '%s' failed to load", kMedkitModel.filename);
+        }
+
         viewmodelLeftHandModelIdx_ = renderer->loadSceneModel("viewmodel_hand_left.glb", glm::vec3{0.0f}, 1.0f, false);
         viewmodelRightHandModelIdx_ =
             renderer->loadSceneModel("viewmodel_hand_right.glb", glm::vec3{0.0f}, 1.0f, false);
@@ -2033,6 +2058,7 @@ SDL_AppResult Game::iterate()
         refreshRemoteProjectileRenderables();
         refreshRemoteRespawnRenderables();
         refreshDroppedWeaponRenderables();
+        refreshRemoteHealthPackRenderables();
         // Fall through to render the current frame normally.
     } else {
         frameTime = std::min(frameTime, 0.25f); // cap to avoid spiral-of-death
@@ -2553,6 +2579,7 @@ SDL_AppResult Game::iterate()
         refreshDroppedWeaponRenderables();
         phaseSnap(phaseStats.refreshDroppedWeaponsMs);
         refreshRemotePowerupRenderables();
+        refreshRemoteHealthPackRenderables();
         phaseSnap(phaseStats.refreshPowerupsMs);
     }
 
@@ -4120,8 +4147,7 @@ SDL_AppResult Game::iterate()
             world = glm::scale(world, rend.scale);
 
             // Projectile entities carry a per-grenade tint (HE = green,
-            // Molotov = orange, Sticky = blue) so the shared rocket model
-            // is visually distinct in flight.  Non-projectile entities use
+            // Molotov = orange, Sticky = blue). Non-projectile entities use
             // the default white tint (no recolor).
             glm::vec4 tint{1.0f};
             if (const auto* proj = registry.try_get<Projectile>(e)) {
@@ -6482,11 +6508,16 @@ void Game::refreshRemotePlayerRenderables()
 void Game::refreshRemoteProjectileRenderables()
 {
     registry.view<Position, Projectile, Velocity, CollisionShape>().each(
-        [&](entt::entity e, const Position&, const Projectile&, const Velocity&, const CollisionShape& /*shape*/) {
+        [&](entt::entity e, const Position&, const Projectile& projectile, const Velocity&, const CollisionShape& /*shape*/) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-            rend.modelIndex = rocketProjectileModelIdx_;
-            rend.scale = glm::vec3(kRocketProjectile.loadScale);
-            rend.visible = true;
+            if (isGrenadeType(projectile.type)) {
+                rend.modelIndex = grenadeModelIdx_;
+                rend.scale = kGrenadeModel.renderScale;
+            } else {
+                rend.modelIndex = rocketProjectileModelIdx_;
+                rend.scale = glm::vec3(kRocketProjectile.loadScale);
+            }
+            rend.visible = rend.modelIndex >= 0;
 
             // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
             // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
@@ -6499,19 +6530,48 @@ void Game::refreshRemoteRespawnRenderables()
         [&](entt::entity e, const Position&, const WeaponSpawner& spawner, const CollisionShape&) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
             const int weaponIndex = static_cast<int>(spawner.type);
-            if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
-                weaponAssetIds_[weaponIndex] < 0)
-            {
-                rend.modelIndex = -1;
-                rend.visible = false;
+            const bool grenadeSpawner = isGrenadeType(spawner.type);
+
+            if (grenadeSpawner) {
+                if (grenadeModelIdx_ < 0) {
+                    rend.modelIndex = -1;
+                    rend.visible = false;
+                    return;
+                }
+                rend.modelIndex = grenadeModelIdx_;
+                const WeaponSpawnerModelParams& params = defaultSpawnerModelParams(spawner.type);
+                rend.scale = params.scale;
+
+                const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+
+                rend.visible = spawner.hasWeapon;
+
+                if (spawner.hasWeapon) {
+                    static constexpr float k_twoPi = 6.28318530718f;
+
+                    rend.translation =
+                        params.translation +
+                        glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
+                } else {
+                    rend.translation = params.translation;
+                }
+                rend.orientation = spawnerModelRotation(params, t, spawner.hasWeapon);
                 return;
+            } else {
+                if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
+                    weaponAssetIds_[weaponIndex] < 0)
+                {
+                    rend.modelIndex = -1;
+                    rend.visible = false;
+                    return;
+                }
+
+                const int assetId = weaponAssetIds_[weaponIndex];
+                const AssetEntry& asset = assets_.entry(assetId);
+                rend.modelIndex = asset.modelIndex;
             }
 
-            const int assetId = weaponAssetIds_[weaponIndex];
-            const AssetEntry& asset = assets_.entry(assetId);
             const WeaponSpawnerModelParams& params = spawnerWeaponParams_[weaponIndex];
-
-            rend.modelIndex = asset.modelIndex;
             rend.scale = params.scale;
 
             const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
@@ -6540,6 +6600,38 @@ void Game::refreshRemotePowerupRenderables()
             rend.modelIndex = powerupIndex;
             rend.scale = glm::vec3(kRocketProjectile.loadScale);
             rend.visible = spawner.hasPowerup;
+        });
+}
+
+void Game::refreshRemoteHealthPackRenderables()
+{
+    registry.view<Position, HealthPackSpawner, CollisionShape>().each(
+        [&](entt::entity e, const Position&, const HealthPackSpawner& spawner, const CollisionShape&) {
+            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            const WeaponSpawnerModelParams params{
+                .scale = kMedkitModel.renderScale,
+                .translation = kMedkitModel.renderTranslation,
+                .yawOffset = 0.0f,
+                .pitchOffset = 0.0f,
+                .rollOffset = 0.0f,
+                .spinDegreesPerSecond = 45.0f,
+                .bobAmplitude = 6.0f,
+                .bobHz = 0.6f,
+            };
+            const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+
+            rend.modelIndex = medkitModelIdx_;
+            rend.scale = params.scale;
+            if (spawner.hasPack) {
+                static constexpr float k_twoPi = 6.28318530718f;
+                rend.translation =
+                    params.translation +
+                    glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
+            } else {
+                rend.translation = params.translation;
+            }
+            rend.orientation = spawnerModelRotation(params, t, spawner.hasPack);
+            rend.visible = spawner.hasPack && medkitModelIdx_ >= 0;
         });
 }
 
