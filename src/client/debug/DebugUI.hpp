@@ -86,7 +86,8 @@ public:
                  float fpsMin,
                  float fpsMax,
                  float fps1pLow,
-                 float fps5pLow);
+                 float fps5pLow,
+                 float fpsPresented);
 
     /// @brief Build the Particle System debug/control window.
     /// @param ps       The particle system to inspect and control.
@@ -389,7 +390,8 @@ private:
                                 float fpsMin,
                                 float fpsMax,
                                 float fps1pLow,
-                                float fps5pLow);
+                                float fps5pLow,
+                                float fpsPresented);
 
     /// @brief Draw the standalone 2-D overhead movement chart window.
     /// Shows the local player dot on a 3 000 × 3 000 unit grid together with

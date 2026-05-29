@@ -307,16 +307,6 @@ private:
     Uint64 softLimitPeriod = 0;            ///< Target frame period in perf-counter ticks (0 = disabled).
     Uint64 softLimitNextFrame = 0;         ///< Performance counter target for next frame deadline.
 
-    /// Render-cadence decoupling. When > 0, render-prep + drawFrame are gated to
-    /// this many Hz while the update loop (input / network / physics / client-side
-    /// prediction) keeps running every iterate(). 0 = render on every iterate()
-    /// (legacy behavior). Set via GROUP2_RENDER_HZ; bench mode enables it so the
-    /// measured loop reflects update throughput rather than the swapchain present
-    /// ceiling. Render phases receive the wall time since the last actual render
-    /// (renderDt) so vfx / particles / animation advance at the correct rate.
-    double renderTargetHz_ = 0.0;
-    Uint64 lastRenderTime_ = 0; ///< Perf counter at last render-iterate (renderTargetHz_ gate).
-
     /// @brief Apply FPS-limit strategy based on limitFPSToMonitor, monitor Hz, and physics Hz.
     /// When monitor refresh >= physics Hz, uses VSync. Otherwise falls back to a
     /// software frame limiter at physics Hz with mailbox/immediate presentation.
@@ -667,6 +657,8 @@ private:
     float statsFPSMax = 0.0f;       ///< Maximum FPS in the ring buffer.
     float statsFPS1pLow = 0.0f;     ///< 1st-percentile FPS (1 % low).
     float statsFPS5pLow = 0.0f;     ///< 5th-percentile FPS (5 % low).
+    float statsPresentedFPS = 0.0f; ///< Real visible FPS: frames actually submitted to the swapchain / sec.
+    Uint64 statsPrevPresentedFrames = 0; ///< Renderer present count at the last stats snapshot.
 
     // Benchmark mode: when BENCH_SECONDS env var is set to a positive number,
     // the client runs for that many seconds, prints a one-line FPS summary to

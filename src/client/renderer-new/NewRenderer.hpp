@@ -140,6 +140,14 @@ public:
     /// @brief Most-recent `SDL_SubmitGPUCommandBuffer` cost in milliseconds.
     [[nodiscard]] float getLastSubmitMs() const { return lastSubmitMs_; }
 
+    /// @brief Monotonic count of frames actually submitted to the swapchain.
+    ///
+    /// Unlike the main-loop FPS counter (which ticks every iterate, including
+    /// iterations where `drawFrame` drops the swapchain), this only advances when
+    /// a frame is genuinely presented.  Sample the delta over a wall-clock window
+    /// to get the *real* visible framerate.
+    [[nodiscard]] Uint64 getPresentedFrameCount() const { return presentedFrameCount_; }
+
     // ─── Per-frame submit setters (data-capture stubs) ───────────────────────
     //
     // Called by Game.cpp every frame BEFORE drawFrame.  Each stores the
@@ -432,8 +440,9 @@ private:
     // replaces the old per-frame create/destroy + 6-face re-record, which cost
     // ~4.7 ms (≈58 %) of every frame.
     SDL_GPUTexture* shadowMap_ = nullptr;
-    bool lightsInitialized_ = false;
     bool shadowDirty_ = true;
+    bool shadowRefreshActive_ = false; ///< Mid-cycle: still emitting cube faces one per frame.
+    Uint32 shadowFaceCursor_ = 0;      ///< Next (light*6 + face) index to record during a refresh.
     Uint64 lastShadowUpdateTick_ = 0;
     double shadowUpdateHz_ = 30.0;
 
@@ -481,4 +490,5 @@ private:
     float lastAcquireMs_ = 0.0f;
     float lastRecordMs_ = 0.0f;
     float lastSubmitMs_ = 0.0f;
+    Uint64 presentedFrameCount_ = 0; ///< Monotonic count of frames actually submitted to the swapchain.
 };

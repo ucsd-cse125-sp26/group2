@@ -1491,46 +1491,22 @@ bool Game::init(AppContext& ctx)
     // Bench mode: BENCH_SECONDS=N runs the client for N seconds, then prints a
     // single-line FPS summary to stderr and quits.  Driven by
     // `scripts/perf-100bots.sh` for baseline + post-change measurements.
-    // Render-cadence decouple: GROUP2_RENDER_HZ caps render-prep+drawFrame to N Hz
-    // while the update loop keeps running every iterate(). Applies in normal play
-    // and bench. Bench defaults it on (below) so the measured loop reflects update
-    // throughput, not the swapchain present ceiling.
-    if (const char* envRenderHz = SDL_getenv("GROUP2_RENDER_HZ")) {
-        const double hz = std::strtod(envRenderHz, nullptr);
-        if (hz > 0.0) {
-            renderTargetHz_ = hz;
-            lastRenderTime_ = prevTime;
-            SDL_Log("[client] render cadence decoupled: render gated to %.1f Hz, update loop uncapped",
-                    renderTargetHz_);
-        }
-    }
-
     if (const char* envBench = SDL_getenv("BENCH_SECONDS")) {
         const float seconds = std::strtof(envBench, nullptr);
         if (seconds > 0.0f) {
             benchSeconds_ = seconds;
             benchActive_ = true;
             benchStartTime_ = prevTime;
-            // Bench decouples render from update by default (override via
-            // GROUP2_RENDER_HZ, or set GROUP2_RENDER_HZ=0 to measure the legacy
-            // present-coupled loop). With render gated, the update loop spins far
-            // faster than 5000 fps, so reserve generously to keep push_back out of
-            // the allocator on the hot path. benchFrameStats_ is only appended on
-            // render-iterates, so it stays bounded by the render cadence.
-            if (renderTargetHz_ == 0.0 && SDL_getenv("GROUP2_RENDER_HZ") == nullptr) {
-                renderTargetHz_ = 120.0;
-                lastRenderTime_ = prevTime;
-            }
-            const float reserveFps = renderTargetHz_ > 0.0 ? 60000.0f : 5000.0f;
-            benchFrameTimesMs_.reserve(static_cast<size_t>(seconds * reserveFps));
+            // Reserve enough room for ~5000 fps × bench duration (worst case),
+            // so push_back never reallocates inside the hot path.
+            benchFrameTimesMs_.reserve(static_cast<size_t>(seconds * 5000.0f));
             benchFrameStats_.reserve(static_cast<size_t>(seconds * 5000.0f));
             // Drop the renderer's vsync limiter so the bench reflects raw client capacity.
             limitFPSToMonitor = false;
             applyFrameRateLimit();
-            SDL_Log("[bench] running for %.1fs then exiting (warmup %.1fs, render %.0f Hz)",
+            SDL_Log("[bench] running for %.1fs then exiting (warmup %.1fs)",
                     static_cast<double>(seconds),
-                    static_cast<double>(k_benchWarmupSeconds),
-                    renderTargetHz_);
+                    static_cast<double>(k_benchWarmupSeconds));
         }
     }
 
@@ -2156,6 +2132,14 @@ SDL_AppResult Game::iterate()
         statsFPS5pLow = sorted[static_cast<int>(static_cast<float>(count) * 0.05f)]; // 5th percentile
         // Most-recent sample (last written = head - 1).
         statsFPSCurrent = fpsHistory[(fpsHistoryHead - 1 + k_fpsHistorySize) % k_fpsHistorySize];
+
+        // Real visible framerate: frames the renderer actually presented this
+        // window, divided by wall time. Unlike the loop-rate FPS above (which
+        // ticks every iterate, including dropped frames), this is what the player
+        // actually sees on screen.
+        const Uint64 presentedNow = renderer->getPresentedFrameCount();
+        statsPresentedFPS = static_cast<float>(presentedNow - statsPrevPresentedFrames) / statsDt;
+        statsPrevPresentedFrames = presentedNow;
     }
 
     // Bench mode: collect per-frame timings (after warmup) then aggregate +
@@ -2202,6 +2186,16 @@ SDL_AppResult Game::iterate()
                          static_cast<double>(fps(msP99)),
                          static_cast<double>(fps(msSlowest)),
                          static_cast<double>(fps(msFastest)));
+
+            // Real visible framerate: frames actually presented to the swapchain
+            // over the whole run. The loop-rate numbers above count every iterate
+            // (including frames the renderer dropped because the swapchain wasn't
+            // ready); this is the rate the player actually sees.
+            std::fprintf(stderr,
+                         "[bench] presented(real visible)=%.1f fps  (%llu frames / %.1fs)\n",
+                         static_cast<double>(renderer->getPresentedFrameCount()) / static_cast<double>(benchElapsed),
+                         static_cast<unsigned long long>(renderer->getPresentedFrameCount()),
+                         static_cast<double>(benchElapsed));
 
             // Phase breakdown: split frames into "fast median band" (frames
             // near the median) vs. "slowest 1%" (the p1 tail).  Average each
@@ -2618,24 +2612,6 @@ SDL_AppResult Game::iterate()
     // 5. Bail out early if there is nothing new to render
     if (!renderSeparateFromPhysics && !physicsRan)
         return SDL_APP_CONTINUE;
-
-    // 5b. Render-cadence decoupling. Everything above (input, network poll,
-    // physics, client-side prediction/reconciliation, renderable refresh) runs
-    // every iterate(). Everything below (camera, vfx, particles, audio,
-    // interpolation, animation, viewmodel, UI, drawFrame) is render-prep and is
-    // gated to renderTargetHz_, letting the update loop run faster than the
-    // swapchain can present. Render phases below consume `frameTime`, so we
-    // rewrite it to the wall time elapsed since the previous *render* — without
-    // this, vfx/particles/animation would advance by only the (tiny) inter-iterate
-    // delta and play in slow-motion.
-    if (renderTargetHz_ > 0.0) {
-        const double sinceRenderSec =
-            static_cast<double>(k_now - lastRenderTime_) / static_cast<double>(k_perfFreq);
-        if (sinceRenderSec < 1.0 / renderTargetHz_)
-            return SDL_APP_CONTINUE;
-        lastRenderTime_ = k_now;
-        frameTime = static_cast<float>(sinceRenderSec);
-    }
 
     // 6. Resolve camera
     glm::vec3 renderEye{0.0f, 100.0f, 0.0f};
@@ -4292,6 +4268,18 @@ SDL_AppResult Game::iterate()
         // Build dynamic point lights list.
         std::vector<PointLight> dynLights;
         std::uint32_t beamPointLights = 0;
+
+        // Persistent static point light.  Game rebuilds this list every frame and
+        // hands it to the renderer, clobbering any light the renderer set itself;
+        // when the list is empty (no active beams) numPointLights drops to 0 and the
+        // cubemap shadow pass is skipped entirely.  Keep one light here so the scene
+        // stays lit and shadows always process.
+        dynLights.push_back(PointLight{
+            .position = glm::vec3(300.0f, 100.0f, 500.0f),
+            .intensity = 250000.0f,
+            .color = glm::vec3(1.0f, 0.7f, 0.5f),
+            .range = 500.0f,
+        });
         // // Static glow sphere point light.
         // dynLights.push_back(PointLight{
         //     .position = glowSpherePos,
@@ -4974,7 +4962,8 @@ SDL_AppResult Game::iterate()
                         statsFPSMin,
                         statsFPSMax,
                         statsFPS1pLow,
-                        statsFPS5pLow);
+                        statsFPS5pLow,
+                        statsPresentedFPS);
         debugUI.buildNetworkUI(client->getNetStats());
     }
 

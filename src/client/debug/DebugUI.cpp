@@ -223,7 +223,8 @@ void DebugUI::buildUI(const Registry& registry,
                       const float fpsMin,
                       const float fpsMax,
                       const float fps1pLow,
-                      const float fps5pLow)
+                      const float fps5pLow,
+                      const float fpsPresented)
 {
     // The Movement Chart and Bhop Analyzer are children of the inspector's
     // toggle state, but also have their own sub-toggles set from inside this
@@ -248,7 +249,8 @@ void DebugUI::buildUI(const Registry& registry,
                                    fpsMin,
                                    fpsMax,
                                    fps1pLow,
-                                   fps5pLow);
+                                   fps5pLow,
+                                   fpsPresented);
             ImGui::End();
         }
     }
@@ -278,7 +280,8 @@ void DebugUI::buildInspectorContents(const Registry& registry,
                                      const float fpsMin,
                                      const float fpsMax,
                                      const float fps1pLow,
-                                     const float fps5pLow)
+                                     const float fps5pLow,
+                                     const float fpsPresented)
 {
     // Key bindings reminder
     ImGui::TextDisabled("F2: debug menu  |  F3: toggle cursor  |  ESC: toggle cursor");
@@ -378,12 +381,16 @@ void DebugUI::buildInspectorContents(const Registry& registry,
     // Performance
     ImGui::SeparatorText("Performance");
     ImGui::Text("Phys: %5.1f Hz    Tick: %d", static_cast<double>(physicsHz), tickCount);
-    ImGui::Text("FPS  cur:%5.0f  1%%:%5.0f  5%%:%5.0f  min:%5.0f  max:%5.0f",
+    ImGui::Text("Loop  cur:%5.0f  1%%:%5.0f  5%%:%5.0f  min:%5.0f  max:%5.0f",
                 static_cast<double>(fpsCurrent),
                 static_cast<double>(fps1pLow),
                 static_cast<double>(fps5pLow),
                 static_cast<double>(fpsMin),
                 static_cast<double>(fpsMax));
+    // Loop rate counts every main-loop iteration (including ones where the
+    // swapchain wasn't ready and the frame was dropped). Presented = frames that
+    // actually reached the screen — the real visible framerate.
+    ImGui::Text("Presented (real visible FPS): %5.0f", static_cast<double>(fpsPresented));
 
     const auto* const k_entityStorage = registry.storage<entt::entity>();
 

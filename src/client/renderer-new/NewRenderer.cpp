@@ -295,6 +295,17 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     const Uint64 freq = SDL_GetPerformanceFrequency();
     const Uint64 t0 = SDL_GetPerformanceCounter();
 
+    // TEMP ablation profiling: env-gated per-pass skips.  We have no GPU
+    // timestamp API (SDL3 GPU exposes only fences), and we are GPU/present-bound
+    // (the CPU blocks in swapchain acquire), so disabling a pass frees the
+    // swapchain sooner and the presented-FPS delta = that pass's GPU cost.
+    static const bool kSkipShadow = SDL_getenv("GROUP2_PROF_NO_SHADOW") != nullptr;
+    static const bool kSkipGeom = SDL_getenv("GROUP2_PROF_NO_GEOM") != nullptr;
+    static const bool kSkipWeapon = SDL_getenv("GROUP2_PROF_NO_WEAPON") != nullptr;
+    static const bool kSkipFxaa = SDL_getenv("GROUP2_PROF_NO_FXAA") != nullptr;
+    static const bool kSkipHud = SDL_getenv("GROUP2_PROF_NO_HUD") != nullptr;
+    static const bool kSkipUI = SDL_getenv("GROUP2_PROF_NO_UI") != nullptr;
+
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
     if (!cmd) {
         SDL_Log("NewRenderer::drawFrame: SDL_AcquireGPUCommandBuffer failed: %s", SDL_GetError());
@@ -356,18 +367,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         glm::vec3(0, 0, -1), glm::vec3(0, -1, 0), glm::vec3(0, -1, 0),
     };
 
-    // Lights are static — build the point-light set exactly once.
-    if (!lightsInitialized_) {
-        std::vector<PointLight> sampleLights;
-        PointLight pl0{};
-        pl0.position = glm::vec3(300, 100.0f, 500);
-        pl0.intensity = 250000;
-        pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
-        pl0.range = 500.0f;
-        sampleLights.push_back(pl0);
-        setPointLights(sampleLights);
-        lightsInitialized_ = true;
-    }
+    // Point lights are supplied by Game every frame via setPointLights().
 
     // Allocate the shadow cubemap ONCE and reuse it.  (Old code created and
     // released a D32F cube array every frame — ~1.2 ms of CPU + allocator
@@ -379,36 +379,42 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     }
     const Uint64 tShadowAlloc1 = SDL_GetPerformanceCounter();
 
-    // Regenerate shadow-map contents on a throttled cadence rather than every
-    // frame.  The light is static and the world is static, so only moving
-    // casters change frame-to-frame; a 30 Hz refresh is visually identical but
-    // skips the 6-face full-scene depth re-record (~3.4 ms) on the vast
-    // majority of frames at high frame rates.
+    // Regenerate shadow-map contents on a throttled cadence, AND spread the
+    // refresh across frames one cube face at a time.  Recording all 6 faces (per
+    // light) in a single frame is a ~7 ms full-scene depth re-record that lands
+    // on whatever frame the 30 Hz timer fires — a spike that dominates the P95/P99
+    // tail.  Instead we start a refresh cycle at 30 Hz and emit exactly one face
+    // per frame until the cube is complete (~1.2 ms each), so no single frame
+    // pays the whole cost.  The light/world are static, so a face-by-face refresh
+    // is visually identical.
+    const Uint32 totalFaces = sceneLightInfo_.numPointLights * numCubeFaces;
     const Uint64 shadowPeriodTicks =
         shadowUpdateHz_ > 0.0 ? static_cast<Uint64>(static_cast<double>(freq) / shadowUpdateHz_) : 0;
-    const bool updateShadows = sceneLightInfo_.numPointLights >= 1 &&
-        (shadowDirty_ || tShadowAlloc1 - lastShadowUpdateTick_ >= shadowPeriodTicks);
-    if (updateShadows) {
+
+    if (!kSkipShadow && sceneLightInfo_.numPointLights >= 1 && !shadowRefreshActive_ &&
+        (shadowDirty_ || tShadowAlloc1 - lastShadowUpdateTick_ >= shadowPeriodTicks)) {
+        shadowRefreshActive_ = true;
+        shadowFaceCursor_ = 0;
+        shadowDirty_ = false;
+        lastShadowUpdateTick_ = tShadowAlloc1; // schedule next cycle from refresh start
+    }
+
+    if (shadowRefreshActive_) {
         glm::mat4 shadowProjection = glm::perspective(
             glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
         shadowProjection[1][1] *= -1;
-        for (Uint8 iLight = 0; iLight < sceneLightInfo_.numPointLights; iLight++) {
-            PointLight& light = sceneLightInfo_.pointLights[iLight];
-            glm::vec3 yNegatedLightPosition = light.position;
 
-            for (int face = 0; face < numCubeFaces; face++) {
-                const glm::vec3& iCubeFaceTarget = cubeFaceTargets[face];
-                const glm::vec3& iCubeFaceUp = cubeFaceUps[face];
-
-                glm::mat4 shadowView =
-                    glm::lookAt(yNegatedLightPosition, yNegatedLightPosition + iCubeFaceTarget, iCubeFaceUp);
-                const glm::mat4 shadowViewProjection = shadowProjection * shadowView;
-
-                drawGeometryDepthPass(shadowMap_, iLight * 6 + face, cmd, shadowViewProjection);
-            }
+        constexpr Uint32 kFacesPerFrame = 1;
+        for (Uint32 n = 0; n < kFacesPerFrame && shadowFaceCursor_ < totalFaces; ++n, ++shadowFaceCursor_) {
+            const Uint32 iLight = shadowFaceCursor_ / numCubeFaces;
+            const Uint32 face = shadowFaceCursor_ % numCubeFaces;
+            const glm::vec3 lightPos = sceneLightInfo_.pointLights[iLight].position;
+            const glm::mat4 shadowView = glm::lookAt(lightPos, lightPos + cubeFaceTargets[face], cubeFaceUps[face]);
+            drawGeometryDepthPass(shadowMap_, iLight * numCubeFaces + face, cmd, shadowProjection * shadowView);
         }
-        lastShadowUpdateTick_ = tShadowAlloc1;
-        shadowDirty_ = false;
+
+        if (shadowFaceCursor_ >= totalFaces)
+            shadowRefreshActive_ = false;
     }
 
     const Uint64 tShadowPasses1 = SDL_GetPerformanceCounter();
@@ -419,12 +425,17 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
 
     const Uint64 tGeom0 = SDL_GetPerformanceCounter();
-    drawGeometryPass(sceneColor_, cmd);
+    if (!kSkipGeom)
+        drawGeometryPass(sceneColor_, cmd);
     const Uint64 tGeom1 = SDL_GetPerformanceCounter();
-    drawWeaponPass(sceneColor_, cmd);
-    drawFxaaPass(sceneColor_, swapchain, cmd);
-    drawHudPass(swapchain, cmd);
-    drawUIPass(swapchain, cmd);
+    if (!kSkipWeapon)
+        drawWeaponPass(sceneColor_, cmd);
+    if (!kSkipFxaa)
+        drawFxaaPass(sceneColor_, swapchain, cmd);
+    if (!kSkipHud)
+        drawHudPass(swapchain, cmd);
+    if (!kSkipUI)
+        drawUIPass(swapchain, cmd);
 
     const Uint64 t2 = SDL_GetPerformanceCounter();
     lastRecordMs_ = ticksToMs(t2 - t1, freq);
@@ -460,6 +471,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     }
 
     SDL_SubmitGPUCommandBuffer(cmd);
+    ++presentedFrameCount_; // a frame genuinely went to the swapchain this iterate
 
     const Uint64 t3 = SDL_GetPerformanceCounter();
     lastSubmitMs_ = ticksToMs(t3 - t2, freq);
