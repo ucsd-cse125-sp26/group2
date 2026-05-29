@@ -74,6 +74,12 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
+    // Allow the CPU to run up to 3 frames ahead of the GPU (default 2).  With an
+    // uncapped present mode this lets the swapchain acquire return without
+    // blocking far more often, which keeps the render loop from stalling on
+    // GPU back-pressure.
+    SDL_SetGPUAllowedFramesInFlight(device_, 3);
+
     ImGui_ImplSDLGPU3_InitInfo imguiInfo = Boilerplate::createImGuiInfo(device_, window_);
     if (!ImGui_ImplSDLGPU3_Init(&imguiInfo)) {
         SDL_Log("NewRenderer: ImGui_ImplSDLGPU3_Init failed");
@@ -300,11 +306,13 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     SDL_GPUTexture* swapchain = nullptr;
     Uint32 width = 0;
     Uint32 height = 0;
+    const Uint64 tSwap0 = SDL_GetPerformanceCounter();
     if (!SDL_AcquireGPUSwapchainTexture(cmd, window_, &swapchain, &width, &height)) {
         SDL_Log("NewRenderer::drawFrame: SDL_AcquireGPUSwapchainTexture failed: %s", SDL_GetError());
         SDL_CancelGPUCommandBuffer(cmd);
         return;
     }
+    const Uint64 tSwap1 = SDL_GetPerformanceCounter();
 
     if (!swapchain) {
         // Swapchain not ready (e.g. minimised) — drop the frame silently.
@@ -320,6 +328,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     // Per-frame uploads (skinning palette/instances, etc.) happen BEFORE
     // the first render pass so the copy is sequenced ahead of the draws.
+    const Uint64 tCopy0 = SDL_GetPerformanceCounter();
     {
         SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
         if (copyPass) {
@@ -327,82 +336,84 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
             SDL_EndGPUCopyPass(copyPass);
         }
     }
+    const Uint64 tCopy1 = SDL_GetPerformanceCounter();
+
+    // Rebuild the static world-geometry batches if the scene changed.  Must run
+    // outside any render pass (uploadBuffers opens its own copy pass); rare.
+    if (worldBatchesDirty_)
+        rebuildWorldBatches(cmd);
 
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
-    // constexpr uint32_t shadowSize = 2048;
-    //  constexpr uint32_t shadowSize = 1024;
     constexpr uint32_t shadowSize = 1024;
     constexpr Uint8 numCubeFaces = 6;
 
-    static glm::vec3 cubeFaceTargets[numCubeFaces];
-    static glm::vec3 cubeFaceUps[numCubeFaces];
+    static const glm::vec3 cubeFaceTargets[numCubeFaces] = {
+        glm::vec3(1, 0, 0), glm::vec3(-1, 0, 0), glm::vec3(0, 1, 0),
+        glm::vec3(0, -1, 0), glm::vec3(0, 0, 1), glm::vec3(0, 0, -1),
+    };
+    static const glm::vec3 cubeFaceUps[numCubeFaces] = {
+        glm::vec3(0, -1, 0), glm::vec3(0, -1, 0), glm::vec3(0, 0, 1),
+        glm::vec3(0, 0, -1), glm::vec3(0, -1, 0), glm::vec3(0, -1, 0),
+    };
 
-    cubeFaceTargets[0] = glm::vec3(1, 0, 0);
-    cubeFaceTargets[1] = glm::vec3(-1, 0, 0);
-    cubeFaceTargets[2] = glm::vec3(0, 1, 0);
-    cubeFaceTargets[3] = glm::vec3(0, -1, 0);
-    cubeFaceTargets[4] = glm::vec3(0, 0, 1);
-    cubeFaceTargets[5] = glm::vec3(0, 0, -1);
+    // Lights are static — build the point-light set exactly once.
+    if (!lightsInitialized_) {
+        std::vector<PointLight> sampleLights;
+        PointLight pl0{};
+        pl0.position = glm::vec3(300, 100.0f, 500);
+        pl0.intensity = 250000;
+        pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
+        pl0.range = 500.0f;
+        sampleLights.push_back(pl0);
+        setPointLights(sampleLights);
+        lightsInitialized_ = true;
+    }
 
-    cubeFaceUps[0] = glm::vec3(0, -1, 0);
-    cubeFaceUps[1] = glm::vec3(0, -1, 0);
-    cubeFaceUps[2] = glm::vec3(0, 0, 1);
-    cubeFaceUps[3] = glm::vec3(0, 0, -1);
-    cubeFaceUps[4] = glm::vec3(0, -1, 0);
-    cubeFaceUps[5] = glm::vec3(0, -1, 0);
-
-    std::vector<PointLight> sampleLights;
-    PointLight pl0{};
-    pl0.position = glm::vec3(300, 100.0f, 500);
-    pl0.intensity = 250000;
-    pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl0.range = 500.0f;
-    sampleLights.push_back(pl0);
-    setPointLights(sampleLights);
-
-    SDL_GPUTexture* shadowMap = nullptr;
-
-    // SDL_Log("farPlane=%f numLights=%u",
-    //     sceneLightInfo_.pointLightFarPlane,
-    //     sceneLightInfo_.numPointLights);
-
+    // Allocate the shadow cubemap ONCE and reuse it.  (Old code created and
+    // released a D32F cube array every frame — ~1.2 ms of CPU + allocator
+    // churn that drove the frame-time tail.)
     const Uint64 tShadowAlloc0 = SDL_GetPerformanceCounter();
-    if (sceneLightInfo_.numPointLights < 1) {
-        shadowMap = Boilerplate::createEmptyTextureD32F(device_, 1, 1, true, MAX_POINT_LIGHTS);
-    } else {
-        // std::cout << "NewRenderer::drawFrame: sceneLightInfo_.numPointLights = " << sceneLightInfo_.numPointLights <<
-        // std::endl;
-        shadowMap = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
+    if (shadowMap_ == nullptr) {
+        shadowMap_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
+        shadowDirty_ = true;
     }
     const Uint64 tShadowAlloc1 = SDL_GetPerformanceCounter();
-    if (sceneLightInfo_.numPointLights >= 1) {
 
+    // Regenerate shadow-map contents on a throttled cadence rather than every
+    // frame.  The light is static and the world is static, so only moving
+    // casters change frame-to-frame; a 30 Hz refresh is visually identical but
+    // skips the 6-face full-scene depth re-record (~3.4 ms) on the vast
+    // majority of frames at high frame rates.
+    const Uint64 shadowPeriodTicks =
+        shadowUpdateHz_ > 0.0 ? static_cast<Uint64>(static_cast<double>(freq) / shadowUpdateHz_) : 0;
+    const bool updateShadows = sceneLightInfo_.numPointLights >= 1 &&
+        (shadowDirty_ || tShadowAlloc1 - lastShadowUpdateTick_ >= shadowPeriodTicks);
+    if (updateShadows) {
         glm::mat4 shadowProjection = glm::perspective(
             glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
         shadowProjection[1][1] *= -1;
         for (Uint8 iLight = 0; iLight < sceneLightInfo_.numPointLights; iLight++) {
             PointLight& light = sceneLightInfo_.pointLights[iLight];
             glm::vec3 yNegatedLightPosition = light.position;
-            // yNegatedLightPosition.y *= -1.0f;
 
             for (int face = 0; face < numCubeFaces; face++) {
-                glm::vec3& iCubeFaceTarget = cubeFaceTargets[face];
-                glm::vec3& iCubeFaceUp = cubeFaceUps[face];
+                const glm::vec3& iCubeFaceTarget = cubeFaceTargets[face];
+                const glm::vec3& iCubeFaceUp = cubeFaceUps[face];
 
                 glm::mat4 shadowView =
                     glm::lookAt(yNegatedLightPosition, yNegatedLightPosition + iCubeFaceTarget, iCubeFaceUp);
                 const glm::mat4 shadowViewProjection = shadowProjection * shadowView;
 
-                drawGeometryDepthPass(shadowMap, iLight * 6 + face, cmd, shadowViewProjection);
+                drawGeometryDepthPass(shadowMap_, iLight * 6 + face, cmd, shadowViewProjection);
             }
         }
+        lastShadowUpdateTick_ = tShadowAlloc1;
+        shadowDirty_ = false;
     }
 
     const Uint64 tShadowPasses1 = SDL_GetPerformanceCounter();
 
     ///////////////////////////////////// SHADOWMAP CREATION /////////////////////////////////////////////
-    // shadowMapBindings_.push({shadowMap, depthSampler_});
-    shadowMapTextureDeletionQueue.push(shadowMap);
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
@@ -421,20 +432,29 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     // TEMP attribution: accumulate sub-pass costs and log averages periodically.
     {
         static double accShadowAlloc = 0.0, accShadowPasses = 0.0, accGeom = 0.0, accRest = 0.0, accRec = 0.0;
+        static double accSwap = 0.0, accCopy = 0.0, accAcq = 0.0, accSub = 0.0;
         static int accN = 0;
+        const double msSwap = ticksToMs(tSwap1 - tSwap0, freq);
+        const double msCopy = ticksToMs(tCopy1 - tCopy0, freq);
         const double msShadowAlloc = ticksToMs(tShadowAlloc1 - tShadowAlloc0, freq);
         const double msShadowPasses = ticksToMs(tShadowPasses1 - tShadowAlloc1, freq);
         const double msGeom = ticksToMs(tGeom1 - tGeom0, freq);
         const double msRest = ticksToMs(t2 - tGeom1, freq);
+        accSwap += msSwap;
+        accCopy += msCopy;
         accShadowAlloc += msShadowAlloc;
         accShadowPasses += msShadowPasses;
         accGeom += msGeom;
         accRest += msRest;
         accRec += lastRecordMs_;
+        accAcq += lastAcquireMs_;
+        accSub += lastSubmitMs_;
         if (++accN >= 300) {
-            SDL_Log("[attr] rec=%.3f | shadowAlloc=%.3f shadowPasses=%.3f geometry=%.3f rest(weapon+fxaa+hud+ui)=%.3f",
-                    accRec / accN, accShadowAlloc / accN, accShadowPasses / accN, accGeom / accN, accRest / accN);
-            accShadowAlloc = accShadowPasses = accGeom = accRest = accRec = 0.0;
+            SDL_Log("[attr] cmdAcq=%.3f rec=%.3f submit=%.3f | swapAcq=%.3f copy=%.3f shadowAlloc=%.3f "
+                    "shadowPasses=%.3f geometry=%.3f rest(weapon+fxaa+hud+ui)=%.3f",
+                    accAcq / accN, accRec / accN, accSub / accN, accSwap / accN, accCopy / accN, accShadowAlloc / accN,
+                    accShadowPasses / accN, accGeom / accN, accRest / accN);
+            accSwap = accCopy = accShadowAlloc = accShadowPasses = accGeom = accRest = accRec = accAcq = accSub = 0.0;
             accN = 0;
         }
     }
@@ -443,13 +463,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     const Uint64 t3 = SDL_GetPerformanceCounter();
     lastSubmitMs_ = ticksToMs(t3 - t2, freq);
-
-    // for (auto smb : shadowMapBindings_) {
-    // for (auto smb : shadowMapBindings_) {
-    if (shadowMapTextureDeletionQueue.size() > 1) {
-        SDL_ReleaseGPUTexture(device_, shadowMapTextureDeletionQueue.front());
-        shadowMapTextureDeletionQueue.pop();
-    }
 
     // TODO(graphics): if `pendingScreenshotPath_` is non-empty, schedule a
     // swapchain readback and write a PNG.  See `requestScreenshot` doc.
@@ -497,15 +510,18 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
 
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUTextureSamplerBinding shadowMapBinding{shadowMapTextureDeletionQueue.back(), depthSampler_};
+    SDL_GPUTextureSamplerBinding shadowMapBinding{shadowMap_, depthSampler_};
     SDL_BindGPUFragmentSamplers(renderPass, 1, &shadowMapBinding, 1);
 
     SDL_PushGPUFragmentUniformData(cmd, 2, &sceneLightInfo_, sizeof(LightUBO));
 }
 void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)
 {
+    const Uint64 gfreq = SDL_GetPerformanceFrequency();
+    const Uint64 gt0 = SDL_GetPerformanceCounter();
     if (particleSystem_)
         particleSystem_->uploadToGpu(cmd); // Must be before render pass
+    const Uint64 gt1 = SDL_GetPerformanceCounter();
 
     SDL_GPUColorTargetInfo colorTarget =
         Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
@@ -518,15 +534,41 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
 
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
+    const Uint64 gt2 = SDL_GetPerformanceCounter();
     drawWorldModelInstances(geometryPass, cmd, false);
+    const Uint64 gt3 = SDL_GetPerformanceCounter();
     drawEntityModels(geometryPass, cmd, false);
+    const Uint64 gt4 = SDL_GetPerformanceCounter();
 
     drawSkinnedModels(geometryPass, cmd);
+    const Uint64 gt5 = SDL_GetPerformanceCounter();
     drawParticles(geometryPass, cmd);
+    const Uint64 gt6 = SDL_GetPerformanceCounter();
 
     // drawWeapon(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
+    const Uint64 gt7 = SDL_GetPerformanceCounter();
+
+    // TEMP attribution for the color geometry pass.
+    {
+        static double aUp = 0, aBegin = 0, aWorld = 0, aEnt = 0, aSkin = 0, aPart = 0, aEnd = 0;
+        static int n = 0;
+        aUp += ticksToMs(gt1 - gt0, gfreq);
+        aBegin += ticksToMs(gt2 - gt1, gfreq);
+        aWorld += ticksToMs(gt3 - gt2, gfreq);
+        aEnt += ticksToMs(gt4 - gt3, gfreq);
+        aSkin += ticksToMs(gt5 - gt4, gfreq);
+        aPart += ticksToMs(gt6 - gt5, gfreq);
+        aEnd += ticksToMs(gt7 - gt6, gfreq);
+        if (++n >= 300) {
+            SDL_Log("[geom] partUpload=%.3f begin+bindLight=%.3f world=%.3f entity=%.3f skinned=%.3f "
+                    "particles=%.3f endPass=%.3f (cache=%zu)",
+                    aUp / n, aBegin / n, aWorld / n, aEnt / n, aSkin / n, aPart / n, aEnd / n, worldBatches_.size());
+            aUp = aBegin = aWorld = aEnt = aSkin = aPart = aEnd = 0;
+            n = 0;
+        }
+    }
 }
 
 void NewRenderer::drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)
@@ -637,16 +679,208 @@ void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUComman
     skinnedRenderer_.draw(renderPass, cmd);
 }
 
-void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth)
+void NewRenderer::rebuildWorldBatches(SDL_GPUCommandBuffer* cmd)
 {
+    // Release any GPU buffers from a prior build (SDL defers the actual free
+    // until pending GPU work referencing them completes, so this is safe).
+    for (auto& b : worldBatches_) {
+        if (b.vbuf)
+            SDL_ReleaseGPUBuffer(device_, b.vbuf);
+        if (b.ibuf)
+            SDL_ReleaseGPUBuffer(device_, b.ibuf);
+    }
+    worldBatches_.clear();
+
+    // CPU-side accumulation: one entry per distinct material signature.
+    struct BuildBatch
+    {
+        SDL_GPUTexture* texture = nullptr;
+        SDL_GPUTexture* normalTexture = nullptr;
+        SDL_GPUTexture* metallicRoughnessTexture = nullptr;
+        glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
+        Uint32 materialFlags[4] = {1, 0, 0, 0};
+        std::vector<Asset::Vertex> verts;
+        std::vector<Uint32> indices;
+    };
+    std::vector<BuildBatch> builds;
+
     for (const auto& mInstance : Asset::modelInstances_) {
         if (!mInstance.drawInScenePass)
             continue;
-        if (depth) {
-            drawModelDepth(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
-        } else {
-            drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
+        const auto modelIt = Asset::models_.find(mInstance.modelId_);
+        if (modelIt == Asset::models_.end())
+            continue;
+        const Asset::Model& model = modelIt->second;
+        for (const auto& element : model.modelElements_) {
+            const auto meshIt = Asset::meshes_.find(element.meshId_);
+            if (meshIt == Asset::meshes_.end())
+                continue;
+            const Asset::Mesh& mesh = meshIt->second;
+            if (mesh.vertexData_.empty() || mesh.indexData_.empty())
+                continue;
+
+            const Asset::Material* material = nullptr;
+            const auto matIt = Asset::materials_.find(element.materialId_);
+            if (matIt != Asset::materials_.end())
+                material = &matIt->second;
+
+            SDL_GPUTexture* texture = nullptr;
+            SDL_GPUTexture* normalTexture = nullptr;
+            SDL_GPUTexture* metallicRoughnessTexture = nullptr;
+            if (material != nullptr) {
+                const auto texIt = Asset::textures_.find(material->texId_[0]);
+                if (texIt != Asset::textures_.end())
+                    texture = texIt->second.tex;
+                const auto nrmIt = Asset::textures_.find(material->normalTexture);
+                if (nrmIt != Asset::textures_.end())
+                    normalTexture = nrmIt->second.tex;
+                const auto mrIt = Asset::textures_.find(material->metallicRoughnessTexture);
+                if (mrIt != Asset::textures_.end())
+                    metallicRoughnessTexture = mrIt->second.tex;
+            }
+
+            const bool useTexture = texture != nullptr || material == nullptr || !material->hasPhongData_;
+            if (texture == nullptr)
+                texture = texture_;
+            if (normalTexture == nullptr)
+                normalTexture = texture_;
+            if (metallicRoughnessTexture == nullptr)
+                metallicRoughnessTexture = texture_;
+
+            const glm::vec4 diffuse =
+                material != nullptr ? glm::vec4(material->kDiffuse_, 1.0f) : glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+            const Uint32 flags[4] = {useTexture ? 1u : 0u, normalTexture != texture_ ? 1u : 0u,
+                                     metallicRoughnessTexture != texture_ ? 1u : 0u, 0u};
+
+            // Find or create the matching material batch (linear scan — there
+            // are only a handful of distinct materials).
+            BuildBatch* batch = nullptr;
+            for (auto& b : builds) {
+                if (b.texture == texture && b.normalTexture == normalTexture &&
+                    b.metallicRoughnessTexture == metallicRoughnessTexture && b.materialDiffuse == diffuse &&
+                    b.materialFlags[0] == flags[0] && b.materialFlags[1] == flags[1] &&
+                    b.materialFlags[2] == flags[2]) {
+                    batch = &b;
+                    break;
+                }
+            }
+            if (batch == nullptr) {
+                BuildBatch nb{};
+                nb.texture = texture;
+                nb.normalTexture = normalTexture;
+                nb.metallicRoughnessTexture = metallicRoughnessTexture;
+                nb.materialDiffuse = diffuse;
+                nb.materialFlags[0] = flags[0];
+                nb.materialFlags[1] = flags[1];
+                nb.materialFlags[2] = flags[2];
+                nb.materialFlags[3] = 0u;
+                builds.push_back(std::move(nb));
+                batch = &builds.back();
+            }
+
+            // Bake this element's vertices into world space so the shader's
+            // per-object model matrix can stay the identity.
+            const glm::mat4 model_m = mInstance.transform_ * element.cachedTransform_;
+            const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(model_m)));
+            const glm::mat3 rot = glm::mat3(model_m);
+            const auto base = static_cast<Uint32>(batch->verts.size());
+            batch->verts.reserve(batch->verts.size() + mesh.vertexData_.size());
+            for (const Asset::Vertex& sv : mesh.vertexData_) {
+                Asset::Vertex wv;
+                wv.position = glm::vec3(model_m * glm::vec4(sv.position, 1.0f));
+                wv.normal = glm::normalize(normalMatrix * sv.normal);
+                wv.texUV = sv.texUV;
+                wv.tangent = glm::vec4(glm::normalize(rot * glm::vec3(sv.tangent)), sv.tangent.w);
+                batch->verts.push_back(wv);
+            }
+            batch->indices.reserve(batch->indices.size() + mesh.indexData_.size());
+            for (const Uint32 idx : mesh.indexData_)
+                batch->indices.push_back(base + idx);
         }
+    }
+
+    // Create GPU buffers and queue one combined upload.
+    std::vector<Boilerplate::BufferUpload> uploads;
+    uploads.reserve(builds.size() * 2);
+    for (auto& b : builds) {
+        if (b.indices.empty())
+            continue;
+        const size_t vsize = b.verts.size() * sizeof(Asset::Vertex);
+        const size_t isize = b.indices.size() * sizeof(Uint32);
+
+        WorldBatch wb{};
+        wb.vbuf = Boilerplate::createBuffer(device_, vsize, SDL_GPU_BUFFERUSAGE_VERTEX);
+        wb.ibuf = Boilerplate::createBuffer(device_, isize, SDL_GPU_BUFFERUSAGE_INDEX);
+        wb.indexCount = static_cast<Uint32>(b.indices.size());
+        wb.texture = b.texture;
+        wb.normalTexture = b.normalTexture;
+        wb.metallicRoughnessTexture = b.metallicRoughnessTexture;
+        wb.materialDiffuse = b.materialDiffuse;
+        wb.materialFlags[0] = b.materialFlags[0];
+        wb.materialFlags[1] = b.materialFlags[1];
+        wb.materialFlags[2] = b.materialFlags[2];
+        wb.materialFlags[3] = 0u;
+
+        uploads.push_back({wb.vbuf, b.verts.data(), static_cast<Uint32>(vsize)});
+        uploads.push_back({wb.ibuf, b.indices.data(), static_cast<Uint32>(isize)});
+        worldBatches_.push_back(wb);
+    }
+
+    Boilerplate::uploadBuffers(device_, cmd, uploads);
+    worldBatchesDirty_ = false;
+}
+
+void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth)
+{
+    // The shadow depth pass (depth=true) runs at most ~30 Hz, so leave it on the
+    // simple per-instance path.  The per-frame color pass (depth=false) replays
+    // the pre-baked, material-merged batches: one draw per material, identity
+    // model matrix (vertices are already in world space).
+    if (depth) {
+        for (const auto& mInstance : Asset::modelInstances_) {
+            if (!mInstance.drawInScenePass)
+                continue;
+            drawModelDepth(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
+        }
+        return;
+    }
+
+    static const glm::mat4 kIdentity(1.0f);
+    SDL_PushGPUVertexUniformData(cmd, 1, &kIdentity, sizeof(glm::mat4));
+
+    SDL_GPUTexture* boundTex = nullptr;
+    SDL_GPUTexture* boundNrm = nullptr;
+    SDL_GPUTexture* boundMr = nullptr;
+    for (const auto& b : worldBatches_) {
+        if (b.texture != boundTex) {
+            SDL_GPUTextureSamplerBinding textureBinding = Boilerplate::makeTextureSamplerBinding(b.texture, sampler_);
+            SDL_BindGPUFragmentSamplers(renderPass, 0, &textureBinding, 1);
+            boundTex = b.texture;
+        }
+        if (b.normalTexture != boundNrm || b.metallicRoughnessTexture != boundMr) {
+            SDL_GPUTextureSamplerBinding pbrTextureBindings[] = {
+                Boilerplate::makeTextureSamplerBinding(b.normalTexture, sampler_),
+                Boilerplate::makeTextureSamplerBinding(b.metallicRoughnessTexture, sampler_),
+            };
+            SDL_BindGPUFragmentSamplers(renderPass, 2, pbrTextureBindings, 2);
+            boundNrm = b.normalTexture;
+            boundMr = b.metallicRoughnessTexture;
+        }
+
+        SDL_PushGPUFragmentUniformData(cmd, 0, &b.materialDiffuse, sizeof(b.materialDiffuse));
+        SDL_PushGPUFragmentUniformData(cmd, 1, &b.materialFlags, sizeof(b.materialFlags));
+
+        SDL_GPUBufferBinding vertexBufferBinding{};
+        vertexBufferBinding.buffer = b.vbuf;
+        vertexBufferBinding.offset = 0;
+        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBufferBinding, 1);
+
+        SDL_GPUBufferBinding indexBufferBinding{};
+        indexBufferBinding.buffer = b.ibuf;
+        indexBufferBinding.offset = 0;
+        SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+        SDL_DrawGPUIndexedPrimitives(renderPass, b.indexCount, 1, 0, 0, 0);
     }
 }
 
@@ -951,6 +1185,7 @@ int NewRenderer::loadSceneModel(
     sceneInstance.transform_ = modelTransform;
 
     Asset::modelInstances_.push_back(sceneInstance);
+    worldBatchesDirty_ = true;
 
     std::vector<Boilerplate::BufferUpload> uploads;
     auto uploadTexture = [&](TexIdInt texId, SDL_GPUTextureFormat format) {
@@ -1038,6 +1273,7 @@ void NewRenderer::setModelScenePass(int32_t modelIndex, bool drawInScene)
     if (modelIndex < 0 || static_cast<size_t>(modelIndex) >= Asset::modelInstances_.size())
         return;
     Asset::modelInstances_.at(static_cast<size_t>(modelIndex)).drawInScenePass = drawInScene;
+    worldBatchesDirty_ = true;
 }
 
 void NewRenderer::setParticleSystem(ParticleSystem* ps)
@@ -1052,11 +1288,29 @@ void NewRenderer::setParticleSystem(ParticleSystem* ps)
 
 bool NewRenderer::setVSync(bool enabled)
 {
-    // TODO(graphics): apply via SDL_SetGPUSwapchainParameters with
-    //   SDL_GPU_PRESENTMODE_VSYNC (or MAILBOX) when enabled, and
-    //   SDL_GPU_PRESENTMODE_IMMEDIATE when disabled.  Check the format
-    //   you currently use for the swapchain so you preserve it.
+    // VSYNC (FIFO) makes SDL_AcquireGPUSwapchainTexture block until the next
+    // refresh interval — at high frame rates that block dominates the frame
+    // (measured ~2.8 ms / frame).  When vsync is requested off we switch the
+    // swapchain to IMMEDIATE (uncapped, may tear) so acquire returns as soon
+    // as an image is free, falling back to MAILBOX then VSYNC if the platform
+    // doesn't support it.
+    SDL_GPUPresentMode mode = SDL_GPU_PRESENTMODE_VSYNC;
+    if (!enabled) {
+        if (SDL_WindowSupportsGPUPresentMode(device_, window_, SDL_GPU_PRESENTMODE_IMMEDIATE))
+            mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+        else if (SDL_WindowSupportsGPUPresentMode(device_, window_, SDL_GPU_PRESENTMODE_MAILBOX))
+            mode = SDL_GPU_PRESENTMODE_MAILBOX;
+    }
+
+    if (!SDL_SetGPUSwapchainParameters(device_, window_, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode)) {
+        SDL_Log("NewRenderer::setVSync: SDL_SetGPUSwapchainParameters failed: %s", SDL_GetError());
+        return false;
+    }
     vsyncEnabled_ = enabled;
+    SDL_Log("NewRenderer::setVSync: present mode = %s",
+            mode == SDL_GPU_PRESENTMODE_VSYNC       ? "VSYNC"
+            : mode == SDL_GPU_PRESENTMODE_IMMEDIATE ? "IMMEDIATE"
+                                                    : "MAILBOX");
     return true;
 }
 

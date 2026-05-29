@@ -425,6 +425,44 @@ private:
     std::queue<SDL_GPUTextureSamplerBinding> shadowMapBindings_;
     std::queue<SDL_GPUTexture*> shadowMapTextureDeletionQueue;
 
+    // Persistent point-light shadow cubemap.  Allocated once and reused; its
+    // contents are regenerated on a throttled cadence (the light is static and
+    // the world is static, so only moving casters change between frames — a
+    // 30 Hz refresh is visually indistinguishable from per-frame).  This
+    // replaces the old per-frame create/destroy + 6-face re-record, which cost
+    // ~4.7 ms (≈58 %) of every frame.
+    SDL_GPUTexture* shadowMap_ = nullptr;
+    bool lightsInitialized_ = false;
+    bool shadowDirty_ = true;
+    Uint64 lastShadowUpdateTick_ = 0;
+    double shadowUpdateHz_ = 30.0;
+
+    // ─── Static world-geometry batch cache ───────────────────────────────────
+    // drawWorldModelInstances() used to walk Asset::modelInstances_ every frame,
+    // issuing ~6 SDL GPU calls (2 sampler binds, 3 uniform pushes, 2 buffer
+    // binds, 1 draw) for EVERY model element — 562 elements ≈ 3.4 k driver calls
+    // and ~0.5 ms of pure command recording.  The world is static, so we bake it
+    // ONCE into world space and merge every element that shares a material into
+    // a single vertex/index buffer.  The per-frame path then issues one draw per
+    // material batch (a few dozen) instead of one per element.  Vertices are
+    // pre-transformed to world space, so the per-object model matrix is the
+    // identity and never re-pushed.  Rebuilt only when the scene changes
+    // (worldBatchesDirty_, flipped by loadSceneModel / setModelScenePass).
+    struct WorldBatch
+    {
+        SDL_GPUBuffer* vbuf = nullptr;
+        SDL_GPUBuffer* ibuf = nullptr;
+        Uint32 indexCount = 0;
+        SDL_GPUTexture* texture = nullptr;
+        SDL_GPUTexture* normalTexture = nullptr;
+        SDL_GPUTexture* metallicRoughnessTexture = nullptr;
+        glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
+        Uint32 materialFlags[4] = {1, 0, 0, 0};
+    };
+    std::vector<WorldBatch> worldBatches_;
+    bool worldBatchesDirty_ = true;
+    void rebuildWorldBatches(SDL_GPUCommandBuffer* cmd);
+
     NewCamera camera_;
 
     // Per-frame captured state ───────────────────────────────────────────────

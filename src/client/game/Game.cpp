@@ -2047,6 +2047,10 @@ SDL_AppResult Game::iterate()
         // without fast-forwarding through every intermediate update.
         if (!client->poll()) {
             SDL_Log("Game: lost connection to server; returning to main menu");
+            if (benchActive_) {
+                benchSeconds_ = 0.0f;
+                return SDL_APP_CONTINUE;
+            }
             returnToMainMenuRequested_ = true;
             serverShutdownNoticeRequested_ = true;
             return SDL_APP_CONTINUE;
@@ -2519,6 +2523,15 @@ SDL_AppResult Game::iterate()
         const std::optional<PredictedPlayerState> currentBeforeSnapshot = captureLocalPredictedState();
         if (!client->poll()) {
             SDL_Log("Game: lost connection to server; returning to main menu");
+            // During a benchmark, a mid-run disconnect must not silently drop
+            // us to the menu (where the in-game summary never prints).  Force
+            // the bench to conclude on the next iterate — the bench-summary
+            // check sits near the top of iterate(), before any network code —
+            // so we emit the stats gathered from the in-game frames so far.
+            if (benchActive_) {
+                benchSeconds_ = 0.0f;
+                return SDL_APP_CONTINUE;
+            }
             returnToMainMenuRequested_ = true;
             serverShutdownNoticeRequested_ = true;
             return SDL_APP_CONTINUE;
