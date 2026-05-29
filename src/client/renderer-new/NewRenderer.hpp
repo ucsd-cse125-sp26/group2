@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-
+#define NUM_CUBE_FACES 6
 class ParticleSystem; ///< Forward-declared — owned by Game, registered via setParticleSystem().
 
 /// @brief Vertex attribute layout for the static geometry pipeline.
@@ -353,7 +353,6 @@ private:
 
     bool createGeometryPipeline();
     bool createDepthPipeline();
-    bool createDebugDepthPipeline();
     bool createHudPipeline();
     bool createFxaaPipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
@@ -362,9 +361,20 @@ private:
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height, float fov);
 
     void drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
-                               Uint8 layer,
-                               SDL_GPUCommandBuffer* cmd,
-                               const glm::mat4& shadowViewProjection);
+                                        Uint8 layer,
+                                        SDL_GPUCommandBuffer* cmd,
+                                        const glm::mat4& shadowViewProjection,
+                                        bool staticGeometry,
+                                        bool entityGeometry,
+                                        bool skinnedGeometry);
+    void drawToShadowMap(SDL_GPUCommandBuffer* cmd,
+                         SDL_GPUTexture* shadowMapTexture,
+                         bool staticGeometry,
+                         bool entityGeometry,
+                         bool skinnedGeometry);
+
+    void onFirstFrame(SDL_GPUCommandBuffer *cmd);
+
     void bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
@@ -419,11 +429,20 @@ private:
     SDL_GPUSampler* hudSampler_ = nullptr;
     SDL_GPUSampler* fxaaSampler_ = nullptr;
 
+
+    // constexpr uint32_t shadowSize = 2048;
+    //  constexpr uint32_t shadowSize = 512;
+    static constexpr uint32_t shadowSize = 1024;
+    SDL_GPUTexture* dynamicShadowMaps_ = nullptr;
+    SDL_GPUTexture* staticShadowMaps_ = nullptr;
     SDL_GPUSampler* depthSampler_ = nullptr;
 
+    glm::vec3 cubeFaceTargets_[NUM_CUBE_FACES];
+    glm::vec3 cubeFaceUps_[NUM_CUBE_FACES];
+
+    bool firstFrame_ = true;
+
     LightUBO sceneLightInfo_;
-    std::queue<SDL_GPUTextureSamplerBinding> shadowMapBindings_;
-    std::queue<SDL_GPUTexture*> shadowMapTextureDeletionQueue;
 
     NewCamera camera_;
 
