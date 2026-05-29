@@ -362,7 +362,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         firstFrame_ = false;
     }
 
-    drawToShadowMap(cmd,dynamicShadowMaps_,false,true,true);
+    drawToShadowMap(cmd, dynamicShadowMaps_, false, true, true);
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
@@ -383,7 +383,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     // TODO(graphics): if `pendingScreenshotPath_` is non-empty, schedule a
     // swapchain readback and write a PNG.  See `requestScreenshot` doc.
-
 }
 
 void NewRenderer::setMainCamera(
@@ -432,10 +431,14 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
     SDL_EndGPURenderPass(geometryDepthPass);
 }
 
-void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *shadowMapTexture, bool staticGeometry, bool entityGeometry, bool skinnedGeometry)
+void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
+                                  SDL_GPUTexture* shadowMapTexture,
+                                  bool staticGeometry,
+                                  bool entityGeometry,
+                                  bool skinnedGeometry)
 {
     glm::mat4 shadowProjection = glm::perspective(
-    glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
+        glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
     shadowProjection[1][1] *= -1;
     for (Uint8 iLight = 0; iLight < sceneLightInfo_.numPointLights; iLight++) {
         PointLight& light = sceneLightInfo_.pointLights[iLight];
@@ -444,28 +447,24 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *sha
             glm::vec3& iCubeFaceTarget = cubeFaceTargets_[face];
             glm::vec3& iCubeFaceUp = cubeFaceUps_[face];
 
-            glm::mat4 shadowView =
-                glm::lookAt(light.position, light.position + iCubeFaceTarget, iCubeFaceUp);
+            glm::mat4 shadowView = glm::lookAt(light.position, light.position + iCubeFaceTarget, iCubeFaceUp);
             const glm::mat4 shadowViewProjection = shadowProjection * shadowView;
 
             drawGeometryDepthPass(shadowMapTexture,
-                            iLight * NUM_CUBE_FACES + face,
-                                 cmd,
-                                 shadowViewProjection,
-                                staticGeometry,
-                                entityGeometry,
-                                skinnedGeometry
-                );
+                                  iLight * NUM_CUBE_FACES + face,
+                                  cmd,
+                                  shadowViewProjection,
+                                  staticGeometry,
+                                  entityGeometry,
+                                  skinnedGeometry);
         }
     }
-
 }
 
-void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer *cmd)
+void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
 {
-    drawToShadowMap(cmd,staticShadowMaps_,true,false,false);
+    drawToShadowMap(cmd, staticShadowMaps_, true, false, false);
 }
-
 
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {

@@ -18,23 +18,20 @@ bool ParticleSystem::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL
     }
 
     const char* base = SDL_GetBasePath();
-    const std::string customFont =
-        std::string(base ? base : "") + "assets/fonts/SpaceGrotesk.ttf";
+    const std::string customFont = std::string(base ? base : "") + "assets/fonts/SpaceGrotesk.ttf";
 
-    const char* fontPaths[] = {
-        customFont.c_str(),
-        "/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/Library/Fonts/Arial.ttf",
-        "/System/Library/Fonts/SFNS.ttf",
-        "C:/Windows/Fonts/segoeui.ttf",
-        nullptr
-    };
+    const char* fontPaths[] = {customFont.c_str(),
+                               "/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf",
+                               "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                               "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                               "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+                               "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+                               "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                               "/System/Library/Fonts/Supplemental/Arial.ttf",
+                               "/Library/Fonts/Arial.ttf",
+                               "/System/Library/Fonts/SFNS.ttf",
+                               "C:/Windows/Fonts/segoeui.ttf",
+                               nullptr};
     for (int i = 0; fontPaths[i]; ++i) {
         if (sdf_.init(dev, fontPaths[i]))
             break;

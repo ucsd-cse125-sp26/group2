@@ -1711,6 +1711,15 @@ void Server::snapshotClientNetStates(std::vector<ClientNetState>& out)
     }
 }
 
+void Server::resetAppliedInputTicks()
+{
+    std::unique_lock<std::shared_mutex> lock(stateMutex_);
+    for (auto& [clientId, conn] : clients) {
+        (void)clientId;
+        conn.lastAppliedInputTick = 0;
+    }
+}
+
 bool Server::sendToClient(const ClientId& clientId, const void* data, int len)
 {
     return enqueueTo(clientId, /*replaceKey*/ 0, data, len);

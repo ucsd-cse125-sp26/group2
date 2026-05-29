@@ -129,6 +129,9 @@ public:
     };
     void snapshotClientNetStates(std::vector<ClientNetState>& out);
 
+    /// @brief Reset per-connection input deduplication for a new match session.
+    void resetAppliedInputTicks();
+
     /// @brief Broadcast match status updates to clients.
     void broadcastMatchStatus(MatchStatePacket packet);
 

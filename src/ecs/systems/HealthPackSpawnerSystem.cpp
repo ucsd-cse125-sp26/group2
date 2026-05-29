@@ -24,10 +24,7 @@ inline void
 checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, HealthPackSpawner& spawner)
 {
     auto view = registry.view<Player, Position, CollisionShape, Health>();
-    view.each([&](entt::entity /*player*/,
-                  const Position& pos,
-                  const CollisionShape& shape,
-                  Health& playerHealth) {
+    view.each([&](entt::entity /*player*/, const Position& pos, const CollisionShape& shape, Health& playerHealth) {
         const bool canHeal = playerHealth.health < healthMax || playerHealth.armor < armorMax;
         if (overlapsAABB(spawnerPos.value, spawnerShape.halfExtents, pos.value, shape.halfExtents) && spawner.hasPack &&
             canHeal)

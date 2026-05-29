@@ -27,7 +27,8 @@ namespace systems
 inline void
 checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, WeaponSpawner& spawner)
 {
-    auto view = registry.view<Player, Position, CollisionShape, InputSnapshot, WeaponState, PlayerVisState, GrenadeState>();
+    auto view =
+        registry.view<Player, Position, CollisionShape, InputSnapshot, WeaponState, PlayerVisState, GrenadeState>();
     view.each([&](entt::entity /*player*/,
                   const Position& pos,
                   const CollisionShape& shape,

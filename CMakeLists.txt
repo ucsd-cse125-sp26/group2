@@ -1092,6 +1092,8 @@ add_executable(group2
         src/client/menus/host/ui/HostConfigUI.cpp
         src/client/util/LocalAddress.hpp
         src/client/util/LocalAddress.cpp
+        src/client/util/InputCapture.hpp
+        src/client/util/InputCapture.cpp
         src/ecs/systems/HealthPackSpawnerSystem.hpp
         src/ecs/systems/HealthPackSpawnerSystem.cpp
         src/ecs/components/HealthPackSpawner.hpp

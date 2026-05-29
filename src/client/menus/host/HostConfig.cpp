@@ -5,6 +5,7 @@
 
 #include "network/ServerName.hpp"
 #include "ui/HostConfigUI.hpp"
+#include "util/InputCapture.hpp"
 
 #include <algorithm>
 #include <backends/imgui_impl_sdl3.h>
@@ -19,6 +20,10 @@ bool HostConfig::init(AppContext& ctx)
     client = &ctx.client;
     hostedServer = &ctx.hostedServer;
     draft = &ctx.hostConfigState;
+
+    // Defensive: menus always run with a free desktop cursor.
+    input_capture::releaseGameplayInputCapture(window);
+
     if (!hostedServer->isRunning() && !draft->useSpecificPort) {
         draft->port = ctx.networkConfig.serverNetwork.port;
     }

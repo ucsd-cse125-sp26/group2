@@ -23,9 +23,9 @@ struct Projectile
     float currentLifeTime = 0.0f;        ///< Seconds since spawn (destroyed when exceeding max).
 
     // Grenade-specific extensions. Defaults preserve rocket-style behavior.
-    float fuseTimer = -1.0f;             ///< Countdown; <0 means no fuse (impact-only).
-    float bounceRestitution = 0.0f;      ///< 0 = no bounce. CollisionSystem reflects velocity * this on hit.
-    bool sticky = false;                 ///< If true, sets vel=0 on first surface hit and starts fuse.
+    float fuseTimer = -1.0f;        ///< Countdown; <0 means no fuse (impact-only).
+    float bounceRestitution = 0.0f; ///< 0 = no bounce. CollisionSystem reflects velocity * this on hit.
+    bool sticky = false;            ///< If true, sets vel=0 on first surface hit and starts fuse.
 
     // Stick state (sticky grenades). Once `stuck`, the projectile is frozen in
     // place and its fuse runs to detonation — no gravity, no further collision.

@@ -547,7 +547,8 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     sweepPlayers(registry, shape.halfExtents, pos.value, k_target, projectile.owner, hitPlayer);
 
                 // Resolve whichever surface is struck first.
-                const bool playerFirst = k_playerHit.hit && (!k_worldHit.hit || k_playerHit.tFirst <= k_worldHit.tFirst);
+                const bool playerFirst =
+                    k_playerHit.hit && (!k_worldHit.hit || k_playerHit.tFirst <= k_worldHit.tFirst);
                 const physics::HitResult k_hit = playerFirst ? k_playerHit : k_worldHit;
 
                 if (!k_hit.hit) {

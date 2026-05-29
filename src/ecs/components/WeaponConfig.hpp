@@ -196,7 +196,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .fireCooldown = 0.9f,
             .magazineSize = 6,
             .defaultAmmoCapacity = 36,
-            .damage = 10.0f, // per-pellet; 11 pellets → 110 body max, ~165 head.
+            .damage = 10.0f,       // per-pellet; 11 pellets → 110 body max, ~165 head.
             .hitscan = true,
             .hitscanRadius = 3.0f, // smaller than rifle — 11 pellets, don't over-buff close range.
             .initialProjectileSpeed = 0.0f,

@@ -764,11 +764,8 @@ inline HitboxHit raycastPlayerHitboxes(Registry& registry,
 /// @param bulletRadius  Swept-sphere "cylinder hitreg" radius (world units)
 ///        applied to PLAYER hitboxes only. World geometry stays a thin ray so
 ///        bullets still require crosshair line-of-sight past walls. 0 = ray.
-inline HitboxHit resolveHitscanHitbox(Registry& registry,
-                                      entt::entity shooter,
-                                      glm::vec3 origin,
-                                      glm::vec3 direction,
-                                      float bulletRadius = 0.0f)
+inline HitboxHit resolveHitscanHitbox(
+    Registry& registry, entt::entity shooter, glm::vec3 origin, glm::vec3 direction, float bulletRadius = 0.0f)
 {
     // World geometry pass (returns HitscanHit but we need HitboxHit).
     const HitscanHit worldHit = raycastWorld(origin, direction, activeWorld());

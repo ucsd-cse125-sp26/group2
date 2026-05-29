@@ -4,6 +4,7 @@
 #include "Home.hpp"
 
 #include "ui/HomeUI.hpp"
+#include "util/InputCapture.hpp"
 #include "util/LocalAddress.hpp"
 
 #include <backends/imgui_impl_sdl3.h>
@@ -48,6 +49,10 @@ bool Home::init(AppContext& ctx)
 {
     renderer = &ctx.renderer;
     window = &ctx.window;
+
+    // Defensive: menus always run with a free desktop cursor.
+    input_capture::releaseGameplayInputCapture(window);
+
     discoveryConfig = ctx.networkConfig.discovery;
     startGlobalRefresh(true);
 

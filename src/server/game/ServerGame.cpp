@@ -259,8 +259,7 @@ void ServerGame::run()
 
         const entt::entity spawner = registry.create();
         registry.emplace<HealthPackSpawner>(
-            spawner,
-            HealthPackSpawner{.spawnCooldown = systems::healthPackCooldownTime, .hasPack = true});
+            spawner, HealthPackSpawner{.spawnCooldown = systems::healthPackCooldownTime, .hasPack = true});
         CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
         glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
 
@@ -793,6 +792,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
                 lobbyStartCountdownTimer = 0.0f;
                 if (lobbyManager.hostStartMatch(lobbyStartRequester)) {
                     selectMatchAbilityPool();
+                    server->resetAppliedInputTicks();
                     matchController.hostStartedMatch();
                     matchController.update(dt, registry, *server);
                 } else {
@@ -806,8 +806,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
         } else {
             const MatchPhase previousPhase = matchController.getCurrentPhase();
             matchController.update(dt, registry, *server);
-            if (previousPhase != MatchPhase::COUNTDOWN && matchController.getCurrentPhase() == MatchPhase::COUNTDOWN)
+            if (previousPhase != MatchPhase::COUNTDOWN && matchController.getCurrentPhase() == MatchPhase::COUNTDOWN) {
                 selectMatchAbilityPool();
+                server->resetAppliedInputTicks();
+            }
             if (previousPhase != MatchPhase::LOBBY && matchController.getCurrentPhase() == MatchPhase::LOBBY)
                 lobbyManager.resetReadyStatuses();
         }

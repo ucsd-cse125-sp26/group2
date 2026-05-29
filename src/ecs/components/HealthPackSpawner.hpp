@@ -7,6 +7,6 @@
 struct HealthPackSpawner
 {
     float healAmount = 75.0f;
-    float spawnCooldown = 0;             ///< Seconds remaining before the weapon reappears.
-    bool hasPack = false;              ///< True if a weapon is available for pickup.
+    float spawnCooldown = 0; ///< Seconds remaining before the weapon reappears.
+    bool hasPack = false;    ///< True if a weapon is available for pickup.
 };

@@ -1381,8 +1381,8 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
         // blend without them. On the upper body: strafe weight 0, loco weight 1
         // (pure forward-facing torso → weapon stays on-aim). On the legs: strafe
         // weight strafeBlend, loco weight (1 - strafeBlend) → original crossfade.
-        const bool maskStrafe = impl_->samplers[k_slotStrafe].active && !impl_->lowerBodyMask.empty() &&
-                                !impl_->locoJointWeights.empty();
+        const bool maskStrafe =
+            impl_->samplers[k_slotStrafe].active && !impl_->lowerBodyMask.empty() && !impl_->locoJointWeights.empty();
         if (maskStrafe) {
             const float sb = std::clamp(impl_->strafeBlend, 0.0f, 1.0f);
             const size_t numSoa = impl_->locoJointWeights.size();

@@ -12,6 +12,7 @@
 #include "debug/ClientPerfRecorder.hpp"
 #include "debug/DebugUI.hpp"
 #include "debug/FrameRecorder.hpp"
+#include "ecs/AssetCatalog.hpp"
 #include "ecs/AssetRegistry.hpp"
 #include "ecs/components/GripPose.hpp"
 #include "ecs/components/Hitbox.hpp"

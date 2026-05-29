@@ -29,8 +29,8 @@
 #include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/FireField.hpp"
 #include "ecs/components/GrenadeState.hpp"
-#include "ecs/components/HealthPackSpawner.hpp"
 #include "ecs/components/Health.hpp"
+#include "ecs/components/HealthPackSpawner.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -75,6 +75,7 @@
 #include "systems/InputSendSystem.hpp"
 #include "systems/PredictionSystem.hpp"
 #include "systems/ReconciliationSystem.hpp"
+#include "util/InputCapture.hpp"
 
 #include <SDL3/SDL_video.h>
 
@@ -895,6 +896,7 @@ bool Game::init(AppContext& ctx)
         currentMatchPhase = latestMatchState->phase;
         countdownTimer = latestMatchState->countdownTimer;
     }
+    client->resetInputHistory();
 
     physics::diag::setFilePrefix("client");
     const char* phaseDiagEnv = std::getenv("GROUP2_PHASE_DIAG");
@@ -1049,7 +1051,9 @@ bool Game::init(AppContext& ctx)
                 weaponModelIndices_[i] =
                     renderer->loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
                 assets_.setModelIndex(id, weaponModelIndices_[i]);
-                if (weaponModelIndices_[i] < 0)
+                if (weaponModelIndices_[i] >= 0)
+                    renderer->setModelScenePass(weaponModelIndices_[i], false);
+                else
                     SDL_Log("[client] WARNING: weapon model '%s' failed to load", def.filename);
             }
         }
@@ -1063,16 +1067,16 @@ bool Game::init(AppContext& ctx)
                                                                  kRocketProjectile.flipUVs);
             assets_.setModelIndex(id, rocketProjectileModelIdx_);
 
-            if (rocketProjectileModelIdx_ < 0)
+            if (rocketProjectileModelIdx_ >= 0)
+                renderer->setModelScenePass(rocketProjectileModelIdx_, false);
+            else
                 SDL_Log("[client] WARNING: rocket projectile model '%s' failed to load", kRocketProjectile.filename);
         }
 
         {
             const int id = addAssetDefinition(assets_, kGrenadeModel);
-            grenadeModelIdx_ = renderer->loadSceneModel(kGrenadeModel.filename,
-                                                        kGrenadeModel.loadTranslation,
-                                                        kGrenadeModel.loadScale,
-                                                        kGrenadeModel.flipUVs);
+            grenadeModelIdx_ = renderer->loadSceneModel(
+                kGrenadeModel.filename, kGrenadeModel.loadTranslation, kGrenadeModel.loadScale, kGrenadeModel.flipUVs);
             assets_.setModelIndex(id, grenadeModelIdx_);
 
             if (grenadeModelIdx_ < 0)
@@ -1081,10 +1085,8 @@ bool Game::init(AppContext& ctx)
 
         {
             const int id = addAssetDefinition(assets_, kMedkitModel);
-            medkitModelIdx_ = renderer->loadSceneModel(kMedkitModel.filename,
-                                                       kMedkitModel.loadTranslation,
-                                                       kMedkitModel.loadScale,
-                                                       kMedkitModel.flipUVs);
+            medkitModelIdx_ = renderer->loadSceneModel(
+                kMedkitModel.filename, kMedkitModel.loadTranslation, kMedkitModel.loadScale, kMedkitModel.flipUVs);
             assets_.setModelIndex(id, medkitModelIdx_);
 
             if (medkitModelIdx_ < 0)
@@ -1344,17 +1346,22 @@ bool Game::init(AppContext& ctx)
         authoredWeaponHandMountParams_[i] = getWeaponHandMountParams(static_cast<WeaponType>(i));
         authoredFPHandMountParams_[i] = getFirstPersonHandMountParams(static_cast<WeaponType>(i));
         makeFingerOffsetsPalmRelative(authoredFPHandMountParams_[i]);
-        applyAuthoredFirstPersonHandMountDefaults(modelFromRendererIndex(weaponModelIndices_[i]),
-                                                  getViewmodelParams(static_cast<WeaponType>(i)),
-                                                  authoredFPHandMountParams_[i]);
+        applyAuthoredFirstPersonHandMountDefaults(
+            modelFromRendererIndex(weaponModelIndices_[static_cast<std::size_t>(i)]),
+            getViewmodelParams(static_cast<WeaponType>(i)),
+            authoredFPHandMountParams_[i]);
         weaponHandMountParams_[i] = authoredWeaponHandMountParams_[i];
         fpHandMountParams_[i] = authoredFPHandMountParams_[i];
-        spawnerWeaponParams_[i] = defaultSpawnerModelParams(static_cast<WeaponType>(i));
     }
+    for (std::size_t i = 0; i < kWeaponAssets.size(); ++i)
+        spawnerWeaponParams_[i] = defaultSpawnerModelParams(static_cast<WeaponType>(i));
 
     // Grab the mouse into relative mode so camera look works immediately.
-    SDL_SetWindowRelativeMouseMode(window, true);
+    // Goes through the shared helper so a fresh Game instance entering after a
+    // prior match cannot inherit stale text-input mode or queued mouse delta.
+    input_capture::acquireGameplayInputCapture(window);
     mouseCaptured = true;
+    chatOpen_ = false;
 
     // Load the shared skinned-character rig (skeleton + bind pose + weights).
     // Loading a single FBX is enough — any file with matching skin data works;
@@ -3460,7 +3467,7 @@ SDL_AppResult Game::iterate()
                             // Capture per-weapon authoring data needed to derive the weaponWorld
                             // matrix from the right-hand bone matrix in the writeback loop.
                             c.hasWeapon = true;
-                            c.weaponModelIdx = weaponModelIndices_[static_cast<int>(gun.type)];
+                            c.weaponModelIdx = weaponModelIndices_[static_cast<std::size_t>(gun.type)];
                             c.weaponScale = tp.scale;
                             c.rightPalmAuthored = mounts.rightHand.palm;
                             // Identity fallback. The worker always overwrites this with the
@@ -4383,7 +4390,7 @@ SDL_AppResult Game::iterate()
     }
 
     const int currentWeaponModelIdx =
-        currentWeaponRenderable ? weaponModelIndices_[static_cast<int>(currentEquippedType_)] : -1;
+        currentWeaponRenderable ? weaponModelIndices_[static_cast<std::size_t>(currentEquippedType_)] : -1;
 
     // Build weapon viewmodel
     {
@@ -4561,7 +4568,8 @@ SDL_AppResult Game::iterate()
                 // to rest instead of propagating the poison.
                 if (!std::isfinite(cameraRecoilPitch_) || !std::isfinite(cameraRecoilPitchVel_) ||
                     !std::isfinite(cameraRecoilYaw_) || !std::isfinite(cameraRecoilYawVel_) ||
-                    !std::isfinite(cameraRecoilTargetPitch_) || !std::isfinite(cameraRecoilTargetYaw_)) {
+                    !std::isfinite(cameraRecoilTargetPitch_) || !std::isfinite(cameraRecoilTargetYaw_))
+                {
                     cameraRecoilPitch_ = cameraRecoilPitchVel_ = 0.0f;
                     cameraRecoilYaw_ = cameraRecoilYawVel_ = 0.0f;
                     cameraRecoilTargetPitch_ = cameraRecoilTargetYaw_ = 0.0f;
@@ -4579,8 +4587,7 @@ SDL_AppResult Game::iterate()
                 // the stability region (c*subDt = 1, k*subDt² = 0.25) no matter
                 // how big the frame time is.
                 const float maxSubDt = (omega > 1e-3f) ? (0.5f / omega) : dt;
-                const int subSteps =
-                    (maxSubDt > 0.0f) ? std::max(1, static_cast<int>(std::ceil(dt / maxSubDt))) : 1;
+                const int subSteps = (maxSubDt > 0.0f) ? std::max(1, static_cast<int>(std::ceil(dt / maxSubDt))) : 1;
                 const float subDt = dt / static_cast<float>(subSteps);
                 auto stepSpring = [&](float& x, float& v, float target) {
                     for (int i = 0; i < subSteps; ++i) {
@@ -5645,7 +5652,7 @@ SDL_AppResult Game::iterate()
                          kRenderableWeaponNames.data(),
                          static_cast<int>(kRenderableWeaponNames.size()));
 
-            auto& params = spawnerWeaponParams_[spawnerTuneWeaponIdx_];
+            auto& params = spawnerWeaponParams_[static_cast<std::size_t>(spawnerTuneWeaponIdx_)];
 
             ImGui::SeparatorText("Translation");
             ImGui::DragFloat("Right", &params.translation.x, 0.5f, -200.0f, 200.0f, "%.1f");
@@ -6463,7 +6470,7 @@ void Game::quit()
 {
     if (window) {
         mouseCaptured = false;
-        SDL_SetWindowRelativeMouseMode(window, false);
+        input_capture::releaseGameplayInputCapture(window);
     }
     if (userSettings) {
         userSettings->mouseSensitivity = mouseSensitivity;
@@ -6478,6 +6485,14 @@ void Game::quit()
     particleSystem.quit();
     hud_.quit();
     if (renderer) {
+        for (const AssetEntry& asset : assets_.entries()) {
+            if (asset.modelIndex >= 0)
+                renderer->setModelScenePass(asset.modelIndex, false);
+        }
+        renderer->setEntityRenderList({});
+        renderer->setWeaponViewmodel({});
+        renderer->setPointLights({});
+        renderer->setSkinnedFrame({}, {});
         // TODO(renderer-migration): renderer->setParticleSystem(nullptr);
         renderer->setParticleSystem(nullptr);
         renderer->setHudTexture(nullptr);
@@ -6560,21 +6575,24 @@ void Game::refreshRemotePlayerRenderables()
 
 void Game::refreshRemoteProjectileRenderables()
 {
-    registry.view<Position, Projectile, Velocity, CollisionShape>().each(
-        [&](entt::entity e, const Position&, const Projectile& projectile, const Velocity&, const CollisionShape& /*shape*/) {
-            auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-            if (isGrenadeType(projectile.type)) {
-                rend.modelIndex = grenadeModelIdx_;
-                rend.scale = kGrenadeModel.renderScale;
-            } else {
-                rend.modelIndex = rocketProjectileModelIdx_;
-                rend.scale = glm::vec3(kRocketProjectile.loadScale);
-            }
-            rend.visible = rend.modelIndex >= 0;
+    registry.view<Position, Projectile, Velocity, CollisionShape>().each([&](entt::entity e,
+                                                                             const Position&,
+                                                                             const Projectile& projectile,
+                                                                             const Velocity&,
+                                                                             const CollisionShape& /*shape*/) {
+        auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+        if (isGrenadeType(projectile.type)) {
+            rend.modelIndex = grenadeModelIdx_;
+            rend.scale = kGrenadeModel.renderScale;
+        } else {
+            rend.modelIndex = rocketProjectileModelIdx_;
+            rend.scale = glm::vec3(kRocketProjectile.loadScale);
+        }
+        rend.visible = rend.modelIndex >= 0;
 
-            // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
-            // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
-        });
+        // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+        // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+    });
 }
 
 void Game::refreshRemoteRespawnRenderables()
@@ -6612,19 +6630,20 @@ void Game::refreshRemoteRespawnRenderables()
                 return;
             } else {
                 if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
-                    weaponAssetIds_[weaponIndex] < 0)
+                    weaponAssetIds_[static_cast<std::size_t>(weaponIndex)] < 0)
                 {
                     rend.modelIndex = -1;
                     rend.visible = false;
                     return;
                 }
 
-                const int assetId = weaponAssetIds_[weaponIndex];
+                const int assetId = weaponAssetIds_[static_cast<std::size_t>(weaponIndex)];
                 const AssetEntry& asset = assets_.entry(assetId);
                 rend.modelIndex = asset.modelIndex;
             }
 
-            const WeaponSpawnerModelParams& params = spawnerWeaponParams_[weaponIndex];
+            const auto weaponIdx = static_cast<std::size_t>(weaponIndex);
+            const WeaponSpawnerModelParams& params = spawnerWeaponParams_[weaponIdx];
             rend.scale = params.scale;
 
             const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
@@ -6677,9 +6696,8 @@ void Game::refreshRemoteHealthPackRenderables()
             rend.scale = params.scale;
             if (spawner.hasPack) {
                 static constexpr float k_twoPi = 6.28318530718f;
-                rend.translation =
-                    params.translation +
-                    glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
+                rend.translation = params.translation +
+                                   glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
             } else {
                 rend.translation = params.translation;
             }
@@ -6695,14 +6713,14 @@ void Game::refreshDroppedWeaponRenderables()
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
             const int weaponIndex = static_cast<int>(dw.type);
             if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
-                weaponAssetIds_[weaponIndex] < 0)
+                weaponAssetIds_[static_cast<std::size_t>(weaponIndex)] < 0)
             {
                 rend.modelIndex = -1;
                 rend.visible = false;
                 return;
             }
 
-            const int assetId = weaponAssetIds_[weaponIndex];
+            const int assetId = weaponAssetIds_[static_cast<std::size_t>(weaponIndex)];
             const AssetEntry& asset = assets_.entry(assetId);
 
             rend.modelIndex = asset.modelIndex;

@@ -131,6 +131,9 @@ public:
     /// current `clientPredictTick` before calling.
     bool sendInputSnapshot(const InputSnapshot& snap);
 
+    /// @brief Clear redundant input history at the start of a new local match instance.
+    void resetInputHistory();
+
     /// @brief PR-27 (netsync): send a SHOT_INTENT packet describing the
     /// client's view of the target's animation state at fire time.
     /// Server pairs this with the corresponding INPUT (by

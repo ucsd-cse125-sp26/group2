@@ -15,10 +15,10 @@
 #pragma once
 
 #include "Asset.hpp"
+#include "Boilerplate.hpp"
 #include "Camera.hpp"
 #include "RendererTypes.hpp"
 #include "SkinnedRenderer.hpp"
-#include "Boilerplate.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
@@ -44,7 +44,8 @@ struct Vertex
     glm::vec4 tangent;
 };
 
-struct LightUBO {
+struct LightUBO
+{
     uint32_t numPointLights = 0;
     uint32_t numSpotLights = 0;
     float pointLightFarPlane = 7500.0f;
@@ -361,19 +362,19 @@ private:
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height, float fov);
 
     void drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
-                                        Uint8 layer,
-                                        SDL_GPUCommandBuffer* cmd,
-                                        const glm::mat4& shadowViewProjection,
-                                        bool staticGeometry,
-                                        bool entityGeometry,
-                                        bool skinnedGeometry);
+                               Uint8 layer,
+                               SDL_GPUCommandBuffer* cmd,
+                               const glm::mat4& shadowViewProjection,
+                               bool staticGeometry,
+                               bool entityGeometry,
+                               bool skinnedGeometry);
     void drawToShadowMap(SDL_GPUCommandBuffer* cmd,
                          SDL_GPUTexture* shadowMapTexture,
                          bool staticGeometry,
                          bool entityGeometry,
                          bool skinnedGeometry);
 
-    void onFirstFrame(SDL_GPUCommandBuffer *cmd);
+    void onFirstFrame(SDL_GPUCommandBuffer* cmd);
 
     void bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
@@ -392,9 +393,9 @@ private:
                    SDL_GPUCommandBuffer* cmd);
 
     void drawModelDepth(ModelIdInt modelId,
-                   const glm::mat4& modelTransform,
-                   SDL_GPURenderPass* renderPass,
-                   SDL_GPUCommandBuffer* cmd);
+                        const glm::mat4& modelTransform,
+                        SDL_GPURenderPass* renderPass,
+                        SDL_GPUCommandBuffer* cmd);
 
     void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth);
 
@@ -428,7 +429,6 @@ private:
     SDL_GPUTexture* hudTexture_ = nullptr;
     SDL_GPUSampler* hudSampler_ = nullptr;
     SDL_GPUSampler* fxaaSampler_ = nullptr;
-
 
     // constexpr uint32_t shadowSize = 2048;
     //  constexpr uint32_t shadowSize = 512;

@@ -5,6 +5,7 @@
 #include "SDL3/SDL_init.h"
 #include "SDL3/SDL_timer.h"
 #include "ui/LobbyUI.hpp"
+#include "util/InputCapture.hpp"
 #include "util/LocalAddress.hpp"
 
 #include <algorithm>
@@ -18,6 +19,12 @@ bool Lobby::init(AppContext& ctx)
     renderer = &ctx.renderer;
     window = &ctx.window;
     client = &ctx.client;
+
+    // Defensive: a prior Game screen should have released mouse capture in
+    // its quit(), but enforcing it here means the lobby cursor is always free
+    // even if a future code path forgets the release.
+    input_capture::releaseGameplayInputCapture(window);
+
     isHosting = ctx.hostedServer.hasSession();
     serverName = std::string(ctx.currentServerName);
     if (serverName.empty() && isHosting) {
