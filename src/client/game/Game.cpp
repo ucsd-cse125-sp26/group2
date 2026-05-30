@@ -1594,6 +1594,8 @@ bool Game::init(AppContext& ctx)
 #endif
 
     SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
+
+    client->sendGameplayReady();
     return true;
 }
 

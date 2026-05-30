@@ -24,7 +24,7 @@ public:
     MatchPhase getCurrentPhase();
 
     /// @brief Start the host-authorized countdown if the match is still in the lobby phase.
-    void hostStartedMatch();
+    void hostStartedMatch(std::span<const ClientId> expectedPlayers);
 
     /// @brief Enable or disable developer-mode lobby bypass.
     void setSkipLobby(bool v);
@@ -37,12 +37,21 @@ public:
     bool setMaxPlayers(int maxPlayers);
     [[nodiscard]] MatchConfig getMatchConfig() const;
 
-private:
-    MatchPhase currentPhase = MatchPhase::LOBBY;       ///< Current phase of the match.
-    float countdownTimer = 0.0f;                       ///< Seconds remaining in the current timed phase.
-    int winnerId = -1;                                 ///< Client ID of the winner (-1 if none).
-    bool skipLobby = false;                            ///< True to auto-promote lobby to countdown.
+    void beginWarmup(std::span<const ClientId> expectedPlayers);
+    void markGameplayReady(ClientId clientId);
+    void removeExpectedPlayer(ClientId clientId);
+    [[nodiscard]] bool allExpectedPlayersReady() const;
 
+private:
+    MatchPhase currentPhase = MatchPhase::LOBBY;          ///< Current phase of the match.
+    float countdownTimer = 0.0f;                          ///< Seconds remaining in the current timed phase.
+    int winnerId = -1;                                    ///< Client ID of the winner (-1 if none).
+    bool skipLobby = false;                               ///< True to auto-promote lobby to countdown.
+
+    std::unordered_map<ClientId, bool> playerReadyStatus; ///< Tracks each player's ready status in the lobby.
+
+    static constexpr float k_warmupDuration =
+        30.0f; ///< Max time to wait for players to load/spawn before starting after host start.
     static constexpr float k_countdownDuration = 5.0f; ///< Seconds for the pre-match countdown.
     static constexpr float k_finishedDuration = 5.0f;  ///< Seconds to display results before reset.
 

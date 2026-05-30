@@ -44,6 +44,9 @@ public:
     /// @brief Clear all ready flags and broadcast Unready events; resends full lobby state to every client.
     void resetReadyStatuses();
 
+    /// @brief Return current lobby player IDs
+    [[nodiscard]] std::vector<ClientId> playerIds() const;
+
 private:
     Server* server = nullptr;         ///< Authoritative server; not owned.
     std::vector<LobbyPlayer> players; ///< Current player roster.

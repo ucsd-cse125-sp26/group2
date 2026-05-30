@@ -1506,3 +1506,9 @@ bool Client::poll()
 
     return true;
 }
+
+bool Client::sendGameplayReady()
+{
+    const auto type = static_cast<uint8_t>(PacketType::GAMEPLAY_READY);
+    return send(&type, sizeof(type));
+}

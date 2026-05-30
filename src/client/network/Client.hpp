@@ -396,6 +396,8 @@ public:
         return simulatedLossPercent_.load(std::memory_order_relaxed);
     }
 
+    bool sendGameplayReady();
+
 private:
     MessageStream msgStream{nullptr};              ///< Framed message stream for server communication.
     NET_Address* serverAddr = nullptr;             ///< Resolved server address.

@@ -81,4 +81,5 @@ enum class PacketType : uint8_t
     UPDATE_DISCOVERY_SETTINGS, ///< Client -> Server: host updates global/LAN advertisement toggles.
 
     REQUEST_SERVER_SHUTDOWN,   ///< Client -> Server: current host requests authoritative server shutdown.
+    GAMEPLAY_READY, ///< Client -> Server: signals that the client has finished loading and is ready to begin match
 };

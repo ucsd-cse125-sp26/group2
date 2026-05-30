@@ -391,6 +391,7 @@ void ServerGame::eventHandler(const Event& event)
     case EventType::Disconnected: {
         GROUP2_PROF_SCOPE("eventDisconnected");
         lobbyManager.removePlayer(event.clientId);
+        matchController.removeExpectedPlayer(event.clientId);
         deletePlayerEntity(event.clientId);
         break;
     }
@@ -524,6 +525,11 @@ void ServerGame::eventHandler(const Event& event)
 
         SDL_Log("ServerGame: host clientId %u requested server shutdown", event.clientId.value);
         shutdown();
+        break;
+    }
+    case EventType::GameplayReady: {
+        GROUP2_PROF_SCOPE("eventGameplayReady");
+        matchController.markGameplayReady(event.clientId);
         break;
     }
     default:
@@ -793,7 +799,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
                 if (lobbyManager.hostStartMatch(lobbyStartRequester)) {
                     selectMatchAbilityPool();
                     server->resetAppliedInputTicks();
-                    matchController.hostStartedMatch();
+                    matchController.hostStartedMatch(lobbyManager.playerIds());
                     matchController.update(dt, registry, *server);
                 } else {
                     server->broadcastMatchStatus(MatchStatePacket{
@@ -807,6 +813,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
             const MatchPhase previousPhase = matchController.getCurrentPhase();
             matchController.update(dt, registry, *server);
             if (previousPhase != MatchPhase::COUNTDOWN && matchController.getCurrentPhase() == MatchPhase::COUNTDOWN) {
+                // toggle movement on countdown + reset positions
                 selectMatchAbilityPool();
                 server->resetAppliedInputTicks();
             }

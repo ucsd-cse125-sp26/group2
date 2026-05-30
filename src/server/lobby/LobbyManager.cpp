@@ -148,3 +148,12 @@ void LobbyManager::sendLobbyStateToAllPlayers()
         server->sendLobbyStateToClient(player.id, players);
     }
 }
+
+std::vector<ClientId> LobbyManager::playerIds() const
+{
+    std::vector<ClientId> ids;
+    for (const auto& player : players) {
+        ids.push_back(player.id);
+    }
+    return ids;
+}
