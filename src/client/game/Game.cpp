@@ -2343,8 +2343,9 @@ SDL_AppResult Game::iterate()
     // Chat owns the keyboard while open, so gameplay inputs are cleared
     // instead of sampled.
     const bool gamePaused = pauseMenu.isOpen();
+    const bool gameplayInputAllowed = currentMatchPhase != MatchPhase::COUNTDOWN;
 
-    if (gamePaused) {
+    if (gamePaused || !gameplayInputAllowed) {
         clearGameplayInputForChat();
     } else if (chatOpen_)
         clearGameplayInputForChat();
@@ -2359,7 +2360,7 @@ SDL_AppResult Game::iterate()
     registry.view<PlayerVisState, LocalPlayer>().each(
         [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
 
-    if (mouseCaptured && !chatOpen_ && !gamePaused) {
+    if (mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
@@ -2451,7 +2452,7 @@ SDL_AppResult Game::iterate()
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
 
         // Movement keys: sample once for this whole group of ticks.
-        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused) {
+        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
             systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
@@ -2530,7 +2531,11 @@ SDL_AppResult Game::iterate()
             // don't have `PlayerSimState` on the client).
             registry.view<LocalPlayer, Position, PreviousPosition>().each(
                 [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
-            systems::runPrediction(registry, k_physicsDt, physics::activeWorld());
+            if (gameplayInputAllowed) {
+                systems::runPrediction(registry, k_physicsDt, physics::activeWorld());
+            } else {
+                registry.view<LocalPlayer, Velocity>().each([](Velocity& vel) { vel = Velocity{}; });
+            }
             storePredictedPlayerState(clientPredictTick);
 
             ++tickCount;
