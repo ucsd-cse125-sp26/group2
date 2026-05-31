@@ -23,6 +23,8 @@ const char* weaponDisplayName(int weaponId)
         return "Rail Gun";
     case 3:
         return "Energy Gun";
+    case 4:
+        return "Shotgun";
     default:
         return "Weapon";
     }

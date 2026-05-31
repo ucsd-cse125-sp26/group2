@@ -9,7 +9,7 @@ struct UserSettings
 {
     InputBindings inputBindings{InputBindings::defaults()}; ///< Configurable keyboard/mouse and controller bindings.
     float mouseSensitivity{0.0007f};                        ///< Mouse-look sensitivity in radians per pixel.
-    float horizontalFovDegrees{90.0f};                      ///< Player-facing horizontal camera FOV in degrees.
+    float horizontalFovDegrees{110.0f};                     ///< Player-facing horizontal camera FOV in degrees.
     bool showControllerBindings{false};                     ///< Settings page shows controller bindings when true.
 
     float gamepadYawSensitivity{6.0f};                      ///< radians/sec

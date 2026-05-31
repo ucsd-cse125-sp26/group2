@@ -219,11 +219,11 @@ void ServerGame::run()
         registry.emplace<CollisionShape>(spawner, shape);
     }
 
-    // Respawn points (with cooldown state)
-    for (const glm::vec3& spawnPos : gamemap::spawnPoints_) {
+    // Respawn points (with cooldown state + authored facing yaw)
+    for (const gamemap::SpawnPoint& sp : gamemap::spawnPoints_) {
         const entt::entity spawnPoint = registry.create();
-        registry.emplace<RespawnPoint>(spawnPoint, RespawnPoint{});
-        registry.emplace<Position>(spawnPoint, spawnPos);
+        registry.emplace<RespawnPoint>(spawnPoint, RespawnPoint{.yaw = sp.yaw});
+        registry.emplace<Position>(spawnPoint, sp.pos);
     }
 
     // Powerup spawners
@@ -973,7 +973,9 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                          .radius = 16.0f,
                                          .halfHeight = 20.0f,
                                      });
-    registry.emplace<Position>(player, systems::chooseAndResolveSpawnPosition(registry, player));
+    const systems::SpawnResolution initialSpawn = systems::chooseAndResolveSpawnPosition(registry, player);
+    registry.emplace<Position>(player, initialSpawn.center);
+    registry.get<InputSnapshot>(player).yaw = initialSpawn.yaw; // Face the spawn's authored direction.
     registry.emplace<Velocity>(player);
     registry.emplace<PlayerVisState>(player);
     registry.emplace<PlayerSimState>(player);
@@ -1410,7 +1412,8 @@ void ServerGame::resetPlayersForCountdown()
             PlayerVisState& vis,
             PlayerSimState& sim,
             CollisionShape&) {
-            pos.value = systems::chooseAndResolveSpawnPosition(registry, player);
+            const systems::SpawnResolution spawn = systems::chooseAndResolveSpawnPosition(registry, player);
+            pos.value = spawn.center;
             vel = Velocity{};
             vis = PlayerVisState{};
             sim = PlayerSimState{};
@@ -1421,7 +1424,10 @@ void ServerGame::resetPlayersForCountdown()
             if (auto* renderable = registry.try_get<Renderable>(player)) {
                 renderable->visible = true;
             }
-            registry.emplace_or_replace<InputSnapshot>(player);
+            // Face the spawn point's authored direction.
+            InputSnapshot freshInput{};
+            freshInput.yaw = spawn.yaw;
+            registry.emplace_or_replace<InputSnapshot>(player, freshInput);
             registry.emplace_or_replace<Health>(player, Health{});
 
             WeaponState weaponState{};

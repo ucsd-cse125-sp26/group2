@@ -46,6 +46,7 @@ private:
         float liveHp = 1.f;
         float liveSh = 0.f;
         bool alive = true;
+        bool occluded = false; ///< True when a wall blocks line of sight — bar/name hidden this frame.
 
         /// @brief Seconds remaining to display this enemy's bar before it
         ///        fades to transparent.  Refreshed each time the enemy takes

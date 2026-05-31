@@ -159,6 +159,7 @@ struct HudWorldEnemy
     int health = 100, maxHealth = 100;
     int armor = 0, maxArmor = 100;
     bool isAlive = true;
+    bool occluded = false; ///< True when world geometry blocks the line of sight from the camera (hide bar/name).
 };
 
 /// @brief Equipment slot state — drives the bottom-center grapple/grenade/tactical row.

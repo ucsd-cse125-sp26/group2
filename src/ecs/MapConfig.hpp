@@ -106,7 +106,13 @@ inline constexpr bool k_useVhacd = false;
     return std::string(base ? base : "") + "assets/" + kMapAsset.filename;
 }
 
-inline std::vector<glm::vec3> spawnPoints_;
+/// @brief A player spawn point: world position plus an authored facing yaw.
+struct SpawnPoint
+{
+    glm::vec3 pos{0.0f};
+    float yaw = 0.0f; ///< Facing direction in radians (matches InputSnapshot.yaw: 0 = +Z, atan2(fwd.x, fwd.z)).
+};
+inline std::vector<SpawnPoint> spawnPoints_;
 
 struct WeaponSpawner
 {
@@ -260,7 +266,16 @@ inline bool loadConfiguredMap(physics::MapCollisionData& out, const char* tag)
                 {
                     const aiMatrix4x4& t = node->mTransformation;
                     glm::vec3 pos = glm::vec3(t.a4, t.b4, t.c4) * kMapAsset.loadScale;
-                    spawnPoints_.push_back(pos);
+                    // Facing yaw from the node's local -Z axis (glTF/OpenGL
+                    // forward), projected onto the XZ plane. Matches
+                    // viewForward(): yaw = atan2(fwd.x, fwd.z). Falls back to 0
+                    // (facing +Z) when the spawn wasn't rotated in the map.
+                    const glm::vec3 fwd{-t.a3, -t.b3, -t.c3};
+                    float yaw = 0.0f;
+                    if (std::abs(fwd.x) > 1e-4f || std::abs(fwd.z) > 1e-4f) {
+                        yaw = std::atan2(fwd.x, fwd.z);
+                    }
+                    spawnPoints_.push_back(SpawnPoint{.pos = pos, .yaw = yaw});
                     break;
                 }
                 case 1: // Weapon spawn point
@@ -343,9 +358,9 @@ inline bool loadConfiguredMap(physics::MapCollisionData& out, const char* tag)
         out_file << "Spawn Points (" << spawnPoints_.size() << ")\n";
 
         for (size_t i = 0; i < spawnPoints_.size(); i++) {
-            const glm::vec3& p = spawnPoints_[i];
+            const glm::vec3& p = spawnPoints_[i].pos;
 
-            out_file << i << ": (" << p.x << ", " << p.y << ", " << p.z << ")\n";
+            out_file << i << ": (" << p.x << ", " << p.y << ", " << p.z << ") yaw=" << spawnPoints_[i].yaw << "\n";
         }
     }
 

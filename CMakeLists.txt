@@ -1699,6 +1699,9 @@ add_executable(clientbot
     # path resolves.
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.hpp"
+    # PlayerStatusSystem's death-drop now delegates to spawnDroppedWeapon.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/DroppedWeaponSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/DroppedWeaponSystem.hpp"
         src/ecs/components/AbilityState.hpp
         src/ecs/abilities/Ability.hpp
         src/ecs/abilities/AbilityTuning.hpp

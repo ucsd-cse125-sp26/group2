@@ -119,24 +119,49 @@ inline glm::vec3 resolveRespawnPosition(Registry& registry, entt::entity player,
     return resolved;
 }
 
-/// @brief Choose a respawn point with cooldown-aware selection.
+/// @brief Choose a respawn point with cooldown-aware, enemy-avoiding selection.
 ///
-/// Prefers available (cooldown = 0) spawn points, picking randomly among them.
-/// If all spawn points are on cooldown, picks the one with the lowest remaining
-/// cooldown.  Sets a 3-second cooldown on the chosen point.
-inline glm::vec3 chooseRespawnPoint(Registry& registry)
+/// Prefers available (cooldown = 0) spawn points, biased toward those farthest
+/// from living enemies (random tiebreak among the safest few so spawns aren't
+/// fully deterministic).  If all points are on cooldown, picks the one closest
+/// to being ready.  Sets a cooldown on the chosen point and returns its feet
+/// position plus authored facing yaw.
+inline SpawnResolution chooseRespawnPoint(Registry& registry, entt::entity respawning)
 {
     auto view = registry.view<RespawnPoint, Position>();
 
-    // Collect available (off-cooldown) spawn points.
-    std::vector<entt::entity> available;
+    // Living enemy positions — spawn points are biased away from these.
+    std::vector<glm::vec3> enemyPositions;
+    registry.view<Player, Position, PlayerVisState>().each(
+        [&](entt::entity e, const Position& pos, const PlayerVisState& vis) {
+            if (e == respawning || vis.isDead)
+                return;
+            enemyPositions.push_back(pos.value);
+        });
+
+    auto nearestEnemyDistSq = [&](const glm::vec3& p) -> float {
+        float best = std::numeric_limits<float>::max();
+        for (const glm::vec3& e : enemyPositions) {
+            const glm::vec3 d = e - p;
+            best = std::min(best, glm::dot(d, d));
+        }
+        return best; // max() when no enemies → every point scores equally.
+    };
+
+    // Available (off-cooldown) points scored by distance to the nearest enemy.
+    struct ScoredPoint
+    {
+        entt::entity entity;
+        float score;
+    };
+    std::vector<ScoredPoint> available;
     entt::entity lowestCooldownEntity = entt::null;
     float lowestCooldown = std::numeric_limits<float>::max();
 
     for (entt::entity e : view) {
         auto& sp = view.get<RespawnPoint>(e);
         if (sp.available) {
-            available.push_back(e);
+            available.push_back({e, nearestEnemyDistSq(view.get<Position>(e).value)});
         }
         if (sp.cooldown < lowestCooldown) {
             lowestCooldown = sp.cooldown;
@@ -147,32 +172,35 @@ inline glm::vec3 chooseRespawnPoint(Registry& registry)
     entt::entity chosen = entt::null;
 
     if (!available.empty()) {
-        // Pick randomly among available spawn points.
+        // Farthest-from-enemies first; random tiebreak among the safest few.
+        std::sort(available.begin(), available.end(), [](const ScoredPoint& a, const ScoredPoint& b) {
+            return a.score > b.score;
+        });
+        const std::size_t topN = std::min<std::size_t>(3, available.size());
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_int_distribution<std::size_t> dist(0, available.size() - 1);
-        chosen = available[dist(gen)];
+        std::uniform_int_distribution<std::size_t> dist(0, topN - 1);
+        chosen = available[dist(gen)].entity;
     } else if (lowestCooldownEntity != entt::null) {
         // All on cooldown — pick the one closest to being ready.
         chosen = lowestCooldownEntity;
     }
 
     if (chosen != entt::null) {
-        // Set cooldown on the chosen spawn point.
         auto& sp = view.get<RespawnPoint>(chosen);
         sp.cooldown = k_spawnPointCooldown;
         sp.available = false;
-        return view.get<Position>(chosen).value;
+        return SpawnResolution{.center = view.get<Position>(chosen).value, .yaw = sp.yaw};
     }
 
     // Fallback when no spawn points exist in the world.
-    return glm::vec3(0.0f, 200.0f, 0.0f);
+    return SpawnResolution{.center = glm::vec3(0.0f, 200.0f, 0.0f), .yaw = 0.0f};
 }
 
-glm::vec3 chooseAndResolveSpawnPosition(Registry& registry, entt::entity player)
+SpawnResolution chooseAndResolveSpawnPosition(Registry& registry, entt::entity player)
 {
-    const glm::vec3 spawnFeet = chooseRespawnPoint(registry);
-    return resolveRespawnPosition(registry, player, spawnFeet);
+    const SpawnResolution choice = chooseRespawnPoint(registry, player);
+    return SpawnResolution{.center = resolveRespawnPosition(registry, player, choice.center), .yaw = choice.yaw};
 }
 
 /// @brief Reset a dead player to a fresh spawn state.
@@ -187,14 +215,17 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
 {
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
-    const glm::vec3 respawnCenter = chooseAndResolveSpawnPosition(registry, player);
+    const SpawnResolution respawn = chooseAndResolveSpawnPosition(registry, player);
 
     destroyRagdoll(registry, player);
     registry.erase<RespawnTimer>(player);
     registry.erase<DeathInfo>(player);
     registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = true; });
-    registry.emplace_or_replace<InputSnapshot>(player);
-    registry.emplace_or_replace<Position>(player, respawnCenter);
+    // Face the spawn point's authored direction on respawn.
+    InputSnapshot freshInput{};
+    freshInput.yaw = respawn.yaw;
+    registry.emplace_or_replace<InputSnapshot>(player, freshInput);
+    registry.emplace_or_replace<Position>(player, respawn.center);
     registry.emplace_or_replace<Velocity>(player);
     registry.emplace_or_replace<PlayerVisState>(player);
     registry.emplace_or_replace<PlayerSimState>(player);
@@ -255,30 +286,11 @@ inline void handleDeath(entt::entity& player,
         const glm::vec3 rightAxis{std::cos(yawAtDeath), 0.0f, -std::sin(yawAtDeath)};
         constexpr float k_dropSideOffset = 32.0f; // ~AABB width — clear gap between the two drops
         auto spawnDrop = [&](const GunInstance& g, float side) {
-            const entt::entity e = registry.create();
-            registry.emplace<Position>(e, deathPos.value + rightAxis * (side * k_dropSideOffset));
-            // Compact weapon-sized AABB so the visual model rests near the
-            // floor under gravity. The pickup overlap test still gets a
-            // generous catch radius once the player's own AABB is added in.
-            CollisionShape dropShape{};
-            dropShape.halfExtents = glm::vec3{12.0f, 6.0f, 12.0f};
-            registry.emplace<CollisionShape>(e, dropShape);
-            // Give the entity a Velocity + RigidBody so DynamicsSystem ticks
-            // it with gravity and resolves it against the world. linearDamping
-            // bleeds momentum so the drop doesn't skid forever after the
-            // initial fall.
-            registry.emplace<Velocity>(e);
-            RigidBody rb{};
-            rb.linearDamping = 2.0f;
-            rb.angularDamping = 4.0f;
-            registry.emplace<RigidBody>(e, rb);
-            registry.emplace<DroppedWeapon>(e,
-                                            DroppedWeapon{
-                                                .type = g.type,
-                                                .totalAmmo = g.totalAmmo,
-                                                .currentMagAmmo = g.currentMagAmmo,
-                                                .despawnTimer = systems::k_droppedWeaponLifetime,
-                                            });
+            spawnDroppedWeapon(registry,
+                               deathPos.value + rightAxis * (side * k_dropSideOffset),
+                               glm::vec3{0.0f},
+                               g,
+                               /*pickupDelay=*/0.0f);
         };
         spawnDrop(getSlot(deathWeapons, WeaponSlot::PRIMARY), -1.0f);
         spawnDrop(getSlot(deathWeapons, WeaponSlot::SECONDARY), +1.0f);

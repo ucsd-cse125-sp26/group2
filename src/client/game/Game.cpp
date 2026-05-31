@@ -2905,6 +2905,27 @@ SDL_AppResult Game::iterate()
         tag.ratePerSecond = 24.f; // dense flame puffs for visible AoE
     });
 
+    // Reap orphaned fire emitters. When the server destroys a FireField, the
+    // replicated component is stripped on the next snapshot — but the
+    // client-attached `Position` + `ParticleEmitterTag` (added just above) keep
+    // the entity non-orphan, so `continuous_loader::orphans()` never reaps it
+    // and the flame puffs pump forever (the "molly stays forever" bug). Strip
+    // the fire emitter from any entity that no longer has a FireField so the
+    // VFX ends with the field and the now-componentless entity can be reaped.
+    {
+        thread_local std::vector<entt::entity> deadFireEmitters;
+        deadFireEmitters.clear();
+        registry.view<ParticleEmitterTag>(entt::exclude<FireField>)
+            .each([&](entt::entity e, const ParticleEmitterTag& tag) {
+                if (tag.type == EmitterType::Fire)
+                    deadFireEmitters.push_back(e);
+            });
+        for (const entt::entity e : deadFireEmitters) {
+            registry.remove<ParticleEmitterTag>(e);
+            registry.remove<Position>(e);
+        }
+    }
+
     // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer->getCamera(), registry);
     phaseSnap(phaseStats.particlesMs);
@@ -5957,6 +5978,8 @@ SDL_AppResult Game::iterate()
                     return;
                 if (localClientId.value != -1 && cid == localClientId)
                     return; // Skip local player (always drawn at center).
+                if (ps.crouching)
+                    return; // Crouching hides you from enemy radar.
                 hudMinimapDots.push_back({pos.value.x, pos.value.z});
             });
         hudState.enemyDots = hudMinimapDots;
@@ -6156,6 +6179,21 @@ SDL_AppResult Game::iterate()
                 we.armor = static_cast<int>(hp.armor);
                 we.maxArmor = 100;
                 we.isAlive = !pvis.isDead;
+
+                // Occlusion: cast from the camera eye toward the enemy's body
+                // center. If static world geometry is hit before reaching the
+                // enemy, a wall is in the way — flag it so the HUD hides the
+                // floating bar/name (no see-through-walls wallhack).
+                const glm::vec3 bodyCenter =
+                    pos.value + glm::vec3{0.f, shape.halfExtents.y * 0.5f * headDir, 0.f};
+                const glm::vec3 toEnemy = bodyCenter - cachedEye_;
+                const float distToEnemy = glm::length(toEnemy);
+                if (distToEnemy > 1.f) {
+                    const physics::HitscanHit losHit =
+                        physics::raycastWorld(cachedEye_, toEnemy / distToEnemy, physics::activeWorld());
+                    we.occluded = losHit.hit && losHit.distance < distToEnemy - 2.f;
+                }
+
                 hudWorldEnemies.push_back(we);
             });
         hudState.worldEnemies = hudWorldEnemies;

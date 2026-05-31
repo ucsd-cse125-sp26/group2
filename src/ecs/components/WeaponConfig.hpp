@@ -175,7 +175,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .fireCooldown = 1.0f,
             .magazineSize = 4,
             .defaultAmmoCapacity = 12,
-            .damage = 200.0f,
+            .damage = 250.0f, // Buffed from 200 — heavier direct hit.
             .hitscan = false,
             .initialProjectileSpeed = 3000.0f,
             .explosive = true,
@@ -276,8 +276,8 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
             .scale = 1.0f,
             .shape = CollisionShape{.halfExtents = {5.0f, 5.0f, 5.0f}},
             .maxLifeTime = 5.0f,
-            .explosionRadius = 250.0f,
-            .explosionFalloffExponent = 3.0f, // Cubic: direct hits 1-shot, ~2m away ≈ 65 dmg, ~3m ≈ chip.
+            .explosionRadius = 340.0f,        // Buffed from 250 — wider blast.
+            .explosionFalloffExponent = 1.5f, // Softened from cubic (3.0) — smoother, more forgiving splash.
             .selfDamageMultiplier = 0.4f,     // 40% self-damage so rocket jumps don't suicide.
             .maxKnockback = 800.0f,           // Feet-rocket pop scaled against k_jumpSpeed=660; retune if too soft.
             .knockbackFalloffExponent = 2.0f, // Quadratic: push reaches further than damage.

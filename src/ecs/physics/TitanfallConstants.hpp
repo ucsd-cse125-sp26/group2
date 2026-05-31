@@ -154,8 +154,8 @@ constexpr float k_crouchingCapsuleHalfHeight = k_crouchingHalfHeight - k_playerC
 
 // Grappling hook (Widowmaker-style: direct pull → look-biased launch)
 
-constexpr float k_grappleMaxRange = 4000.0f;  ///< Max hook distance (~20 m in Quake units).
-constexpr float k_grapplePullSpeed = 4000.0f; ///< Direct velocity toward anchor (u/s). Overrides, not additive.
+constexpr float k_grappleMaxRange = 2200.0f;  ///< Max hook distance (nerfed from 4000 — shorter reach).
+constexpr float k_grapplePullSpeed = 2400.0f; ///< Direct velocity toward anchor (u/s). Overrides, not additive (nerfed from 4000 — slower pull).
 constexpr float k_grappleDetachDist = 80.0f;  ///< Auto-detach when this close to anchor (~2 m).
 constexpr float k_grappleMaxDuration = 5.0f;  ///< Safety timeout (s).
 constexpr float k_grappleCooldown = 5.0f;     ///< Cooldown between grapples (s).
