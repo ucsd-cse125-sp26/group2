@@ -133,7 +133,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 500,
             .damage = 15.0f,
             .hitscan = true,
-            .hitscanRadius = 8.0f, // ~forgiving rifle; player capsules are ~2.5–6.5u radius in world space.
+            .hitscanRadius = 16.0f, // doubled — generous rifle reg; player capsules are ~2.5–6.5u radius in world space.
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .reloadTime = 1.25f,
@@ -166,7 +166,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 32,
             .damage = 50.0f,
             .hitscan = true,
-            .hitscanRadius = 6.0f,
+            .hitscanRadius = 12.0f, // doubled
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isCharge = true,
@@ -180,7 +180,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 200,
             .damage = 5.0f,
             .hitscan = true,
-            .hitscanRadius = 6.0f,
+            .hitscanRadius = 12.0f, // doubled
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isBeam = true,
@@ -198,7 +198,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 36,
             .damage = 10.0f,       // per-pellet; 11 pellets → 110 body max, ~165 head.
             .hitscan = true,
-            .hitscanRadius = 3.0f, // smaller than rifle — 11 pellets, don't over-buff close range.
+            .hitscanRadius = 6.0f, // doubled; still tighter than rifle since the 11 pellets compound close-range damage.
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .reloadTime = 2.5f,
