@@ -72,10 +72,11 @@ constexpr float k_slideBrakingDecelMin = 200.0f;     ///< Initial braking decele
 constexpr float k_slideBrakingDecelMax = 400.0f;     ///< Maximum braking deceleration (u/s^2).
 constexpr float k_slideBrakingRampTime = 3.0f;       ///< Time to ramp from min to max braking (s).
 constexpr float k_slideFloorInfluenceForce = 400.0f; ///< How much slope angle affects slide speed (u/s^2).
-constexpr float k_slideSteerAccel = 200.0f;          ///< Sideways accel from WASD while sliding (u/s^2).
-                                                     ///< Applied along the component of wishDir perpendicular
-                                                     ///< to current motion, so it gently rotates the slide
-                                                     ///< trajectory without adding forward speed.
+constexpr float k_slideSteerTurnRate = 1.8f;         ///< Max heading turn rate while sliding (rad/s).
+                                                     ///< The slide's velocity is rotated toward the WASD/view
+                                                     ///< wish direction at up to this rate, preserving speed, so
+                                                     ///< the player can carve their trajectory without instantly
+                                                     ///< pivoting.
 constexpr int k_slideFatigueDecayTicks = 200;        ///< Ticks (at 128Hz = 3s) to reset one fatigue level.
 constexpr int k_slideFatigueMax = 4;                 ///< Max fatigue levels (boost fully killed at this).
 
