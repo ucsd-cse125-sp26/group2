@@ -13,6 +13,7 @@
 #include "effects/ImpactEffect.hpp"
 #include "effects/RibbonTrail.hpp"
 #include "effects/SmokeEffect.hpp"
+#include "effects/TeslaBeamEffect.hpp"
 #include "effects/TracerEffect.hpp"
 #include "renderer-new/Camera.hpp"
 #include "sdf/SdfRenderer.hpp"
@@ -125,7 +126,7 @@ public:
     [[nodiscard]] uint32_t tracerCount() const { return tracers_.count(); }
     [[nodiscard]] uint32_t ribbonVertexCount() const { return ribbons_.count(); }
     [[nodiscard]] uint32_t hitscanBeamCount() const { return hitscan_.activeBeamCount(); }
-    [[nodiscard]] uint32_t arcVertexCount() const { return hitscan_.arcCount(); }
+    [[nodiscard]] uint32_t arcVertexCount() const { return hitscan_.arcCount() + tesla_.arcCount(); }
     [[nodiscard]] uint32_t smokeCount() const { return smoke_.count(); }
     [[nodiscard]] uint32_t decalCount() const { return decals_.count(); }
     [[nodiscard]] bool sdfReady() const { return sdf_.ready(); }
@@ -138,6 +139,7 @@ private:
     TracerEffect tracers_;
     RibbonTrail ribbons_;
     HitscanEffect hitscan_;
+    TeslaBeamEffect tesla_;
     SmokeEffect smoke_;
     ImpactEffect impact_;
     BulletHoleDecal decals_;
@@ -153,4 +155,7 @@ private:
     float screenH_ = 720.f;
 
     float frameDt_ = 0.016f; // last dt, needed by spawn callbacks
+
+    // Scratch buffer: hitscan + tesla arc verts merged for a single upload.
+    std::vector<ArcVertex> arcScratch_;
 };

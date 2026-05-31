@@ -3,8 +3,11 @@
 
 #include "ParticleSystem.hpp"
 
+#include "ecs/components/BeamState.hpp"
+#include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/RibbonEmitter.hpp"
 #include "ecs/components/TracerEmitter.hpp"
+#include "ecs/components/WeaponState.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -65,6 +68,21 @@ void ParticleSystem::update(float dt, const NewCamera& cam, Registry& reg)
     tracers_.update(dt, reg);
     ribbons_.update(dt, reg, camPos_);
     hitscan_.update(dt, camForward_);
+
+    // Tesla Cannon: drive a sustained, curved arc from each active EnergyGun
+    // beam to its locked target (server-set BeamState.hitPoint). The local
+    // player's arc is offset to a hip-fire muzzle so it doesn't shoot from the
+    // camera's centre.
+    reg.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
+        if (!beam.active || beam.type != WeaponType::EnergyGun)
+            return;
+        glm::vec3 origin = beam.origin;
+        if (reg.all_of<LocalPlayer>(e))
+            origin = camPos_ + camForward_ * 6.0f + camRight_ * 5.0f - camUp_ * 5.0f;
+        tesla_.drive(static_cast<uint32_t>(e), origin, beam.hitPoint);
+    });
+    tesla_.update(dt, camForward_);
+
     smoke_.update(dt, reg, camPos_, camForward_);
     impact_.update(dt);
     decals_.update(dt);
@@ -84,7 +102,27 @@ void ParticleSystem::uploadToGpu(SDL_GPUCommandBuffer* cmd)
     renderer_.uploadTracers(cmd, tracers_.data(), tracers_.count());
     renderer_.uploadRibbon(cmd, ribbons_.data(), ribbons_.count());
     renderer_.uploadHitscan(cmd, hitscan_.beamData(), hitscan_.beamCount());
-    renderer_.uploadArcs(cmd, hitscan_.arcData(), hitscan_.arcCount());
+
+    // Both lightning effects share one arc vertex buffer / draw call. Merge
+    // them, inserting a degenerate join so the two triangle strips don't link.
+    // Clamp to the GPU buffer capacity so an overflow can never read OOB.
+    constexpr uint32_t kMaxArcVerts = 4096;
+    arcScratch_.clear();
+    const ArcVertex* h = hitscan_.arcData();
+    const uint32_t hN = hitscan_.arcCount();
+    arcScratch_.insert(arcScratch_.end(), h, h + hN);
+    const ArcVertex* t = tesla_.arcData();
+    const uint32_t tN = tesla_.arcCount();
+    if (tN > 0) {
+        if (!arcScratch_.empty()) {
+            arcScratch_.push_back(arcScratch_.back()); // degenerate strip restart
+            arcScratch_.push_back(t[0]);
+        }
+        arcScratch_.insert(arcScratch_.end(), t, t + tN);
+    }
+    if (arcScratch_.size() > kMaxArcVerts)
+        arcScratch_.resize(kMaxArcVerts);
+    renderer_.uploadArcs(cmd, arcScratch_.data(), static_cast<uint32_t>(arcScratch_.size()));
     renderer_.uploadSmoke(cmd, smoke_.data(), smoke_.count());
     renderer_.uploadDecals(cmd, decals_.data(), decals_.count());
     renderer_.uploadSdfWorld(cmd, sdf_.worldData(), sdf_.worldCount());
