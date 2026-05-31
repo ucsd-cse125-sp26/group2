@@ -5056,11 +5056,13 @@ SDL_AppResult Game::iterate()
                         glm::vec3(vm.transform * glm::vec4(weaponVm_.boneModelPos("muzzle_flash"), 1.0f));
                     glm::vec3 barrelDir = muzzleWorld - chamberWorld;
                     barrelDir = (glm::length(barrelDir) > 1e-4f) ? glm::normalize(barrelDir) : fwd;
+                    // Casing long axis (local X) points opposite the muzzle (it was spawning 180-degrees backwards).
+                    const glm::vec3 longAxis = -barrelDir;
                     const glm::vec3 refUp =
-                        (std::abs(barrelDir.y) < 0.99f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
-                    const glm::vec3 cz = glm::normalize(glm::cross(barrelDir, refUp));
-                    const glm::vec3 cy = glm::cross(cz, barrelDir);
-                    cs.orient = glm::mat3(barrelDir, cy, cz); // local X -> barrel
+                        (std::abs(longAxis.y) < 0.99f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+                    const glm::vec3 cz = glm::normalize(glm::cross(longAxis, refUp));
+                    const glm::vec3 cy = glm::cross(cz, longAxis);
+                    cs.orient = glm::mat3(longAxis, cy, cz); // local X -> -barrel (correct facing)
                     cs.pos = chamberWorld + rgt * 1.5f;       // ejection port: just right of the chamber
                     cs.vel = rgt * (150.0f + j * 40.0f) + upv * (120.0f + j * 30.0f) + fwd * (j * 40.0f);
                     cs.spin = 20.0f + j * 8.0f;
