@@ -80,6 +80,26 @@ const char* clipName(ClipId id)
         return "Crouch Walk Right";
     case ClipId::CrouchWalkBackward:
         return "Crouch Walk Backward";
+    case ClipId::StartForward:
+        return "Start Forward";
+    case ClipId::StartBackward:
+        return "Start Backward";
+    case ClipId::StartLeft:
+        return "Start Left";
+    case ClipId::StartRight:
+        return "Start Right";
+    case ClipId::StopForward:
+        return "Stop Forward";
+    case ClipId::StopBackward:
+        return "Stop Backward";
+    case ClipId::StopLeft:
+        return "Stop Left";
+    case ClipId::StopRight:
+        return "Stop Right";
+    case ClipId::PivotLeft:
+        return "Pivot Left";
+    case ClipId::PivotRight:
+        return "Pivot Right";
     case ClipId::_Count:
         return "(none)";
     }
@@ -120,13 +140,33 @@ const char* clipFile(ClipId id)
     case ClipId::CrouchIdle:
         return "crouch/Idle Crouching.fbx";
     case ClipId::CrouchWalk:
-        return "crouch/Walk Crouching Backward.fbx";
+        return "crouch/Walk Crouching Forward.fbx";
     case ClipId::CrouchWalkLeft:
         return "crouch/Walk Crouching Left.fbx";
     case ClipId::CrouchWalkRight:
         return "crouch/Walk Crouching Right.fbx";
     case ClipId::CrouchWalkBackward:
         return "crouch/Walk Crouching Backward.fbx";
+    case ClipId::StartForward:
+        return "loco/start_forward.fbx";
+    case ClipId::StartBackward:
+        return "loco/start_backward.fbx";
+    case ClipId::StartLeft:
+        return "loco/start_left.fbx";
+    case ClipId::StartRight:
+        return "loco/start_right.fbx";
+    case ClipId::StopForward:
+        return "loco/stop_forward.fbx";
+    case ClipId::StopBackward:
+        return "loco/stop_backward.fbx";
+    case ClipId::StopLeft:
+        return "loco/stop_left.fbx";
+    case ClipId::StopRight:
+        return "loco/stop_right.fbx";
+    case ClipId::PivotLeft:
+        return "loco/pivot_left.fbx";
+    case ClipId::PivotRight:
+        return "loco/pivot_right.fbx";
     case ClipId::_Count:
         return "";
     }
