@@ -297,6 +297,7 @@ struct HudGameState
     bool isBuyPhase = false;
     MatchPhase currentPhase = MatchPhase::IN_PROGRESS; ///< Current server match phase.
     bool matchWon = false;                             ///< True if the local player won the finished match.
+    bool forceScoreboardOpen = false;                  ///< True when match flow should show scoreboard automatically.
     bool isReloading = false;
     float reloadProgress = 0.0f;                       ///< 0-1
 

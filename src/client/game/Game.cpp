@@ -5829,6 +5829,7 @@ SDL_AppResult Game::iterate()
         hudState.roundTimeRemaining = countdownTimer;
         hudState.isBuyPhase = (currentMatchPhase == MatchPhase::WARMUP || currentMatchPhase == MatchPhase::COUNTDOWN);
         hudState.currentPhase = currentMatchPhase;
+        hudState.forceScoreboardOpen = currentMatchPhase == MatchPhase::FINISHED && countdownTimer <= 10.0f;
 
         // ── Kill feed: convert KillFeedEvent → HudKillFeedEntry ──
         ClientId localClientId{-1};

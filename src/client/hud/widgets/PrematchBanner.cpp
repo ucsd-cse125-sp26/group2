@@ -22,7 +22,8 @@ void PrematchBanner::update(float /*dt*/, const HudGameState& state, HudTweenPoo
     timeRemaining_ = std::max(state.roundTimeRemaining, 0.f);
     matchWon_ = state.matchWon;
 
-    visible = (phase_ == MatchPhase::WARMUP || phase_ == MatchPhase::COUNTDOWN || phase_ == MatchPhase::FINISHED);
+    visible = (phase_ == MatchPhase::WARMUP || phase_ == MatchPhase::COUNTDOWN ||
+               (phase_ == MatchPhase::FINISHED && !state.forceScoreboardOpen));
 
     if (phase_ == MatchPhase::WARMUP) {
         anchor = HudAnchor::BottomCenter;
