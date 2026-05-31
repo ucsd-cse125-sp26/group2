@@ -898,6 +898,13 @@ bool Game::init(AppContext& ctx)
     }
     client->resetInputHistory();
 
+    // Bind any controller already plugged in before the match started. SDL only
+    // fires SDL_EVENT_GAMEPAD_ADDED for those at SDL_Init time — long before this
+    // screen exists — so without an explicit scan a pre-connected pad stays
+    // unbound until the user physically reconnects it. Runtime hot-plug is still
+    // handled by the GAMEPAD_ADDED/REMOVED events in Game::event().
+    scanForConnectedGamepads();
+
     physics::diag::setFilePrefix("client");
     const char* phaseDiagEnv = std::getenv("GROUP2_PHASE_DIAG");
     const bool phaseDiagEnabled = phaseDiagEnv != nullptr && phaseDiagEnv[0] != '\0' && phaseDiagEnv[0] != '0';
@@ -1899,23 +1906,15 @@ SDL_AppResult Game::event(SDL_Event* event)
     }
 
     // ── Gamepad hot-plug ──────────────────────────────────────────────────
-    // SDL fires _ADDED for already-connected pads at startup once events are
-    // pumped, so this single handler covers both runtime hot-plug AND the
-    // initial bind.  We accept the first pad to arrive and ignore additional
-    // ones — multi-controller support (split-screen / co-op) would need an
-    // entity-per-controller scheme in the ECS, out of scope for this change.
+    // Runtime connect/disconnect while in-game. SDL also fires _ADDED for pads
+    // already connected at SDL_Init time, but those arrive before this Game
+    // screen exists and are delivered to the lobby instead — the pre-connected
+    // case is handled by scanForConnectedGamepads() in Game::init(). We accept
+    // the first pad and ignore additional ones; multi-controller support
+    // (split-screen / co-op) would need an entity-per-controller scheme in the
+    // ECS, out of scope for this change.
     if (event->type == SDL_EVENT_GAMEPAD_ADDED) {
-        if (!activeGamepad_) {
-            const SDL_JoystickID id = event->gdevice.which;
-            activeGamepad_ = SDL_OpenGamepad(id);
-            if (activeGamepad_) {
-                activeGamepadId_ = id;
-                const char* name = SDL_GetGamepadName(activeGamepad_);
-                SDL_Log("[input] gamepad connected: %s (id=%u)", name ? name : "unknown", id);
-            } else {
-                SDL_Log("[input] SDL_OpenGamepad failed for id=%u: %s", id, SDL_GetError());
-            }
-        }
+        adoptGamepad(event->gdevice.which);
     } else if (event->type == SDL_EVENT_GAMEPAD_REMOVED) {
         // Only tear down if the disconnected device is the one we're using —
         // otherwise an unrelated unplug (e.g. a second pad we never opened)
@@ -2023,6 +2022,35 @@ void Game::applyFrameRateLimit()
         if (renderer)
             renderer->setVSync(false);
     }
+}
+
+void Game::adoptGamepad(SDL_JoystickID id)
+{
+    if (activeGamepad_)
+        return; // First-device-wins: a controller is already bound.
+    activeGamepad_ = SDL_OpenGamepad(id);
+    if (activeGamepad_) {
+        activeGamepadId_ = id;
+        const char* name = SDL_GetGamepadName(activeGamepad_);
+        SDL_Log("[input] gamepad connected: %s (id=%u)", name ? name : "unknown", id);
+    } else {
+        SDL_Log("[input] SDL_OpenGamepad failed for id=%u: %s", id, SDL_GetError());
+    }
+}
+
+void Game::scanForConnectedGamepads()
+{
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    if (!ids) {
+        // Non-fatal: no gamepad subsystem / enumeration failure. Hot-plug still
+        // works via SDL_EVENT_GAMEPAD_ADDED.
+        SDL_Log("[input] SDL_GetGamepads failed: %s", SDL_GetError());
+        return;
+    }
+    for (int i = 0; i < count && !activeGamepad_; ++i)
+        adoptGamepad(ids[i]);
+    SDL_free(ids);
 }
 
 SDL_AppResult Game::iterate()
@@ -2361,6 +2389,19 @@ SDL_AppResult Game::iterate()
     bool localGravFlipped = false;
     registry.view<PlayerVisState, LocalPlayer>().each(
         [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
+
+    // On respawn, snap the local view to the spawn point's authored facing so
+    // the player doesn't spawn looking into a wall. Fires once on the dead→alive
+    // edge; runMouseLook is incremental (yaw -= mdx*sens) so this frame's mouse
+    // delta still composes on top and the player immediately keeps control.
+    registry.view<PlayerVisState, LocalPlayer, InputSnapshot>().each(
+        [&](const PlayerVisState& vis, InputSnapshot& snap) {
+            if (localWasDead_ && !vis.isDead) {
+                snap.yaw = vis.spawnViewYaw;
+                snap.pitch = 0.0f;
+            }
+            localWasDead_ = vis.isDead;
+        });
 
     if (mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
 

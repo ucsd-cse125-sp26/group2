@@ -977,7 +977,9 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
     registry.emplace<Position>(player, initialSpawn.center);
     registry.get<InputSnapshot>(player).yaw = initialSpawn.yaw; // Face the spawn's authored direction.
     registry.emplace<Velocity>(player);
-    registry.emplace<PlayerVisState>(player);
+    PlayerVisState initialVis{};
+    initialVis.spawnViewYaw = initialSpawn.yaw;
+    registry.emplace<PlayerVisState>(player, initialVis);
     registry.emplace<PlayerSimState>(player);
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
@@ -1416,6 +1418,7 @@ void ServerGame::resetPlayersForCountdown()
             pos.value = spawn.center;
             vel = Velocity{};
             vis = PlayerVisState{};
+            vis.spawnViewYaw = spawn.yaw; // client snaps local view here on the dead→alive edge.
             sim = PlayerSimState{};
 
             systems::destroyRagdoll(registry, player);

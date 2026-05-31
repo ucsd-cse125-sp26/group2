@@ -259,9 +259,11 @@ private:
 
     /// @brief Currently-bound gamepad, or nullptr if none is plugged in.
     ///
-    /// Opened on SDL_EVENT_GAMEPAD_ADDED (first device wins — extra controllers
-    /// are ignored until the active one disconnects), closed on
-    /// SDL_EVENT_GAMEPAD_REMOVED.  SDL3's gamepad mapping database normalises
+    /// Opened by scanForConnectedGamepads() at init (for pads already plugged
+    /// in before the match) and on SDL_EVENT_GAMEPAD_ADDED for runtime hot-plug
+    /// (first device wins — extra controllers are ignored until the active one
+    /// disconnects), closed on SDL_EVENT_GAMEPAD_REMOVED.  SDL3's gamepad
+    /// mapping database normalises
     /// every supported controller (Xbox 360 / One, DualShock, Switch Pro, ...)
     /// onto the same logical buttons + axes, so the input mapping in
     /// InputSampleSystem.hpp works uniformly across devices.
@@ -298,6 +300,10 @@ private:
     /// rest of the system.  Gated behind a unique_ptr so it constructs
     /// AFTER `init()` reads the env override.
     std::unique_ptr<WorkerPool> workerPool_;
+
+    /// @brief Local player's dead state last frame — used to detect the
+    ///        dead→alive (respawn) edge and snap the view to the spawn yaw.
+    bool localWasDead_ = false;
 
     // Runtime-tunable loop settings (exposed via ImGui)
     float mouseSensitivity = 0.0007f;      ///< Radians per pixel of mouse movement.
@@ -696,6 +702,23 @@ private:
     /// Wired to the same `WeaponFiredEvent` channel SfxSystem listens on, so
     /// the same event drives both audio and visuals.
     void onWeaponFired(const struct WeaponFiredEvent& evt);
+
+    /// @brief Open the gamepad with the given SDL_JoystickID and make it the
+    /// active controller, but only if none is currently bound (first-device-wins
+    /// policy).  Shared by the SDL_EVENT_GAMEPAD_ADDED hot-plug path and the
+    /// init-time scan below, so both routes apply identical state + logging.
+    void adoptGamepad(SDL_JoystickID id);
+
+    /// @brief Open the first already-connected gamepad, if any.
+    ///
+    /// SDL fires SDL_EVENT_GAMEPAD_ADDED for pads present at SDL_Init time, but
+    /// those events are delivered to whatever screen is active then (the lobby /
+    /// Home), not the Game which doesn't exist yet — so a controller plugged in
+    /// before the match starts would otherwise never be bound until the user
+    /// physically reconnected it.  Game::init() calls this to enumerate
+    /// SDL_GetGamepads() and adopt the first one, covering the "connected before
+    /// launch" case; the event handler still covers runtime hot-plug.
+    void scanForConnectedGamepads();
 
     // Match State
     MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.

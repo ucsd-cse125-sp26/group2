@@ -227,7 +227,9 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
     registry.emplace_or_replace<InputSnapshot>(player, freshInput);
     registry.emplace_or_replace<Position>(player, respawn.center);
     registry.emplace_or_replace<Velocity>(player);
-    registry.emplace_or_replace<PlayerVisState>(player);
+    PlayerVisState respawnVis{};
+    respawnVis.spawnViewYaw = respawn.yaw; // client snaps local view here on the dead→alive edge.
+    registry.emplace_or_replace<PlayerVisState>(player, respawnVis);
     registry.emplace_or_replace<PlayerSimState>(player);
     registry.emplace_or_replace<Health>(player, Health{});
     if (auto* abilityState = registry.try_get<AbilityState>(player)) {

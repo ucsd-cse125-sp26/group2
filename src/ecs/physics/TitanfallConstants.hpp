@@ -123,7 +123,7 @@ constexpr float k_speedCap = 7000.0f; ///< Hard horizontal speed limit (u/s).
 
 // Bullet-hit slow
 
-constexpr float k_bulletHitSlowFactor = 0.5f;   ///< Multiplier on wish speed while bullet-slowed (0.5 = halved).
+constexpr float k_bulletHitSlowFactor = 0.8f;   ///< Multiplier on wish speed while bullet-slowed (0.8 = 20% slow).
 constexpr float k_bulletHitSlowDuration = 0.5f; ///< Seconds the slow lingers after the last bullet hit. Each new
                                                 ///< hit refreshes the timer, so sustained fire keeps the target slowed.
 

@@ -60,4 +60,9 @@ struct PlayerVisState
 
     // Camera effects (read by renderer).
     float targetCameraTilt{0.0f}; ///< Target camera roll for wallrun lean (degrees).
+
+    // Spawn facing. Set by the server at (re)spawn to the spawn point's authored
+    // yaw; the local client snaps its view to this on the dead→alive edge so the
+    // player doesn't respawn looking into a wall.
+    float spawnViewYaw{0.0f}; ///< Authored spawn facing (radians); applied to local view on respawn.
 };
