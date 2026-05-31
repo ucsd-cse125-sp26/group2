@@ -388,7 +388,7 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
         ++inputRingCount_;
 
     // Pack [PacketType::INPUT (1B)] [count (1B)] [rttMs (2B)]
-    //      [interpDelaySnapshots (1B)] [InputSnapshot * count].
+    //      [interpDelaySnapshots (1B)] [interpDelayMs (2B)] [InputSnapshot * count].
     //
     // Inputs are written oldest-first so the server can apply them in
     // tick order with a simple `tick > lastAppliedInputTick` check.
@@ -418,21 +418,40 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     const auto rttMs = static_cast<uint16_t>(std::lround(rttClamped));
     const auto interpDelaySnapshots =
         static_cast<uint8_t>(std::clamp(interpDelaySnapshots_, 0, static_cast<int>(InterpolationBuffer::k_capacity)));
-    uint8_t buf[5 + k_inputRedundancy * sizeof(InputSnapshot)];
+
+    // PR-31: the client's *measured* render delay in milliseconds —
+    // `interpDelaySnapshots × snapshotIntervalEmaNs_`, where the EMA tracks
+    // the actually-observed snapshot-apply interval (Client::applyRegistry).
+    // The server prefers this over the snapshot-count byte so its lag-comp
+    // rewind locks onto the real render time the client displayed, even when
+    // jitter or the post-join warm-up window pushes the effective cadence
+    // away from the nominal rate. See server::lagcomp::computeRewindTicks.
+    // Zero when render-delay interp is off, which selects the server's
+    // snapshot-count fallback path. Clamped to 1000 ms here; the server
+    // re-clamps the combined rewind to the HitboxHistory ring in ticks.
+    uint16_t interpDelayMs = 0;
+    if (interpDelaySnapshots_ > 0) {
+        const Uint64 delayNs = static_cast<Uint64>(interpDelaySnapshots_) * snapshotIntervalEmaNs_;
+        const Uint64 delayMs = (delayNs + 500'000ULL) / 1'000'000ULL; // round ns → ms
+        interpDelayMs = static_cast<uint16_t>(std::min<Uint64>(delayMs, 1000ULL));
+    }
+
+    uint8_t buf[7 + k_inputRedundancy * sizeof(InputSnapshot)];
     buf[0] = static_cast<uint8_t>(PacketType::INPUT);
     buf[1] = count;
     std::memcpy(buf + 2, &rttMs, sizeof(uint16_t));
     buf[4] = interpDelaySnapshots;
+    std::memcpy(buf + 5, &interpDelayMs, sizeof(uint16_t));
 
     // Oldest-first iteration: when ring is full, oldest is at head; otherwise
     // entries [0, count) are already in order.
     const size_t firstIdx = (inputRingCount_ == k_inputRedundancy) ? inputRingHead_ : 0;
     for (size_t i = 0; i < inputRingCount_; ++i) {
         const size_t srcIdx = (firstIdx + i) % k_inputRedundancy;
-        std::memcpy(buf + 5 + i * sizeof(InputSnapshot), &inputRing_[srcIdx], sizeof(InputSnapshot));
+        std::memcpy(buf + 7 + i * sizeof(InputSnapshot), &inputRing_[srcIdx], sizeof(InputSnapshot));
     }
 
-    const uint32_t totalLen = 5 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
+    const uint32_t totalLen = 7 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
 
     if (usingUdpSession_) {
         return session_.send(connectionId_, net::ChannelId::InputUnreliable, buf, static_cast<int>(totalLen));

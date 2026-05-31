@@ -16,6 +16,7 @@
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
+#include "config/InputBindings.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
 #include "ecs/abilities/AbilityTuning.hpp"
@@ -898,6 +899,13 @@ bool Game::init(AppContext& ctx)
     }
     client->resetInputHistory();
 
+    // Bind any controller already plugged in before the match started. SDL only
+    // fires SDL_EVENT_GAMEPAD_ADDED for those at SDL_Init time — long before this
+    // screen exists — so without an explicit scan a pre-connected pad stays
+    // unbound until the user physically reconnects it. Runtime hot-plug is still
+    // handled by the GAMEPAD_ADDED/REMOVED events in Game::event().
+    scanForConnectedGamepads();
+
     physics::diag::setFilePrefix("client");
     const char* phaseDiagEnv = std::getenv("GROUP2_PHASE_DIAG");
     const bool phaseDiagEnabled = phaseDiagEnv != nullptr && phaseDiagEnv[0] != '\0' && phaseDiagEnv[0] != '0';
@@ -1678,8 +1686,16 @@ void Game::appendLocalChatMessage(std::string_view message)
 
 void Game::clearGameplayInputForChat()
 {
-    systems::grenadeRadialActive = false;
     systems::pendingGrenadeThrow = false;
+    systems::pendingGrenadeCycleNext = false;
+    systems::pendingGrenadeCyclePrev = false;
+    systems::grenadeCycledThisHold = false;
+    systems::prevGrenadeCycleNext = false;
+    systems::prevGrenadeCyclePrev = false;
+    systems::prevGamepadGrenadeKey = false;
+    systems::gamepadGrenadeCycledThisHold = false;
+    systems::prevGamepadGrenadeCycleNext = false;
+    systems::prevGamepadGrenadeCyclePrev = false;
     systems::prevKillSelfKey = false;
     systems::prevGrenadeKey = false;
     systems::prevAbilitySelectLeft = false;
@@ -1706,8 +1722,8 @@ void Game::clearGameplayInputForChat()
         snap.killSelf = false;
         snap.skipRespawn = false;
         snap.throwGrenade = false;
-        snap.grenadeMenuHeld = false;
-        snap.grenadeSelectIndex = kInvalidGrenadeSelectIndex;
+        snap.grenadeCycleNext = false;
+        snap.grenadeCyclePrev = false;
         snap.ability1 = false;
         snap.ability2 = false;
         snap.abilitySelectHeld = false;
@@ -1726,6 +1742,30 @@ SDL_AppResult Game::event(SDL_Event* event)
 
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
+
+    // Track the last-used input device so HUD prompts show the matching glyphs.
+    // Keyboard/mouse activity flips back to KBM; gamepad buttons or stick/trigger
+    // motion past a deadzone flip to Controller (a raw deadzone keeps stick drift
+    // from stealing the glyphs from a mouse player who happens to have a pad
+    // plugged in).
+    switch (event->type) {
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_MOTION:
+    case SDL_EVENT_MOUSE_WHEEL:
+        lastInputDevice_ = BindingDevice::KeyboardMouse;
+        break;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        lastInputDevice_ = BindingDevice::Controller;
+        break;
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+        // SDL axes are int16; ~40% deflection clears stick/trigger rest noise.
+        if (std::abs(event->gaxis.value) > 13000)
+            lastInputDevice_ = BindingDevice::Controller;
+        break;
+    default:
+        break;
+    }
 
     // Resize HUD offscreen target when the window pixel size changes.
     if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
@@ -1899,23 +1939,15 @@ SDL_AppResult Game::event(SDL_Event* event)
     }
 
     // ── Gamepad hot-plug ──────────────────────────────────────────────────
-    // SDL fires _ADDED for already-connected pads at startup once events are
-    // pumped, so this single handler covers both runtime hot-plug AND the
-    // initial bind.  We accept the first pad to arrive and ignore additional
-    // ones — multi-controller support (split-screen / co-op) would need an
-    // entity-per-controller scheme in the ECS, out of scope for this change.
+    // Runtime connect/disconnect while in-game. SDL also fires _ADDED for pads
+    // already connected at SDL_Init time, but those arrive before this Game
+    // screen exists and are delivered to the lobby instead — the pre-connected
+    // case is handled by scanForConnectedGamepads() in Game::init(). We accept
+    // the first pad and ignore additional ones; multi-controller support
+    // (split-screen / co-op) would need an entity-per-controller scheme in the
+    // ECS, out of scope for this change.
     if (event->type == SDL_EVENT_GAMEPAD_ADDED) {
-        if (!activeGamepad_) {
-            const SDL_JoystickID id = event->gdevice.which;
-            activeGamepad_ = SDL_OpenGamepad(id);
-            if (activeGamepad_) {
-                activeGamepadId_ = id;
-                const char* name = SDL_GetGamepadName(activeGamepad_);
-                SDL_Log("[input] gamepad connected: %s (id=%u)", name ? name : "unknown", id);
-            } else {
-                SDL_Log("[input] SDL_OpenGamepad failed for id=%u: %s", id, SDL_GetError());
-            }
-        }
+        adoptGamepad(event->gdevice.which);
     } else if (event->type == SDL_EVENT_GAMEPAD_REMOVED) {
         // Only tear down if the disconnected device is the one we're using —
         // otherwise an unrelated unplug (e.g. a second pad we never opened)
@@ -2023,6 +2055,35 @@ void Game::applyFrameRateLimit()
         if (renderer)
             renderer->setVSync(false);
     }
+}
+
+void Game::adoptGamepad(SDL_JoystickID id)
+{
+    if (activeGamepad_)
+        return; // First-device-wins: a controller is already bound.
+    activeGamepad_ = SDL_OpenGamepad(id);
+    if (activeGamepad_) {
+        activeGamepadId_ = id;
+        const char* name = SDL_GetGamepadName(activeGamepad_);
+        SDL_Log("[input] gamepad connected: %s (id=%u)", name ? name : "unknown", id);
+    } else {
+        SDL_Log("[input] SDL_OpenGamepad failed for id=%u: %s", id, SDL_GetError());
+    }
+}
+
+void Game::scanForConnectedGamepads()
+{
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    if (!ids) {
+        // Non-fatal: no gamepad subsystem / enumeration failure. Hot-plug still
+        // works via SDL_EVENT_GAMEPAD_ADDED.
+        SDL_Log("[input] SDL_GetGamepads failed: %s", SDL_GetError());
+        return;
+    }
+    for (int i = 0; i < count && !activeGamepad_; ++i)
+        adoptGamepad(ids[i]);
+    SDL_free(ids);
 }
 
 SDL_AppResult Game::iterate()
@@ -2362,12 +2423,25 @@ SDL_AppResult Game::iterate()
     registry.view<PlayerVisState, LocalPlayer>().each(
         [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
 
+    // On respawn, snap the local view to the spawn point's authored facing so
+    // the player doesn't spawn looking into a wall. Fires once on the dead→alive
+    // edge; runMouseLook is incremental (yaw -= mdx*sens) so this frame's mouse
+    // delta still composes on top and the player immediately keeps control.
+    registry.view<PlayerVisState, LocalPlayer, InputSnapshot>().each(
+        [&](const PlayerVisState& vis, InputSnapshot& snap) {
+            if (localWasDead_ && !vis.isDead) {
+                snap.yaw = vis.spawnViewYaw;
+                snap.pitch = 0.0f;
+            }
+            localWasDead_ = vis.isDead;
+        });
+
     if (mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
             systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
-        systems::runWeaponKeys(registry, userSettings->inputBindings, frameTime);
+        systems::runWeaponKeys(registry, userSettings->inputBindings);
 
         // Gamepad samplers run AFTER kbm so they OR into the same flags —
         // a player can use kbm and pad simultaneously without either source
@@ -2447,11 +2521,15 @@ SDL_AppResult Game::iterate()
     int ticksThisFrame = 0;
     bool grantAbilityLevelThisFrame = false;
     bool throwGrenadeThisFrame = false;
+    bool grenadeCycleNextThisFrame = false;
+    bool grenadeCyclePrevThisFrame = false;
 
     if (accumulator >= k_physicsDt) {
         grantAbilityLevelThisFrame = debugUI.pendingAbilityLevelGrant_;
         debugUI.pendingAbilityLevelGrant_ = false;
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
+        grenadeCycleNextThisFrame = systems::consumePendingGrenadeCycleNext();
+        grenadeCyclePrevThisFrame = systems::consumePendingGrenadeCyclePrev();
 
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
@@ -2522,7 +2600,12 @@ SDL_AppResult Game::iterate()
             registry.view<InputSnapshot, LocalPlayer>().each([this, grantAbilityLevelThisFrame](InputSnapshot& snap) {
                 snap.tick = clientPredictTick;
                 snap.debugGrantAbilityLevel = grantAbilityLevelThisFrame;
+                // Grenade throw/cycle are edge events: keep them false during
+                // prediction ticks so the local sim never double-applies them.
+                // They're stamped onto the sent snapshot once, after the loop.
                 snap.throwGrenade = false;
+                snap.grenadeCycleNext = false;
+                snap.grenadeCyclePrev = false;
             });
             registry.view<LocalPlayer, InputSnapshot>().each(
                 [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
@@ -2552,9 +2635,17 @@ SDL_AppResult Game::iterate()
         // ticks are pulled from `Client::inputRing_` (which the
         // sendInputSnapshot path appends to internally).
         registry.view<LocalPlayer, InputSnapshot>().each(
-            [throwGrenadeThisFrame](InputSnapshot& snap) { snap.throwGrenade = throwGrenadeThisFrame; });
+            [throwGrenadeThisFrame, grenadeCycleNextThisFrame, grenadeCyclePrevThisFrame](InputSnapshot& snap) {
+                snap.throwGrenade = throwGrenadeThisFrame;
+                snap.grenadeCycleNext = grenadeCycleNextThisFrame;
+                snap.grenadeCyclePrev = grenadeCyclePrevThisFrame;
+            });
         systems::runInputSend(registry, *client);
-        registry.view<LocalPlayer, InputSnapshot>().each([](InputSnapshot& snap) { snap.throwGrenade = false; });
+        registry.view<LocalPlayer, InputSnapshot>().each([](InputSnapshot& snap) {
+            snap.throwGrenade = false;
+            snap.grenadeCycleNext = false;
+            snap.grenadeCyclePrev = false;
+        });
 
         phaseSnap(phaseStats.physicsMs);
 
@@ -2904,6 +2995,27 @@ SDL_AppResult Game::iterate()
         tag.radius = field.radius;
         tag.ratePerSecond = 24.f; // dense flame puffs for visible AoE
     });
+
+    // Reap orphaned fire emitters. When the server destroys a FireField, the
+    // replicated component is stripped on the next snapshot — but the
+    // client-attached `Position` + `ParticleEmitterTag` (added just above) keep
+    // the entity non-orphan, so `continuous_loader::orphans()` never reaps it
+    // and the flame puffs pump forever (the "molly stays forever" bug). Strip
+    // the fire emitter from any entity that no longer has a FireField so the
+    // VFX ends with the field and the now-componentless entity can be reaped.
+    {
+        thread_local std::vector<entt::entity> deadFireEmitters;
+        deadFireEmitters.clear();
+        registry.view<ParticleEmitterTag>(entt::exclude<FireField>)
+            .each([&](entt::entity e, const ParticleEmitterTag& tag) {
+                if (tag.type == EmitterType::Fire)
+                    deadFireEmitters.push_back(e);
+            });
+        for (const entt::entity e : deadFireEmitters) {
+            registry.remove<ParticleEmitterTag>(e);
+            registry.remove<Position>(e);
+        }
+    }
 
     // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer->getCamera(), registry);
@@ -5759,6 +5871,7 @@ SDL_AppResult Game::iterate()
     if (hud_.getOutputTexture()) {
         HudGameState hudState{};
         hudState.bindings = &userSettings->inputBindings;
+        hudState.activeInputDevice = lastInputDevice_;
 
         // ── Local player health, armor, alive ──
         registry.view<LocalPlayer, Health>().each([&](const Health& hp) {
@@ -5804,10 +5917,6 @@ SDL_AppResult Game::iterate()
         registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
             scopeHeld = snap.scoped;
             hudState.abilitySelection.modifierHeld = snap.abilitySelectHeld;
-            hudState.grenadeRadial.open = snap.grenadeMenuHeld;
-            if (snap.grenadeSelectIndex < kHudGrenadeSlots) {
-                hudState.grenadeRadial.selectedIndex = static_cast<int>(snap.grenadeSelectIndex);
-            }
         });
 
         // ── Weapon / ammo ──
@@ -5957,6 +6066,8 @@ SDL_AppResult Game::iterate()
                     return;
                 if (localClientId.value != -1 && cid == localClientId)
                     return; // Skip local player (always drawn at center).
+                if (ps.crouching)
+                    return; // Crouching hides you from enemy radar.
                 hudMinimapDots.push_back({pos.value.x, pos.value.z});
             });
         hudState.enemyDots = hudMinimapDots;
@@ -6097,10 +6208,7 @@ SDL_AppResult Game::iterate()
                 const float cooldown = getGrenadeConfig(selected).throwCooldown;
                 hudState.equipment.grenadeCharge =
                     cooldown > 0.0f ? 1.0f - std::clamp(grenades.cooldown / cooldown, 0.0f, 1.0f) : 1.0f;
-                const int selectedIndex = static_cast<int>(grenadeTypeIndex(selected));
-                if (hudState.grenadeRadial.selectedIndex < 0) {
-                    hudState.grenadeRadial.selectedIndex = selectedIndex;
-                }
+                hudState.grenadeRadial.selectedIndex = static_cast<int>(grenadeTypeIndex(selected));
 
                 for (std::size_t i = 0; i < kGrenadeTypes.size() && i < hudState.grenadeRadial.items.size(); ++i) {
                     const WeaponType type = kGrenadeTypes[i];
@@ -6156,6 +6264,21 @@ SDL_AppResult Game::iterate()
                 we.armor = static_cast<int>(hp.armor);
                 we.maxArmor = 100;
                 we.isAlive = !pvis.isDead;
+
+                // Occlusion: cast from the camera eye toward the enemy's body
+                // center. If static world geometry is hit before reaching the
+                // enemy, a wall is in the way — flag it so the HUD hides the
+                // floating bar/name (no see-through-walls wallhack).
+                const glm::vec3 bodyCenter =
+                    pos.value + glm::vec3{0.f, shape.halfExtents.y * 0.5f * headDir, 0.f};
+                const glm::vec3 toEnemy = bodyCenter - cachedEye_;
+                const float distToEnemy = glm::length(toEnemy);
+                if (distToEnemy > 1.f) {
+                    const physics::HitscanHit losHit =
+                        physics::raycastWorld(cachedEye_, toEnemy / distToEnemy, physics::activeWorld());
+                    we.occluded = losHit.hit && losHit.distance < distToEnemy - 2.f;
+                }
+
                 hudWorldEnemies.push_back(we);
             });
         hudState.worldEnemies = hudWorldEnemies;

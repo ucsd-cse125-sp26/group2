@@ -829,8 +829,6 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeSlotsWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeSlotsWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ChatWidget.cpp"
@@ -1074,6 +1072,8 @@ add_executable(group2
         src/client/menus/home/Home.cpp
         src/client/menus/home/ui/HomeUI.hpp
         src/client/menus/home/ui/HomeUI.cpp
+        src/client/menus/MenuTheme.hpp
+        src/client/menus/MenuTheme.cpp
         src/ecs/components/PowerupSpawner.hpp
         src/ecs/components/PowerupState.hpp
         src/ecs/systems/PowerupSpawnerSystem.cpp
@@ -1699,6 +1699,9 @@ add_executable(clientbot
     # path resolves.
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.hpp"
+    # PlayerStatusSystem's death-drop now delegates to spawnDroppedWeapon.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/DroppedWeaponSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/DroppedWeaponSystem.hpp"
         src/ecs/components/AbilityState.hpp
         src/ecs/abilities/Ability.hpp
         src/ecs/abilities/AbilityTuning.hpp
@@ -1878,6 +1881,20 @@ endif()
 set_compiler_warnings(audio_math_tests)
 enable_sanitizers(audio_math_tests)
 add_test(NAME audio_math_tests COMMAND audio_math_tests)
+
+add_executable(lag_comp_math_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/lag_comp_math_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/LagCompMath.hpp"
+)
+target_include_directories(lag_comp_math_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(lag_comp_math_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(lag_comp_math_tests)
+enable_sanitizers(lag_comp_math_tests)
+add_test(NAME lag_comp_math_tests COMMAND lag_comp_math_tests)
 
 add_executable(voice_jitter_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/voice_jitter_tests.cpp"

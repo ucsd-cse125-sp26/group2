@@ -154,7 +154,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 500,
             .damage = 15.0f,
             .hitscan = true,
-            .hitscanRadius = 16.0f, // doubled — generous rifle reg; player capsules are ~2.5–6.5u radius in world space.
+            .hitscanRadius = 11.2f, // -30% cylinder hitreg (was 16.0); player capsules are ~2.5–6.5u radius in world space.
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .reloadTime = 1.25f,
@@ -175,7 +175,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .fireCooldown = 1.0f,
             .magazineSize = 4,
             .defaultAmmoCapacity = 12,
-            .damage = 200.0f,
+            .damage = 250.0f, // Buffed from 200 — heavier direct hit.
             .hitscan = false,
             .initialProjectileSpeed = 3000.0f,
             .explosive = true,
@@ -187,7 +187,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 32,
             .damage = 50.0f,
             .hitscan = true,
-            .hitscanRadius = 12.0f, // doubled
+            .hitscanRadius = 8.4f, // -30% cylinder hitreg (was 12.0)
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isCharge = true,
@@ -201,16 +201,16 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 200,
             .damage = 5.0f,
             .hitscan = true,
-            .hitscanRadius = 12.0f, // doubled
+            .hitscanRadius = 8.4f, // -30% cylinder hitreg (was 12.0)
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isBeam = true,
-            .dps = 35.0f,        // ramp floor (Tesla Cannon: low until lock-on ramps up)
+            .dps = 14.0f,        // ramp floor, -60% (was 35) — Tesla Cannon, low until lock-on ramps up
             .ammoPerSecond = 20.0f,
             .autoLockBeam = true,
-            .maxRange = 200.0f,           // ~5 m on the small map (unit ≈ 1 inch)
+            .maxRange = 140.0f,           // -30% range (was 200)
             .coneHalfAngleDeg = 30.0f,    // wide, forgiving — true no-aim
-            .dpsMax = 70.0f,              // ramp ceiling (2× base) after dpsRampTime
+            .dpsMax = 19.6f,              // ramp ceiling = floor +40% (was 2× base) after dpsRampTime
             .dpsRampTime = 2.0f,          // seconds of continuous lock to reach dpsMax
             .shieldDamageMultiplier = 0.2f, // energy-vs-energy: barely chips shields
             .reloadTime = 2.0f,
@@ -225,7 +225,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 36,
             .damage = 10.0f,       // per-pellet; 11 pellets → 110 body max, ~165 head.
             .hitscan = true,
-            .hitscanRadius = 6.0f, // doubled; still tighter than rifle since the 11 pellets compound close-range damage.
+            .hitscanRadius = 4.2f, // -30% cylinder hitreg (was 6.0); still tighter than rifle since the 11 pellets compound close-range damage.
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .reloadTime = 2.5f,
@@ -276,8 +276,8 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
             .scale = 1.0f,
             .shape = CollisionShape{.halfExtents = {5.0f, 5.0f, 5.0f}},
             .maxLifeTime = 5.0f,
-            .explosionRadius = 250.0f,
-            .explosionFalloffExponent = 3.0f, // Cubic: direct hits 1-shot, ~2m away ≈ 65 dmg, ~3m ≈ chip.
+            .explosionRadius = 340.0f,        // Buffed from 250 — wider blast.
+            .explosionFalloffExponent = 1.5f, // Softened from cubic (3.0) — smoother, more forgiving splash.
             .selfDamageMultiplier = 0.4f,     // 40% self-damage so rocket jumps don't suicide.
             .maxKnockback = 800.0f,           // Feet-rocket pop scaled against k_jumpSpeed=660; retune if too soft.
             .knockbackFalloffExponent = 2.0f, // Quadratic: push reaches further than damage.

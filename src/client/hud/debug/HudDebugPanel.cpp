@@ -13,7 +13,6 @@
 #include "hud/widgets/EnemyWorldHealthBar.hpp"
 #include "hud/widgets/EquipmentSlots.hpp"
 #include "hud/widgets/GravityIndicator.hpp"
-#include "hud/widgets/GrenadeRadialWidget.hpp"
 #include "hud/widgets/GrenadeSlotsWidget.hpp"
 #include "hud/widgets/HealthArmorBar.hpp"
 #include "hud/widgets/HitMarkerWidget.hpp"
@@ -92,8 +91,6 @@ const char* widgetName(const HudWidget* widget)
         return "Ability Slots";
     if (dynamic_cast<const GravityIndicator*>(widget))
         return "Gravity Indicator";
-    if (dynamic_cast<const GrenadeRadialWidget*>(widget))
-        return "Grenade Radial";
     if (dynamic_cast<const GrenadeSlotsWidget*>(widget))
         return "Grenade Slots";
     if (dynamic_cast<const HealthArmorBar*>(widget))
@@ -242,13 +239,6 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "keyPadY", equipment->keyPadY);
     } else if (const auto* gravity = dynamic_cast<const GravityIndicator*>(&widget)) {
         writeFloatParam(out, first, "diskSize", gravity->diskSize);
-    } else if (const auto* grenade = dynamic_cast<const GrenadeRadialWidget*>(&widget)) {
-        writeFloatParam(out, first, "radius", grenade->radius);
-        writeFloatParam(out, first, "cardWidth", grenade->cardWidth);
-        writeFloatParam(out, first, "cardHeight", grenade->cardHeight);
-        writeFloatParam(out, first, "nameFontSize", grenade->nameFontSize);
-        writeFloatParam(out, first, "countFontSize", grenade->countFontSize);
-        writeFloatParam(out, first, "keyFontSize", grenade->keyFontSize);
     } else if (const auto* grenades = dynamic_cast<const GrenadeSlotsWidget*>(&widget)) {
         writeFloatParam(out, first, "slotSize", grenades->slotSize);
         writeFloatParam(out, first, "slotGap", grenades->slotGap);
@@ -447,13 +437,6 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Key Pad Y", equipment->keyPadY, 0.25f, 0.0f, 40.0f);
     } else if (auto* gravity = dynamic_cast<GravityIndicator*>(&widget)) {
         editFloat("Disk Size", gravity->diskSize, 1.0f, 4.0f, 240.0f);
-    } else if (auto* grenade = dynamic_cast<GrenadeRadialWidget*>(&widget)) {
-        editFloat("Radius", grenade->radius, 1.0f, 10.0f, 600.0f);
-        editFloat("Card Width", grenade->cardWidth, 1.0f, 10.0f, 500.0f);
-        editFloat("Card Height", grenade->cardHeight, 1.0f, 10.0f, 300.0f);
-        editFloat("Name Font Size", grenade->nameFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Count Font Size", grenade->countFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Key Font Size", grenade->keyFontSize, 0.5f, 4.0f, 96.0f);
     } else if (auto* grenades = dynamic_cast<GrenadeSlotsWidget*>(&widget)) {
         editFloat("Slot Size", grenades->slotSize, 1.0f, 8.0f, 160.0f);
         editFloat("Slot Gap", grenades->slotGap, 0.5f, 0.0f, 80.0f);

@@ -67,15 +67,24 @@ void runPlayerStatus(Registry& registry, float dt);
 /// @param dt        Fixed physics delta time in seconds.
 void runSpawnPointCooldowns(Registry& registry, float dt);
 
+/// @brief A resolved spawn: safe center position plus the point's facing yaw.
+struct SpawnResolution
+{
+    glm::vec3 center{0.0f};
+    float yaw = 0.0f; ///< Authored facing direction (radians) for the chosen spawn point.
+};
+
 /// @brief Pick a respawn point and resolve it to a safe spawn center.
 ///
 /// Uses the same cooldown-aware spawn selection and depenetration logic as
 /// on-death respawn, so initial join spawns share the live respawn behavior.
+/// Spawn points are biased away from living enemies, and the chosen point's
+/// authored facing yaw is returned so the caller can orient the player.
 /// The player's `CollisionShape` should already be attached so the capsule
 /// recovery sweep matches the player's actual shape.
 ///
 /// @param registry  The ECS registry.
 /// @param player    The player entity whose spawn position to resolve.
-/// @return The resolved spawn-center position.
-glm::vec3 chooseAndResolveSpawnPosition(Registry& registry, entt::entity player);
+/// @return The resolved spawn center and facing yaw.
+SpawnResolution chooseAndResolveSpawnPosition(Registry& registry, entt::entity player);
 } // namespace systems

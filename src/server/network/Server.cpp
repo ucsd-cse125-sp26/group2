@@ -385,6 +385,7 @@ void Server::flushAllOutbound()
                 .id = id,
                 .rttMs = conn.lastReportedRttMs,
                 .interpDelaySnapshots = conn.lastReportedInterpDelaySnapshots,
+                .interpDelayMs = conn.lastReportedInterpDelayMs,
             });
         }
         // PR-30: free-function API for cross-platform atomic shared_ptr.
@@ -491,15 +492,15 @@ void Server::handleUdpUnreliable(std::uint64_t connId,
 
     switch (type) {
     case PacketType::INPUT: {
-        // Same parser as the TCP INPUT case. Wire format (PR-12):
-        //   [count u8] [rttMs u16] [interpDelaySnapshots u8] [InputSnapshot * count]
-        if (subLen < 4)
+        // Same parser as the TCP INPUT case. Wire format (PR-31):
+        //   [count u8] [rttMs u16] [interpDelaySnapshots u8] [interpDelayMs u16] [InputSnapshot * count]
+        if (subLen < 6)
             return;
         const uint8_t count = sub[0];
         constexpr uint8_t k_maxInputsPerPacket = 16;
         if (count == 0 || count > k_maxInputsPerPacket)
             return;
-        const uint32_t expectedSize = 4u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
+        const uint32_t expectedSize = 6u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
         if (subLen != expectedSize)
             return;
 
@@ -517,7 +518,14 @@ void Server::handleUdpUnreliable(std::uint64_t connId,
         const uint8_t interpDelaySnapshots = std::min<uint8_t>(sub[3], 8);
         conn.lastReportedInterpDelaySnapshots = interpDelaySnapshots;
 
-        const uint8_t* base = sub + 4;
+        // PR-31: client's *measured* render-delay in ms (EMA-derived).
+        // Preferred over the snapshot count in updateLagCompTargets; see
+        // Connection::lastReportedInterpDelayMs.
+        uint16_t interpDelayMs = 0;
+        std::memcpy(&interpDelayMs, sub + 4, sizeof(uint16_t));
+        conn.lastReportedInterpDelayMs = interpDelayMs;
+
+        const uint8_t* base = sub + 6;
         for (uint8_t i = 0; i < count; ++i) {
             InputSnapshot snap{};
             std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
@@ -1238,16 +1246,17 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
 
     switch (type) {
     case PacketType::INPUT: {
-        // Multi-input wire format (PR-12):
-        //   [count u8] [rttMs u16] [interpDelaySnapshots u8] [InputSnapshot * count]
+        // Multi-input wire format (PR-31):
+        //   [count u8] [rttMs u16] [interpDelaySnapshots u8] [interpDelayMs u16] [InputSnapshot * count]
         // oldest-first. Each client packet carries the last
         // Client::k_inputRedundancy inputs. We dedup against
         // conn.lastAppliedInputTick — most entries in any given packet are
         // duplicates of already-applied snapshots and get skipped cheaply.
         // The rttMs prefix is the client's smoothed RTT estimate; the
-        // interpDelaySnapshots byte is the client's render-delay (PR-11).
-        // Both feed the lag-comp formula in updateLagCompTargets.
-        if (payloadLen < 4) {
+        // interpDelaySnapshots byte and interpDelayMs are the client's
+        // render-delay (PR-11/PR-31). All feed the lag-comp formula in
+        // updateLagCompTargets.
+        if (payloadLen < 6) {
             SDL_Log("Server: received undersized INPUT packet from client %d", conn.clientId.value);
             return;
         }
@@ -1264,7 +1273,7 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
             return;
         }
 
-        const uint32_t expectedSize = 4u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
+        const uint32_t expectedSize = 6u + static_cast<uint32_t>(count) * sizeof(InputSnapshot);
         if (payloadLen != expectedSize) {
             SDL_Log("Server: received INPUT packet of invalid size %u (expected %u for count %u)",
                     payloadLen,
@@ -1288,7 +1297,13 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         const uint8_t interpDelaySnapshots = std::min<uint8_t>(payload[3], 8);
         conn.lastReportedInterpDelaySnapshots = interpDelaySnapshots;
 
-        const uint8_t* base = payload + 4;
+        // PR-31: client's *measured* render-delay in ms (EMA-derived),
+        // preferred over the snapshot count in updateLagCompTargets.
+        uint16_t interpDelayMs = 0;
+        std::memcpy(&interpDelayMs, payload + 4, sizeof(uint16_t));
+        conn.lastReportedInterpDelayMs = interpDelayMs;
+
+        const uint8_t* base = payload + 6;
         for (uint8_t i = 0; i < count; ++i) {
             InputSnapshot snap{};
             std::memcpy(&snap, base + i * sizeof(InputSnapshot), sizeof(InputSnapshot));
@@ -1726,6 +1741,7 @@ void Server::snapshotClientNetStates(std::vector<ClientNetState>& out)
             .id = id,
             .rttMs = conn.lastReportedRttMs,
             .interpDelaySnapshots = conn.lastReportedInterpDelaySnapshots,
+            .interpDelayMs = conn.lastReportedInterpDelayMs,
         });
     }
 }

@@ -472,8 +472,17 @@ inline void handleGrenadeInput(Registry& registry,
                                GrenadeState& grenades,
                                bool gravityFlipped)
 {
-    if (input.grenadeMenuHeld && input.grenadeSelectIndex < kGrenadeTypeCount) {
-        grenades.selected = grenadeTypeAt(input.grenadeSelectIndex);
+    // Cycle the selected grenade type. next/prev are edge-pulsed once per input
+    // and consumed here so the selection advances exactly one step.
+    if (input.grenadeCycleNext || input.grenadeCyclePrev) {
+        const int count = static_cast<int>(kGrenadeTypeCount);
+        int index = static_cast<int>(grenadeTypeIndex(grenades.selected));
+        index += input.grenadeCycleNext ? 1 : 0;
+        index -= input.grenadeCyclePrev ? 1 : 0;
+        index = ((index % count) + count) % count;
+        grenades.selected = grenadeTypeAt(static_cast<std::size_t>(index));
+        input.grenadeCycleNext = false;
+        input.grenadeCyclePrev = false;
     }
 
     if (!input.throwGrenade) {

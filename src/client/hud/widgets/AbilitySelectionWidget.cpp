@@ -22,8 +22,24 @@ AbilitySelectionWidget::AbilitySelectionWidget()
 void AbilitySelectionWidget::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
 {
     state_ = state.abilitySelection;
+
+    // Option 0 is chosen by Shoot, option 1 by Scope. On controller Shoot is the
+    // Right Trigger and Scope the Left Trigger, so swap the cards' screen
+    // positions — the left card maps to the physically-left trigger. Each card's
+    // tag shows the live glyph of the action that selects it.
+    const bool controller = state.activeInputDevice == BindingDevice::Controller;
+    for (int slot = 0; slot < 2; ++slot) {
+        const int option = controller ? (1 - slot) : slot;
+        slotOption_[static_cast<std::size_t>(slot)] = option;
+        const Action selectAction = option == 0 ? Action::Shoot : Action::Scope;
+        slotTag_[static_cast<std::size_t>(slot)] =
+            state.bindings ? InputBindings::bindingLabel(state.bindings->get(selectAction, state.activeInputDevice))
+                           : std::string(option == 0 ? "LMB" : "RMB");
+    }
+
     if (state.bindings) {
-        abilityMenuLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::AbilityMenu));
+        abilityMenuLabel_ =
+            InputBindings::bindingLabel(state.bindings->get(Action::AbilityMenu, state.activeInputDevice));
     }
     visible = state.isAlive && state_.available;
 }
@@ -133,17 +149,20 @@ void AbilitySelectionWidget::draw(HudContext& ctx, float anchorX, float anchorY)
     std::snprintf(holdPrompt, sizeof(holdPrompt), "HOLD %s", abilityMenuLabel_.c_str());
     drawTrackedText(ctx, holdPrompt, anchorX, y0 - 24.0f * s, keyFs, 1.25f * s, k_amber, HudAlign::Center, true);
 
-    for (int i = 0; i < 2; ++i) {
-        const auto& choice = state_.choices[static_cast<std::size_t>(i)];
-        const float x = x0 + static_cast<float>(i) * (choiceW + gap);
+    for (int slot = 0; slot < 2; ++slot) {
+        const int option = slotOption_[static_cast<std::size_t>(slot)];
+        const auto& choice = state_.choices[static_cast<std::size_t>(option)];
+        const float x = x0 + static_cast<float>(slot) * (choiceW + gap);
         const bool active = state_.modifierHeld;
         const HudColor border = active ? k_amber : k_lineBright;
-        const HudColor fill = i == 0 ? withAlpha(k_quaternary, 0.92f) : withAlpha(k_secondary, 0.40f);
+        // Color follows the option, not the screen slot, so a given ability keeps
+        // its styling even when the cards swap sides on controller.
+        const HudColor fill = option == 0 ? withAlpha(k_quaternary, 0.92f) : withAlpha(k_secondary, 0.40f);
 
         drawPanel(ctx, x, y0, choiceW, choiceH, fill, border, 1.0f);
         drawCornerBrackets(ctx, x, y0, choiceW, choiceH, 10.0f * s, 1.0f, 2.0f * s, active ? k_amber : k_lineBright);
 
-        drawKeyTag(ctx, i == 0 ? "LMB" : "RMB", x + 10.0f * s, y0 + 9.0f * s, keyFs, active);
+        drawKeyTag(ctx, slotTag_[static_cast<std::size_t>(slot)].c_str(), x + 10.0f * s, y0 + 9.0f * s, keyFs, active);
         ctx.text(choice.name.c_str(), x + 14.0f * s, y0 + 35.0f * s, nameFs, k_textBright, HudAlign::Left, true);
         ctx.text(choice.description.c_str(), x + 14.0f * s, y0 + 62.0f * s, bodyFs, k_textDim, HudAlign::Left);
     }

@@ -339,7 +339,7 @@ public:
     // ceremony.
 
     float renderScale = 1.0f;                    ///< Internal-resolution multiplier (0.5 = half-res, 2.0 = SSAA).
-    float mainHorizontalFovDegrees = 90.0f;      ///< Main camera horizontal field of view in degrees.
+    float mainHorizontalFovDegrees = 110.0f;     ///< Main camera horizontal field of view in degrees.
     float scopeZoom = 1.0f;                      ///< Per-frame scope zoom multiplier (FOV divisor).
                                                  ///< 1.0 = no zoom; 1.5 = ADS through the charge rifle scope (FOV/1.5).
                                                  ///< Game.cpp drives this each frame from the local player's ADS state.
