@@ -46,7 +46,8 @@ ConnectError Client::init(const char* addr,
                           Uint16 port,
                           const TransportConfig& transport,
                           int timeoutMs,
-                          const std::optional<net::UdpSessionTransport::RelayConfig>& relay)
+                          const std::optional<net::UdpSessionTransport::RelayConfig>& relay,
+                          const std::optional<net::UdpSessionTransport::PunchAssist>& punch)
 {
     if (networkThread_.joinable() || msgStream.socket != nullptr || usingUdpSession_) {
         shutdown();
@@ -71,6 +72,8 @@ ConnectError Client::init(const char* addr,
         session_.preferRelay(transportConfig_.forceRelay && !transportConfig_.noRelay);
         if (relay && !transportConfig_.noRelay)
             session_.setRelayConfig(*relay);
+        if (punch)
+            session_.setPunchAssist(*punch);
         if (!session_.connectClient(addr, port, timeoutMs)) {
             SDL_Log("Client: UDP session connection to %s:%u failed", addr, port);
             session_.close();

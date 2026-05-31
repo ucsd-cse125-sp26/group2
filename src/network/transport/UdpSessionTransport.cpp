@@ -136,6 +136,9 @@ bool UdpSessionTransport::connectClient(const char* host, Uint16 port, int timeo
         return false;
     if (relayConfig_.enabled && !relayConfig_.host.empty() && relayConfig_.port != 0)
         resolveAddress(relayConfig_.host.c_str(), relayConfig_.port, relayAddr_, timeoutMs);
+    if (punchAssist_.enabled && !punchAssist_.directoryHost.empty() && punchAssist_.directoryPort != 0 &&
+        !punchAssist_.request.empty())
+        resolveAddress(punchAssist_.directoryHost.c_str(), punchAssist_.directoryPort, punchDirectoryAddr_, timeoutMs);
 
     const Uint64 started = SDL_GetTicks();
     lastConnectAttemptMs_ = 0;
@@ -152,6 +155,14 @@ bool UdpSessionTransport::connectClient(const char* host, Uint16 port, int timeo
             sendConnectionRequest(false);
             if (relayConfig_.enabled)
                 sendConnectionRequest(true);
+            // Re-punch from THIS (game) socket so the directory keeps the
+            // host probing our real NAT mapping, not the throwaway helper
+            // socket that discovered the server. Required for port-
+            // restricted / symmetric NATs — otherwise the host's pinhole is
+            // for a dead port and our ConnectionRequest is dropped.
+            if (punchDirectoryAddr_.addr && !punchAssist_.request.empty())
+                sendDirectoryControl(
+                    punchDirectoryAddr_, punchAssist_.request.data(), static_cast<int>(punchAssist_.request.size()));
             lastConnectAttemptMs_ = now;
         }
         SDL_Delay(5);
@@ -168,6 +179,7 @@ void UdpSessionTransport::close()
     endpoint_.close();
     serverAddr_.release();
     relayAddr_.release();
+    punchDirectoryAddr_.release();
     clientConnectionId_ = 0;
     stats_ = Stats{};
 }
@@ -179,6 +191,12 @@ void UdpSessionTransport::setRelayConfig(const RelayConfig& cfg)
     if (cfg.enabled && !cfg.host.empty() && cfg.port != 0) {
         resolveAddress(cfg.host.c_str(), cfg.port, relayAddr_, 1000);
     }
+}
+
+void UdpSessionTransport::setPunchAssist(PunchAssist assist)
+{
+    punchAssist_ = std::move(assist);
+    punchDirectoryAddr_.release();
 }
 
 void UdpSessionTransport::queueEvent(Event&& event)

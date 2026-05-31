@@ -200,6 +200,7 @@ SDL_AppResult App::iterate()
             std::string serverIp = joinRequest->serverIp;
             uint16_t serverPort = joinRequest->serverPort;
             std::optional<net::UdpSessionTransport::RelayConfig> relayConfig;
+            std::optional<net::UdpSessionTransport::PunchAssist> punchAssist;
             if (joinRequest->globalServerId != 0 && networkConfig.discovery.enabled) {
                 GlobalDiscoveryClient discovery;
                 net::discovery::ServerInfo punchedServer;
@@ -220,6 +221,18 @@ SDL_AppResult App::iterate()
                             serverIp.c_str(),
                             serverPort,
                             joinRequest->globalServerId);
+                    // Keep punching from the real game socket during connect:
+                    // the discovery punch above ran on a throwaway socket, so
+                    // its NAT mapping won't match the session socket. Re-sending
+                    // the PunchRequest (same nonce) from the session socket makes
+                    // the directory re-notify the host with our true game port.
+                    punchAssist = net::UdpSessionTransport::PunchAssist{
+                        .directoryHost = networkConfig.discovery.directoryHost,
+                        .directoryPort = networkConfig.discovery.directoryUdpPort,
+                        .request = net::discovery::encodePunchRequest(
+                            {.serverId = joinRequest->globalServerId, .clientNonce = clientNonce}),
+                        .enabled = true,
+                    };
                     if (!networkConfig.transport.noRelay) {
                         relayConfig = net::UdpSessionTransport::RelayConfig{
                             .host = networkConfig.discovery.directoryHost,
@@ -241,7 +254,7 @@ SDL_AppResult App::iterate()
             }
             SDL_Log("Attempting to join server at %s:%d...", serverIp.c_str(), serverPort);
             const ConnectError connectError = client.init(
-                serverIp.c_str(), serverPort, networkConfig.transport, k_joinConnectionTimeoutMs, relayConfig);
+                serverIp.c_str(), serverPort, networkConfig.transport, k_joinConnectionTimeoutMs, relayConfig, punchAssist);
             if (connectError != ConnectError::None) {
                 SDL_Log("Failed to connect to server at %s:%d: %s",
                         serverIp.c_str(),

@@ -105,7 +105,8 @@ public:
                       Uint16 port,
                       const TransportConfig& transport = {},
                       int timeoutMs = -1,
-                      const std::optional<net::UdpSessionTransport::RelayConfig>& relay = std::nullopt);
+                      const std::optional<net::UdpSessionTransport::RelayConfig>& relay = std::nullopt,
+                      const std::optional<net::UdpSessionTransport::PunchAssist>& punch = std::nullopt);
 
     /// @brief Close the socket and release the resolved address.
     void shutdown();
