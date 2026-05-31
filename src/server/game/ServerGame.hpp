@@ -264,6 +264,9 @@ private:
     /// @brief Determine if server should allow input based on phase
     [[nodiscard]] bool isGameplayInputAllowed(MatchPhase phase) const;
 
+    /// @brief Checks if match in lobby phase (for broadcast gating)
+    [[nodiscard]] bool isLobbyPhase(MatchPhase phase) const;
+
     // ── PR-27: pending client SHOT_INTENTs ───────────────────────────────
     //
     // The network thread enqueues `EventType::ShotIntent` events into

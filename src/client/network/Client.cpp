@@ -15,6 +15,7 @@
 #include "network/NetKillEvent.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/RosterEvent.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/PacketHeader.hpp"
 
@@ -1471,6 +1472,16 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         const auto chat = net::chat::decodeServerText(std::span<const std::uint8_t>(data, size));
         if (chat && textChatFn_)
             textChatFn_(*chat);
+        break;
+    }
+    case PacketType::ROSTER_UPDATE: {
+        if (payloadSize < sizeof(PlayerRosterEvent))
+            break;
+
+        PlayerRosterEvent event{};
+        std::memcpy(&event, payload, sizeof(PlayerRosterEvent));
+        if (rosterEventFn_)
+            rosterEventFn_(event);
         break;
     }
     case PacketType::VOICE_FRAME: {

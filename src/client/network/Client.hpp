@@ -15,6 +15,7 @@
 #include "network/NetworkConfig.hpp"
 #include "network/OutboundQueue.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/RosterEvent.hpp"
 #include "network/ShotDebugReport.hpp" // PR-20: shared wire-format + runtime capture struct.
 #include "network/ShotEvent.hpp"
 #include "network/VoiceProtocol.hpp"
@@ -79,6 +80,7 @@ public:
     using MatchStateUpdateFn = std::function<void(const MatchStatePacket&)>;
     using KillEventCallback = std::function<void(const NetKillEvent&)>;
     using TextChatCallback = std::function<void(const net::chat::ServerTextChat&)>;
+    using RosterEventCallback = std::function<void(const PlayerRosterEvent&)>;
     using VoiceFrameCallback = std::function<void(const net::voice::ServerVoiceFrame&)>;
     /// @brief PR-20: callback for SHOT_DEBUG_REPORT.  Fired on the
     /// game thread inside `dispatchMessage` after the bytes have been
@@ -191,6 +193,7 @@ public:
     /// @brief Register the kill-event callback, fired for each replicated kill from the server.
     void onKillEvent(KillEventCallback fn) { killEventFn_ = std::move(fn); }
     void onTextChat(TextChatCallback fn) { textChatFn_ = std::move(fn); }
+    void onRosterEvent(RosterEventCallback fn) { rosterEventFn_ = std::move(fn); }
     void onVoiceFrame(VoiceFrameCallback fn) { voiceFrameFn_ = std::move(fn); }
     /// @brief Register the shot-debug callback (PR-20); fired for each SHOT_DEBUG_REPORT.
     void onShotDebugReport(ShotDebugCallback fn) { shotDebugFn_ = std::move(fn); }
@@ -410,6 +413,7 @@ private:
     MatchStateUpdateFn matchStateUpdateFn_;        ///< Called whenever a MATCH_STATE packet is received.
     KillEventCallback killEventFn_;                ///< Called for each replicated kill event from server.
     TextChatCallback textChatFn_;                  ///< Called for server-broadcast all-chat messages.
+    RosterEventCallback rosterEventFn_;            ///< Called for mid-match player join/leave updates.
     VoiceFrameCallback voiceFrameFn_;              ///< Called for proximity-routed Opus voice frames.
     ShotDebugCallback shotDebugFn_;                ///< PR-20: called for each SHOT_DEBUG_REPORT from server.
     LobbyUpdateCallback lobbyUpdateFn_;            ///< Called for each lobby update received from server.

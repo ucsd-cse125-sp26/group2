@@ -879,6 +879,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EnemyWorldHealthBar.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupNotification.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupNotification.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PopupNotification.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PopupNotification.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GravityIndicator.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GravityIndicator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/debug/HudDebugPanel.cpp"

@@ -194,6 +194,9 @@ private:
     /// @brief Queue a locally-authored chat echo while waiting for server replication.
     void appendLocalChatMessage(std::string_view message);
 
+    /// @brief Queue a generic transient HUD popup message.
+    void appendPopupMessage(HudPopupKind kind, std::string_view message);
+
     /// @brief Clear held gameplay actions so typing chat cannot leak into movement or weapons.
     void clearGameplayInputForChat();
 
@@ -451,6 +454,7 @@ private:
     /// when the local player's WeaponState gains a new weapon type or their
     /// reserve ammo grows beyond the previous frame's reading.
     std::vector<HudPickupNotification> pendingPickupNotifications_;
+    std::vector<HudPopupMessage> pendingPopupMessages_;
     std::vector<HudChatMessage> chatMessages_;
     std::vector<HudVoiceSpeaker> voiceSpeakers_;
     std::string chatDraft_;

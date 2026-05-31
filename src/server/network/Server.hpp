@@ -12,6 +12,7 @@
 #include "network/MessageStream.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/OutboundQueue.hpp"
+#include "network/RosterEvent.hpp"
 #include "network/ShotEvent.hpp"
 #include "network/VoiceProtocol.hpp"
 #include "network/lobby/LobbyStatus.hpp"
@@ -172,6 +173,9 @@ public:
 
     /// @brief Unicast the current match settings to a single client.
     bool sendMatchConfigToClient(ClientId clientId, const MatchConfig& config);
+
+    /// @brief Broadcast join/leave events to all clients except @p excluded.
+    void broadcastRosterEventExcept(ClientId excluded, const PlayerRosterEvent& event);
 
     /// @brief Update the authoritative client admission cap.
     void setMaxPlayers(int maxPlayers);
@@ -390,6 +394,9 @@ private:
     /// the events-over-udp toggle is off, so the same broadcast
     /// helpers work in both modes.
     void enqueueReliableEvent(const void* data, int len);
+
+    /// @brief Enqueue reliable event for all clients except those in @p excluded.
+    void enqueueReliableEventExcept(std::span<const ClientId> excluded, const void* data, int len);
 
     /// @brief Network-thread main loop body.
     ///
