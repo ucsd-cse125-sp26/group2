@@ -432,10 +432,12 @@ private:
 
     // constexpr uint32_t shadowSize = 2048;
     //  constexpr uint32_t shadowSize = 512;
-    static constexpr uint32_t shadowSize = 1024;
+    static const uint32_t shadowSize = 512;
+    static const uint32_t staticShadowSize = 2048;
     SDL_GPUTexture* dynamicShadowMaps_ = nullptr;
     SDL_GPUTexture* staticShadowMaps_ = nullptr;
-    SDL_GPUSampler* depthSampler_ = nullptr;
+    SDL_GPUSampler* staticDepthSampler_ = nullptr;
+    SDL_GPUSampler* dynamicDepthSampler_ = nullptr;
 
     glm::vec3 cubeFaceTargets_[NUM_CUBE_FACES];
     glm::vec3 cubeFaceUps_[NUM_CUBE_FACES];

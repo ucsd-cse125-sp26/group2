@@ -62,7 +62,7 @@ bool NewRenderer::init(SDL_Window* window)
                                                     | SDL_GPU_SHADERFORMAT_DXIL
 #endif
         ;
-    device_ = SDL_CreateGPUDevice(k_wantedFormats, true, nullptr);
+    device_ = SDL_CreateGPUDevice(k_wantedFormats, false, nullptr);
     if (!device_) {
         SDL_Log("NewRenderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
@@ -120,8 +120,14 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    depthSampler_ = Boilerplate::createLinearComparisonSampler(device_);
-    if (!depthSampler_) {
+    staticDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_,SDL_GPU_FILTER_LINEAR);
+    if (!staticDepthSampler_) {
+        SDL_Log("NewRenderer: failed to create depth sampler: %s", SDL_GetError());
+        return false;
+    }
+
+    dynamicDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_,SDL_GPU_FILTER_NEAREST);
+    if (!dynamicDepthSampler_) {
         SDL_Log("NewRenderer: failed to create depth sampler: %s", SDL_GetError());
         return false;
     }
@@ -144,7 +150,7 @@ bool NewRenderer::init(SDL_Window* window)
     skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
-    staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
+    staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
 
     cubeFaceTargets_[0] = glm::vec3(1, 0, 0);
     cubeFaceTargets_[1] = glm::vec3(-1, 0, 0);
@@ -423,6 +429,8 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
 
     if (staticGeometry)
         drawWorldModelInstances(geometryDepthPass, cmd, true);
+    //SDL_SetGPUDepthBias(geometryDepthPass,);
+
     if (entityGeometry)
         drawEntityModels(geometryDepthPass, cmd, true);
     if (skinnedGeometry)
@@ -469,8 +477,8 @@ void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
     SDL_GPUTextureSamplerBinding shadowBindings[2];
-    shadowBindings[0] = {staticShadowMaps_, depthSampler_};
-    shadowBindings[1] = {dynamicShadowMaps_, depthSampler_};
+    shadowBindings[0] = {staticShadowMaps_, staticDepthSampler_};
+    shadowBindings[1] = {dynamicShadowMaps_,dynamicDepthSampler_};
 
     SDL_BindGPUFragmentSamplers(renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings, 2);
 
@@ -865,6 +873,10 @@ void NewRenderer::quit()
             SDL_ReleaseGPUSampler(device_, fxaaSampler_);
         if (texture_)
             SDL_ReleaseGPUTexture(device_, texture_);
+        if (staticShadowMaps_)
+            SDL_ReleaseGPUTexture(device_, staticShadowMaps_);
+        if (dynamicShadowMaps_)
+            SDL_ReleaseGPUTexture(device_, dynamicShadowMaps_);
 
         ImGui_ImplSDLGPU3_Shutdown();
         SDL_ReleaseWindowFromGPUDevice(device_, window_);

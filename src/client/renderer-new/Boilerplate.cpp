@@ -196,8 +196,8 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device, Pipe
     pipelineInfo.rasterizer_state.cull_mode = pipelineDesc.cullMode;
 
     pipelineInfo.rasterizer_state.enable_depth_bias = true;
-    pipelineInfo.rasterizer_state.depth_bias_constant_factor = 10000.0f;
-    pipelineInfo.rasterizer_state.depth_bias_slope_factor = 2.0f;
+    pipelineInfo.rasterizer_state.depth_bias_constant_factor = 500.0f;
+    pipelineInfo.rasterizer_state.depth_bias_slope_factor = 1.0f;
     pipelineInfo.rasterizer_state.depth_bias_clamp = 0.005f;
 
     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
@@ -524,11 +524,11 @@ SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device)
     return SDL_CreateGPUSampler(device, &samplerInfo);
 }
 
-SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device)
+SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device,SDL_GPUFilter filterMode)
 {
     SDL_GPUSamplerCreateInfo samplerInfo{};
-    samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
-    samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.min_filter = filterMode;
+    samplerInfo.mag_filter = filterMode;
     samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
     samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
     samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
