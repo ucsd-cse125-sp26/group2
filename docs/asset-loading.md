@@ -211,7 +211,7 @@ These are **mutable inline globals** in `MapConfig.hpp` — populated as a side 
 
 FBX files are loaded by `AnimationLibrary::loadClipFromFBX` / `CharacterRig::loadFromFBX` — both are **runtime Assimp imports on the main thread** at game-init (`Game.cpp:512-561`). See [animations.md](animations.md).
 
-The map of clip → filename is hardcoded in `AnimationLibrary.cpp:89-134` (`clipFile()`). Convention is **inconsistent**: some clips return `"male_locomotion_pack/idle.fbx"`, others return `"running_backward.fbx"` (no folder). Some clip filenames are **wrong**: `CrouchWalk` and `CrouchWalkBackward` both return `"crouch/Walk Crouching Backward.fbx"` — see *potential-issues*.
+The map of clip to filename is hardcoded in `AnimationLibrary.cpp` (`clipFile()`). Convention is intentionally mixed because some assets live in `male_locomotion_pack/`, some live at the root, and newer movement-polish clips are expected under `loco/`. See [animation-assets-needed.md](animation-assets-needed.md) for the missing start/stop/pivot clips and straight crouch-forward clip.
 
 ---
 

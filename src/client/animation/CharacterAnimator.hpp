@@ -42,7 +42,7 @@ struct AnimationInputs
 ///  [1] locomotion secondary  (for 1-D speed band blend)
 ///  [2] locomotion strafe     (StrafeLeft/Right, WalkStrafe/RunStrafe)
 ///  [3] override              (Slide / WallRun / Jump / debug clip)
-///  [4] reserved              (future: additive upper-body layer)
+///  [4] transition            (short start / stop / pivot overlay)
 static constexpr size_t kNumSamplerSlots = 5;
 
 /// @brief One active sampler slot contributing to the per-frame blend.

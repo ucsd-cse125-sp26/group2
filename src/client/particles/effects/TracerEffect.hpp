@@ -7,6 +7,8 @@
 #include "particles/ParticlePool.hpp"
 #include "particles/ParticleTypes.hpp"
 
+#include <array>
+#include <cstdint>
 #include <glm/glm.hpp>
 #include <unordered_map>
 
@@ -31,21 +33,50 @@ public:
     /// @param e Entity handle being destroyed.
     void detach(entt::entity e);
 
-    /// @brief Spawn a standalone one-shot tracer streak not tied to any ECS entity.
-    /// @param tip      World-space hit/end point.
-    /// @param tail     World-space origin/start point.
-    /// @param lifetime Seconds before the streak fully fades.
-    void spawnFree(glm::vec3 tip, glm::vec3 tail, float lifetime = 0.12f);
+    /// @brief Spawn a visual-only rifle bullet that travels along a hitscan path.
+    /// @param origin Muzzle world position.
+    /// @param dir    Normalized or normalizable fire direction.
+    /// @param range  Visual travel distance in world units.
+    void spawnRifleTracer(glm::vec3 origin, glm::vec3 dir, float range);
 
     [[nodiscard]] const TracerParticle* data() const { return pool_.rawData(); }
     [[nodiscard]] uint32_t count() const { return pool_.liveCount(); }
 
 private:
-    ParticlePool<TracerParticle, 512> pool_;
+    static constexpr uint32_t k_maxTracers = 512;
+
+    enum class RuntimeKind : uint8_t
+    {
+        None,
+        Entity,
+        RifleProjectile,
+    };
+
+    struct RuntimeState
+    {
+        RuntimeKind kind = RuntimeKind::None;
+        entt::entity entity = entt::null;
+        glm::vec3 origin{};
+        glm::vec3 dir{0.0f, 0.0f, 1.0f};
+        float distance = 0.0f;
+        float speed = 0.0f;
+        float trailLength = 0.0f;
+        float age = 0.0f;
+    };
+
+    ParticlePool<TracerParticle, k_maxTracers> pool_;
+    std::array<RuntimeState, k_maxTracers> runtime_{};
 
     // Maps entity -> index into pool (for fast detach / per-entity update)
     std::unordered_map<uint32_t, uint32_t> entityToIdx_;
 
+    void killTracer(uint32_t idx);
+    void updateRifleTracer(uint32_t idx, float dt);
+
     static constexpr float k_streakLength = 200.f; ///< Visual streak length in world units.
     static constexpr float k_fadeTime = 0.15f;     ///< Seconds to fade after entity death.
+    static constexpr float k_rifleVisualSpeed = 8000.f;
+    static constexpr float k_rifleTrailLength = 140.f;
+    static constexpr float k_rifleSpawnLead = 75.f;
+    static constexpr float k_rifleRadius = 2.35f;
 };

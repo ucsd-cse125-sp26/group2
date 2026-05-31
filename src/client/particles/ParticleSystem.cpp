@@ -154,8 +154,7 @@ void ParticleSystem::spawnRibbonTrail(entt::entity e, Registry& reg)
 
 void ParticleSystem::spawnBulletTracer(glm::vec3 origin, glm::vec3 dir, float range)
 {
-    // tip = hit point (front of streak), tail = muzzle (back of streak)
-    tracers_.spawnFree(origin + dir * range, origin);
+    tracers_.spawnRifleTracer(origin, dir, range);
 }
 
 void ParticleSystem::spawnHitscanBeam(glm::vec3 origin, glm::vec3 hitPos, WeaponType wt)

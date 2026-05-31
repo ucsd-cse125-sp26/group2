@@ -3649,7 +3649,7 @@ SDL_AppResult Game::iterate()
                     auto& c = candidates[static_cast<size_t>(i)];
                     if (c.sampleThisFrame) {
                         if (c.isLocal) {
-                            c.ac->animator->update(c.ai, k_animationTick);
+                            c.ac->animator->update(c.ai, c.ai.dtSec);
                         } else {
                             const auto* serverAnim = registry.try_get<AnimSnapshot>(c.entity);
                             if (serverAnim != nullptr)

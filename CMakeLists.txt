@@ -806,6 +806,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLocomotion.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLocomotion.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinVertex.hpp"
@@ -1385,6 +1387,8 @@ add_executable(server
         src/server/systems/HitboxHistorySystem.cpp
         src/client/animation/CharacterRig.hpp
         src/client/animation/CharacterRig.cpp
+        src/client/animation/AnimationLocomotion.hpp
+        src/client/animation/AnimationLocomotion.cpp
         src/client/animation/CharacterAnimator.hpp
         src/client/animation/CharacterAnimator.cpp
         src/client/animation/AnimationLibrary.hpp
@@ -1882,6 +1886,24 @@ set_compiler_warnings(audio_math_tests)
 enable_sanitizers(audio_math_tests)
 add_test(NAME audio_math_tests COMMAND audio_math_tests)
 
+add_executable(animation_locomotion_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/animation_locomotion_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLocomotion.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLocomotion.hpp"
+)
+target_include_directories(animation_locomotion_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(animation_locomotion_tests PRIVATE
+    glm::glm
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(animation_locomotion_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(animation_locomotion_tests)
+enable_sanitizers(animation_locomotion_tests)
+add_test(NAME animation_locomotion_tests COMMAND animation_locomotion_tests)
+
 add_executable(lag_comp_math_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/lag_comp_math_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/LagCompMath.hpp"
@@ -1931,6 +1953,25 @@ endif()
 set_compiler_warnings(audio_runtime_tests)
 enable_sanitizers(audio_runtime_tests)
 add_test(NAME audio_runtime_tests COMMAND audio_runtime_tests)
+
+add_executable(tracer_effect_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/tracer_effect_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TracerEffect.cpp"
+)
+target_include_directories(tracer_effect_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+)
+target_link_libraries(tracer_effect_tests PRIVATE
+    EnTT::EnTT
+    glm::glm
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(tracer_effect_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(tracer_effect_tests)
+enable_sanitizers(tracer_effect_tests)
+add_test(NAME tracer_effect_tests COMMAND tracer_effect_tests)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)
