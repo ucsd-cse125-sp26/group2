@@ -37,14 +37,14 @@ struct InputSnapshot
     /// `WeaponType` ordinal. -1 = no change. Consumed (reset to -1) by WeaponSystem.
     std::int8_t debugSetPrimaryWeapon{-1};
     std::int8_t debugSetSecondaryWeapon{-1};
-    bool killSelf{false};                                        ///< Debug: kill self (rising-edge only).
-    bool skipRespawn{false};                                     ///< Skip respawn timer (space while dead).
-    bool throwGrenade{false};      ///< Tap-G (no cycle): throw the selected grenade. Edge-pulsed once.
-    bool grenadeCycleNext{false};  ///< Hold-G + Shoot: select next grenade type. Edge-pulsed once.
-    bool grenadeCyclePrev{false};  ///< Hold-G + Scope: select previous grenade type. Edge-pulsed once.
-    bool ability1{false};          ///< Activate ability 1
-    bool ability2{false};                                        ///< Activate ability 2
-    bool abilitySelectHeld{false};                               ///< True while holding the ability-selection modifier.
+    bool killSelf{false};               ///< Debug: kill self (rising-edge only).
+    bool skipRespawn{false};            ///< Skip respawn timer (space while dead).
+    bool throwGrenade{false};           ///< Tap-G (no cycle): throw the selected grenade. Edge-pulsed once.
+    bool grenadeCycleNext{false};       ///< Hold-G + Shoot: select next grenade type. Edge-pulsed once.
+    bool grenadeCyclePrev{false};       ///< Hold-G + Scope: select previous grenade type. Edge-pulsed once.
+    bool ability1{false};               ///< Activate ability 1
+    bool ability2{false};               ///< Activate ability 2
+    bool abilitySelectHeld{false};      ///< True while holding the ability-selection modifier.
     bool abilitySelectLeft{false};      ///< Choose the left pending ability option (edge-triggered).
     bool abilitySelectRight{false};     ///< Choose the right pending ability option (edge-triggered).
     bool debugGrantAbilityLevel{false}; ///< Debug: grant the next ability choice threshold.

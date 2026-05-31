@@ -257,6 +257,8 @@ void Client::shutdown()
     }
 
     std::lock_guard<std::mutex> lock(stateMutex_);
+    // Gracefully notify the UDP session peer before tearing down local
+    // transport state so the server can remove this client without timeout.
     if (usingUdpSession_ && connectionId_ != 0) {
         session_.disconnect(connectionId_);
     }
@@ -1478,6 +1480,8 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         if (payloadSize < sizeof(PlayerRosterEvent))
             break;
 
+        // Roster events are small fixed-size payloads and ride the same
+        // reliable event path as kill/chat-style notifications.
         PlayerRosterEvent event{};
         std::memcpy(&event, payload, sizeof(PlayerRosterEvent));
         if (rosterEventFn_)

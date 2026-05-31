@@ -411,6 +411,8 @@ void Server::enqueueReliableEvent(const void* data, int len)
 
 void Server::enqueueReliableEventExcept(std::span<const ClientId> excluded, const void* data, int len)
 {
+    // Keep the public roster API simple while allowing future callers to skip
+    // multiple recipients without duplicating reliable fan-out logic.
     const auto isExcluded = [excluded](const ClientId& id) {
         return std::find(excluded.begin(), excluded.end(), id) != excluded.end();
     };
@@ -1924,6 +1926,8 @@ bool Server::sendMatchConfigToClient(ClientId clientId, const MatchConfig& confi
 
 void Server::broadcastRosterEventExcept(ClientId excluded, const PlayerRosterEvent& event)
 {
+    // Roster events are reliable, ordered UI notifications. The payload is
+    // fixed-size so clients can decode it with a single bounds check.
     std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(PlayerRosterEvent));
     buf[0] = static_cast<uint8_t>(PacketType::ROSTER_UPDATE);
     std::memcpy(buf.data() + 1, &event, sizeof(PlayerRosterEvent));

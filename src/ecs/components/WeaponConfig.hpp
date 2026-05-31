@@ -25,10 +25,10 @@ struct WeaponConfig
     float hitscanRadius = 0.0f;
     float initialProjectileSpeed = 0.0f;
     bool explosive = false;
-    bool isBeam = false;             ///< True for continuous beam weapons (no per-shot cooldown).
-    bool isCharge = false;           ///< True for charge weapons (hold to charge, release to fire).
-    float dps = 0.0f;                ///< Damage per second (beam weapons only; discrete weapons use `damage`).
-    float ammoPerSecond = 0.0f;      ///< Ammo drain rate (beam weapons only).
+    bool isBeam = false;        ///< True for continuous beam weapons (no per-shot cooldown).
+    bool isCharge = false;      ///< True for charge weapons (hold to charge, release to fire).
+    float dps = 0.0f;           ///< Damage per second (beam weapons only; discrete weapons use `damage`).
+    float ammoPerSecond = 0.0f; ///< Ammo drain rate (beam weapons only).
 
     // ── Tesla Cannon (auto-lock cone beam) tuning ──
     /// @brief True for Winston-style auto-lock beams: each tick picks the enemy
@@ -154,7 +154,8 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 500,
             .damage = 15.0f,
             .hitscan = true,
-            .hitscanRadius = 11.2f, // -30% cylinder hitreg (was 16.0); player capsules are ~2.5–6.5u radius in world space.
+            .hitscanRadius =
+                11.2f, // -30% cylinder hitreg (was 16.0); player capsules are ~2.5–6.5u radius in world space.
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .reloadTime = 1.25f,
@@ -205,16 +206,16 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isBeam = true,
-            .dps = 14.0f,        // ramp floor, -60% (was 35) — Tesla Cannon, low until lock-on ramps up
+            .dps = 14.0f, // ramp floor, -60% (was 35) — Tesla Cannon, low until lock-on ramps up
             .ammoPerSecond = 20.0f,
             .autoLockBeam = true,
-            .maxRange = 140.0f,           // -30% range (was 200)
-            .coneHalfAngleDeg = 30.0f,    // wide, forgiving — true no-aim
-            .dpsMax = 19.6f,              // ramp ceiling = floor +40% (was 2× base) after dpsRampTime
-            .dpsRampTime = 2.0f,          // seconds of continuous lock to reach dpsMax
+            .maxRange = 140.0f,             // -30% range (was 200)
+            .coneHalfAngleDeg = 30.0f,      // wide, forgiving — true no-aim
+            .dpsMax = 19.6f,                // ramp ceiling = floor +40% (was 2× base) after dpsRampTime
+            .dpsRampTime = 2.0f,            // seconds of continuous lock to reach dpsMax
             .shieldDamageMultiplier = 0.2f, // energy-vs-energy: barely chips shields
             .reloadTime = 2.0f,
-        }, // EnergyGun
+        },                                  // EnergyGun
         WeaponConfig{
             // Peacekeeper-style pump shotgun: hitscan multi-pellet star spread.
             // The fire path in WeaponSystem.cpp checks `type == Shotgun` and loops
@@ -225,7 +226,8 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .defaultAmmoCapacity = 36,
             .damage = 10.0f,       // per-pellet; 11 pellets → 110 body max, ~165 head.
             .hitscan = true,
-            .hitscanRadius = 4.2f, // -30% cylinder hitreg (was 6.0); still tighter than rifle since the 11 pellets compound close-range damage.
+            .hitscanRadius = 4.2f, // -30% cylinder hitreg (was 6.0); still tighter than rifle since the 11 pellets
+                                   // compound close-range damage.
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .reloadTime = 2.5f,

@@ -43,9 +43,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <limits>
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <limits>
 
 using physics::HitboxHit;
 using physics::HitscanHit;
@@ -541,8 +541,8 @@ handleScope(Registry& registry, entt::entity shooter, const InputSnapshot& input
 /// @brief Result of an auto-lock cone scan for a Tesla-style beam.
 struct BeamLockResult
 {
-    entt::entity target{entt::null}; ///< Best locked enemy, or null if none in cone.
-    glm::vec3 point{0.0f};           ///< Aim point on the target (centre of mass) for VFX + damage.
+    entt::entity target{entt::null};           ///< Best locked enemy, or null if none in cone.
+    glm::vec3 point{0.0f};                     ///< Aim point on the target (centre of mass) for VFX + damage.
     BodyRegion region{BodyRegion::UpperTorso}; ///< Region credited for the hit (centre mass = torso).
 };
 
@@ -555,8 +555,8 @@ struct BeamLockResult
 /// candidates the one with the smallest angular deviation from the crosshair
 /// wins. Must be called while any lag-compensation rewind guard is in scope so
 /// the capsules reflect the attacker's screen-time positions.
-inline BeamLockResult
-findBeamLockTarget(Registry& registry, entt::entity shooter, glm::vec3 eye, glm::vec3 viewDir, const WeaponConfig& config)
+inline BeamLockResult findBeamLockTarget(
+    Registry& registry, entt::entity shooter, glm::vec3 eye, glm::vec3 viewDir, const WeaponConfig& config)
 {
     BeamLockResult result;
     const float maxRange = (config.maxRange > 0.0f) ? config.maxRange : physics::k_hitscanRange;
@@ -693,8 +693,7 @@ inline void handleFire(Registry& registry,
         if (config.autoLockBeam) {
             const float maxRange = (config.maxRange > 0.0f) ? config.maxRange : physics::k_hitscanRange;
             // Rewind so the cone scan sees the attacker's screen-time positions.
-            const auto rewindGuard =
-                systems::rewindHitboxes(registry, shooter, &eye, &direction, maxRange, 0.0f);
+            const auto rewindGuard = systems::rewindHitboxes(registry, shooter, &eye, &direction, maxRange, 0.0f);
             const BeamLockResult lock = findBeamLockTarget(registry, shooter, eye, direction, config);
 
             auto& lockState = registry.get_or_emplace<BeamLockState>(shooter);

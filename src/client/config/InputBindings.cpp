@@ -333,13 +333,10 @@ InputBindings InputBindings::defaults()
         Action::Ability2, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), BindingDevice::Controller);
     b.rebind(
         Action::SwitchToPrimary, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_UP), BindingDevice::Controller);
-    b.rebind(Action::SwitchToSecondary,
-             Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_DOWN),
-             BindingDevice::Controller);
     b.rebind(
-        Action::CycleGrenade, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_LEFT), BindingDevice::Controller);
-    b.rebind(
-        Action::AbilityMenu, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_RIGHT), BindingDevice::Controller);
+        Action::SwitchToSecondary, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_DOWN), BindingDevice::Controller);
+    b.rebind(Action::CycleGrenade, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_LEFT), BindingDevice::Controller);
+    b.rebind(Action::AbilityMenu, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_RIGHT), BindingDevice::Controller);
     b.rebind(Action::Scoreboard, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_BACK), BindingDevice::Controller);
     b.rebind(Action::BuyMenu, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_STICK), BindingDevice::Controller);
     b.rebind(Action::PushToTalk, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_LEFT_STICK), BindingDevice::Controller);

@@ -256,8 +256,12 @@ SDL_AppResult App::iterate()
                 }
             }
             SDL_Log("Attempting to join server at %s:%d...", serverIp.c_str(), serverPort);
-            const ConnectError connectError = client.init(
-                serverIp.c_str(), serverPort, networkConfig.transport, k_joinConnectionTimeoutMs, relayConfig, punchAssist);
+            const ConnectError connectError = client.init(serverIp.c_str(),
+                                                          serverPort,
+                                                          networkConfig.transport,
+                                                          k_joinConnectionTimeoutMs,
+                                                          relayConfig,
+                                                          punchAssist);
             if (connectError != ConnectError::None) {
                 SDL_Log("Failed to connect to server at %s:%d: %s",
                         serverIp.c_str(),

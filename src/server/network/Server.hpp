@@ -174,7 +174,10 @@ public:
     /// @brief Unicast the current match settings to a single client.
     bool sendMatchConfigToClient(ClientId clientId, const MatchConfig& config);
 
-    /// @brief Broadcast join/leave events to all clients except @p excluded.
+    /// @brief Broadcast an in-match join/leave event to all clients except @p excluded.
+    ///
+    /// The excluded client is the player who joined or left; they either know
+    /// they joined already or are no longer connected.
     void broadcastRosterEventExcept(ClientId excluded, const PlayerRosterEvent& event);
 
     /// @brief Update the authoritative client admission cap.
@@ -396,6 +399,9 @@ private:
     void enqueueReliableEvent(const void* data, int len);
 
     /// @brief Enqueue reliable event for all clients except those in @p excluded.
+    ///
+    /// Shared fan-out primitive for reliable one-shot notifications that should
+    /// skip one or more recipients while preserving the existing UDP/TCP paths.
     void enqueueReliableEventExcept(std::span<const ClientId> excluded, const void* data, int len);
 
     /// @brief Network-thread main loop body.

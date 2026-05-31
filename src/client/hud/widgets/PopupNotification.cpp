@@ -11,6 +11,7 @@
 namespace
 {
 
+/// @brief Pick the left-edge accent color for a popup category.
 HudColor accentFor(HudPopupKind kind)
 {
     using namespace voidfall;
@@ -39,6 +40,8 @@ PopupNotification::PopupNotification()
 
 void PopupNotification::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)
 {
+    // Incoming popup messages are one-frame events. Retained entries below own
+    // their lifetime so producers do not need to resend the same message.
     for (const auto& popup : state.popupMessages) {
         Entry entry;
         entry.kind = popup.kind;

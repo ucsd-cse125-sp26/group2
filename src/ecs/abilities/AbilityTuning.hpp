@@ -10,10 +10,10 @@
 namespace abilities
 {
 
-constexpr float k_dashCooldown = 1.5f;  ///< Buffed (was 2.5/4.0) — dash much more often.
-constexpr float k_dashSpeed = 3400.0f;  ///< Buffed (was 2400/1900) — much faster, longer burst.
-constexpr float k_dashLift = 180.0f;    ///< Buffed (was 90) — more lift keeps the dash airborne so its momentum carries
-                                        ///< past ground friction instead of bleeding off immediately.
+constexpr float k_dashCooldown = 1.5f; ///< Buffed (was 2.5/4.0) — dash much more often.
+constexpr float k_dashSpeed = 3400.0f; ///< Buffed (was 2400/1900) — much faster, longer burst.
+constexpr float k_dashLift = 180.0f; ///< Buffed (was 90) — more lift keeps the dash airborne so its momentum carries
+                                     ///< past ground friction instead of bleeding off immediately.
 
 constexpr float k_recallCooldown = 12.0f;
 

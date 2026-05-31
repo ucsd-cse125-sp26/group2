@@ -60,10 +60,9 @@ inline std::uint32_t computeRewindTicks(std::uint16_t rttMs,
     // ServerGame::updateLagCompTargets for the full derivation.
     const std::uint32_t rttTicks = msToTicks(rttMs, tickRateHz);
 
-    const std::uint32_t interpDelayTicks =
-        (interpDelayMs > 0)
-            ? msToTicks(interpDelayMs, tickRateHz)
-            : static_cast<std::uint32_t>(interpDelaySnapshots) * std::max<std::uint32_t>(1u, snapshotEveryNTicks);
+    const std::uint32_t interpDelayTicks = (interpDelayMs > 0) ? msToTicks(interpDelayMs, tickRateHz)
+                                                               : static_cast<std::uint32_t>(interpDelaySnapshots) *
+                                                                     std::max<std::uint32_t>(1u, snapshotEveryNTicks);
 
     return std::min<std::uint32_t>(rttTicks + interpDelayTicks, maxLagCompTicks);
 }

@@ -80,6 +80,7 @@ public:
     using MatchStateUpdateFn = std::function<void(const MatchStatePacket&)>;
     using KillEventCallback = std::function<void(const NetKillEvent&)>;
     using TextChatCallback = std::function<void(const net::chat::ServerTextChat&)>;
+    /// @brief Fired for server-authored mid-match join/leave notifications.
     using RosterEventCallback = std::function<void(const PlayerRosterEvent&)>;
     using VoiceFrameCallback = std::function<void(const net::voice::ServerVoiceFrame&)>;
     /// @brief PR-20: callback for SHOT_DEBUG_REPORT.  Fired on the
@@ -193,6 +194,7 @@ public:
     /// @brief Register the kill-event callback, fired for each replicated kill from the server.
     void onKillEvent(KillEventCallback fn) { killEventFn_ = std::move(fn); }
     void onTextChat(TextChatCallback fn) { textChatFn_ = std::move(fn); }
+    /// @brief Register the roster-event callback, fired for each mid-match join/leave.
     void onRosterEvent(RosterEventCallback fn) { rosterEventFn_ = std::move(fn); }
     void onVoiceFrame(VoiceFrameCallback fn) { voiceFrameFn_ = std::move(fn); }
     /// @brief Register the shot-debug callback (PR-20); fired for each SHOT_DEBUG_REPORT.

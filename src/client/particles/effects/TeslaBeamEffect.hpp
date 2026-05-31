@@ -54,12 +54,12 @@ public:
 
 private:
     static constexpr int k_maxBeams = 4;
-    static constexpr int k_bezierSegs = 28; ///< Samples along the main arc.
-    static constexpr int k_branchSegs = 6;  ///< Samples along each branch.
+    static constexpr int k_bezierSegs = 28;        ///< Samples along the main arc.
+    static constexpr int k_branchSegs = 6;         ///< Samples along each branch.
     static constexpr int k_maxBranches = 3;
-    static constexpr float k_fadeTime = 0.08f;  ///< Fade in/out window (s).
-    static constexpr float k_keepAlive = 0.06f; ///< Grace before an undriven beam starts fading.
-    static constexpr float k_bowFrac = 0.16f;   ///< Spine sag as a fraction of beam length.
+    static constexpr float k_fadeTime = 0.08f;     ///< Fade in/out window (s).
+    static constexpr float k_keepAlive = 0.06f;    ///< Grace before an undriven beam starts fading.
+    static constexpr float k_bowFrac = 0.16f;      ///< Spine sag as a fraction of beam length.
     static constexpr float k_branchRetime = 0.05f; ///< Branch re-randomise interval (s).
 
     /// @brief One forked branch diverging from the main arc.

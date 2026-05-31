@@ -23,11 +23,8 @@
 namespace systems
 {
 
-void spawnDroppedWeapon(Registry& registry,
-                        glm::vec3 pos,
-                        glm::vec3 initialVel,
-                        const GunInstance& gun,
-                        float pickupDelay)
+void spawnDroppedWeapon(
+    Registry& registry, glm::vec3 pos, glm::vec3 initialVel, const GunInstance& gun, float pickupDelay)
 {
     const entt::entity e = registry.create();
     registry.emplace<Position>(e, pos);

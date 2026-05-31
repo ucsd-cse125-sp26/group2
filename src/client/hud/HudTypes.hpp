@@ -65,13 +65,14 @@ enum class HudIcon : uint8_t
     None = 0,
 };
 
+/// @brief Visual category for generic transient HUD popup messages.
 enum class HudPopupKind : std::uint8_t
 {
-    Info,
-    Success,
-    Warning,
-    PlayerJoined,
-    PlayerLeft
+    Info,         ///< Neutral informational popup.
+    Success,      ///< Positive confirmation popup.
+    Warning,      ///< Warning or attention popup.
+    PlayerJoined, ///< Player joined the active match.
+    PlayerLeft    ///< Player left the active match.
 };
 
 // ── Vertex ──────────────────────────────────────────────────────────────────
@@ -233,8 +234,8 @@ struct HudPickupNotification
 /// @brief Generic transient HUD popup message.
 struct HudPopupMessage
 {
-    HudPopupKind kind = HudPopupKind::Info;
-    std::string text;
+    HudPopupKind kind = HudPopupKind::Info; ///< Styling category.
+    std::string text;                       ///< Already-formatted display text.
 };
 
 /// @brief Local player K/D/A — feeds the top-right counter.

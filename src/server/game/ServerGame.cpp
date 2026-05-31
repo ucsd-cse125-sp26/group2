@@ -400,6 +400,8 @@ void ServerGame::eventHandler(const Event& event)
         }
         lobbyManager.addPlayer(event.clientId);
         server->sendMatchConfigToClient(event.clientId, matchController.getMatchConfig());
+        // Lobby updates already cover joins before the match starts. Once the
+        // match is active, send a lightweight roster popup event instead.
         if (!isLobbyPhase(matchController.getCurrentPhase())) {
             PlayerRosterEvent rosterEvent{
                 .type = RosterEventType::PlayerJoined,
@@ -414,6 +416,8 @@ void ServerGame::eventHandler(const Event& event)
     }
     case EventType::Disconnected: {
         GROUP2_PROF_SCOPE("eventDisconnected");
+        // Build the roster event before removing the player entity so the
+        // display name is still available for the client-side popup.
         if (!isLobbyPhase(matchController.getCurrentPhase())) {
             PlayerRosterEvent rosterEvent{
                 .type = RosterEventType::PlayerLeft,

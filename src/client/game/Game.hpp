@@ -454,6 +454,11 @@ private:
     /// when the local player's WeaponState gains a new weapon type or their
     /// reserve ammo grows beyond the previous frame's reading.
     std::vector<HudPickupNotification> pendingPickupNotifications_;
+
+    /// @brief Generic popup notifications queued for the next HUD frame.
+    ///
+    /// The HUD widget consumes each entry once, then owns display lifetime,
+    /// animation, and expiration.
     std::vector<HudPopupMessage> pendingPopupMessages_;
     std::vector<HudChatMessage> chatMessages_;
     std::vector<HudVoiceSpeaker> voiceSpeakers_;

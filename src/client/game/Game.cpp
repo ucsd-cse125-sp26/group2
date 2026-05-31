@@ -478,6 +478,8 @@ const char* lookupPlayerName(const Registry& registry, ClientId cid, char* outBu
 
 std::string rosterEventPlayerName(const Registry& registry, const PlayerRosterEvent& event)
 {
+    // Prefer the server-snapshotted name because disconnects can remove the
+    // replicated player entity before this client renders the notification.
     const auto* nameBegin = event.name;
     const auto* nameEnd = std::find(nameBegin, nameBegin + sizeof(event.name), '\0');
     if (nameEnd != nameBegin)
