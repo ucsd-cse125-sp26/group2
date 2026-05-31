@@ -518,8 +518,12 @@ inline void runGamepadDeadInput(Registry& registry, SDL_Gamepad* gamepad, const 
     if (!gamepadConnected(gamepad))
         return;
     const bool skipRespawn = bindings.controllerPressed(Action::Jump, gamepad);
+    // OR into the flag the keyboard path (runDeadInput) just set — the gamepad
+    // sampler runs right after it, so an assignment here would stomp a Space
+    // press on keyboard whenever a pad is connected. Mirrors how the alive-path
+    // gamepad inputs compose with |= rather than overwriting.
     registry.view<InputSnapshot, LocalPlayer, RespawnTimer>().each(
-        [&](InputSnapshot& snap, const RespawnTimer& /*unused*/) { snap.skipRespawn = skipRespawn; });
+        [&](InputSnapshot& snap, const RespawnTimer& /*unused*/) { snap.skipRespawn |= skipRespawn; });
 }
 
 } // namespace systems

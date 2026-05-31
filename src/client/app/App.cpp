@@ -6,6 +6,7 @@
 #include "SDL3/SDL_init.h"
 #include "game/Game.hpp"
 #include "host/HostedServer.hpp"
+#include "menus/MenuTheme.hpp"
 #include "menus/home/Home.hpp"
 #include "menus/host/HostConfig.hpp"
 #include "menus/lobby/Lobby.hpp"
@@ -130,6 +131,8 @@ bool App::init()
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     }
     ImGui::StyleColorsDark();
+    menu_theme::applyStyle();
+    menu_theme::loadFonts();
     if (!ImGui_ImplSDL3_InitForSDLGPU(window)) {
         SDL_Log("ImGui_ImplSDL3_InitForSDLGPU failed");
         cleanup();
@@ -455,6 +458,7 @@ void App::cleanup()
         shutdownHostedServerGracefully();
     }
     client.shutdown();
+    menu_theme::releaseBackground(renderer.getDevice());
     renderer.quit();
     if (screen_) {
         screen_->shutdownAfterRenderer();

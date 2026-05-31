@@ -3,6 +3,7 @@
 
 #include "HostConfig.hpp"
 
+#include "menus/MenuTheme.hpp"
 #include "network/ServerName.hpp"
 #include "ui/HostConfigUI.hpp"
 #include "util/InputCapture.hpp"
@@ -65,6 +66,7 @@ SDL_AppResult HostConfig::iterate()
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    menu_theme::drawBackground(renderer ? renderer->getDevice() : nullptr);
 
     const bool ownsLocalProcess = hostedServer->isRunning();
     const bool serverRunning = ownsLocalProcess || (client && client->isConnected());

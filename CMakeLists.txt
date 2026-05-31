@@ -1074,6 +1074,8 @@ add_executable(group2
         src/client/menus/home/Home.cpp
         src/client/menus/home/ui/HomeUI.hpp
         src/client/menus/home/ui/HomeUI.cpp
+        src/client/menus/MenuTheme.hpp
+        src/client/menus/MenuTheme.cpp
         src/ecs/components/PowerupSpawner.hpp
         src/ecs/components/PowerupState.hpp
         src/ecs/systems/PowerupSpawnerSystem.cpp

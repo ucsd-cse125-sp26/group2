@@ -3,6 +3,8 @@
 
 #include "HomeUI.hpp"
 
+#include "menus/MenuTheme.hpp"
+
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
 
@@ -18,16 +20,17 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
     JoinMenuResult result;
     result.connectClicked = false;
 
-    ImGui::SetNextWindowPos(ImVec2(40.0f, 40.0f), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(620.0f, 420.0f), ImGuiCond_Once);
-    if (ImGui::Begin("Join Game")) {
+    if (menu_theme::beginPanel("Join Game", 680.0f, 500.0f, true)) {
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
         ImGui::InputText("Server IP", &state.serverIp);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
         ImGui::InputInt("Port", &state.serverPort);
-        if (ImGui::Button("Join")) {
+        ImGui::Spacing();
+        if (menu_theme::accentButton("Join", ImVec2(140.0f, 0.0f))) {
             result.connectClicked = true;
         }
         ImGui::SameLine();
-        if (ImGui::Button("Host")) {
+        if (ImGui::Button("Host", ImVec2(140.0f, 0.0f))) {
             result.hostClicked = true;
         }
         if (!errorMessage.empty()) {
@@ -36,7 +39,7 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "%.*s", static_cast<int>(errorMessage.size()), errorMessage.data());
         }
 
-        ImGui::SeparatorText("Local Servers");
+        menu_theme::heading("Local Servers");
         if (ImGui::BeginTable("LocalServerTable", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
             ImGui::TableSetupColumn("Name");
             ImGui::TableSetupColumn("Address");
@@ -67,7 +70,7 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
             ImGui::EndTable();
         }
 
-        ImGui::SeparatorText("Global Servers");
+        menu_theme::heading("Global Servers");
         if (ImGui::Button(browserRefreshing ? "Refreshing..." : "Refresh")) {
             result.refreshClicked = true;
         }
@@ -115,7 +118,7 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
             ImGui::EndTable();
         }
     }
-    ImGui::End();
+    menu_theme::endPanel();
 
     return result;
 }

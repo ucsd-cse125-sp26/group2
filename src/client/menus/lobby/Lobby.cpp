@@ -4,6 +4,7 @@
 
 #include "SDL3/SDL_init.h"
 #include "SDL3/SDL_timer.h"
+#include "menus/MenuTheme.hpp"
 #include "ui/LobbyUI.hpp"
 #include "util/InputCapture.hpp"
 #include "util/LocalAddress.hpp"
@@ -146,6 +147,7 @@ SDL_AppResult Lobby::iterate()
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    menu_theme::drawBackground(renderer ? renderer->getDevice() : nullptr);
 
     updateStartCountdown();
 

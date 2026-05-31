@@ -1,5 +1,7 @@
 #include "PauseMenu.hpp"
 
+#include "menus/MenuTheme.hpp"
+
 #include <SDL3/SDL_keyboard.h>
 
 #include <algorithm>
@@ -244,10 +246,9 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
     if (ImGui::Begin("Paused", nullptr, flags)) {
         const float buttonWidth = ImGui::GetContentRegionAvail().x;
         if (!settingsOpen) {
-            ImGui::TextUnformatted("Game Paused");
-            ImGui::Separator();
+            menu_theme::heading("Game Paused");
 
-            if (ImGui::Button("Resume", {buttonWidth, 36.0f})) {
+            if (menu_theme::accentButton("Resume", {buttonWidth, 36.0f})) {
                 result.resumeGame = true;
             }
 
@@ -280,8 +281,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             }
             ImGui::PopStyleColor(3);
         } else {
-            ImGui::TextUnformatted("Settings");
-            ImGui::Separator();
+            menu_theme::heading("Settings");
 
             const float previousSensitivity = draftMouseSensitivity;
             ImGui::SliderFloat(
@@ -433,7 +433,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             }
 
             const float halfWidth = (buttonWidth - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-            if (ImGui::Button("Apply", {halfWidth, 34.0f})) {
+            if (menu_theme::accentButton("Apply", {halfWidth, 34.0f})) {
                 settings.inputBindings = draftBindings;
                 settings.mouseSensitivity = draftMouseSensitivity;
                 settings.horizontalFovDegrees = draftHorizontalFovDegrees;

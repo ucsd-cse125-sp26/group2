@@ -2,6 +2,8 @@
 /// @brief ImGui implementation of the lobby player-list panel and ready/start controls.
 #include "LobbyUI.hpp"
 
+#include "menus/MenuTheme.hpp"
+
 #include <imgui.h>
 
 namespace lobby_ui
@@ -19,9 +21,7 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         }
     }
 
-    ImGui::SetNextWindowPos(ImVec2(40.0f, 40.0f), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(380.0f, 300.0f), ImGuiCond_Once);
-    if (ImGui::Begin("Lobby")) {
+    if (menu_theme::beginPanel("Lobby", 480.0f, 480.0f, true)) {
         if (!config.serverName.empty()) {
             ImGui::Text("Server: %.*s", static_cast<int>(config.serverName.size()), config.serverName.data());
             ImGui::Separator();
@@ -51,11 +51,13 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
                 ImGui::Text("Player %d", p.id.value);
 
             ImGui::SameLine();
-            ImGui::TextUnformatted(p.ready ? "Ready" : "Not ready");
+            if (p.ready)
+                ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "Ready");
+            else
+                ImGui::TextColored(ImVec4(0.65f, 0.68f, 0.74f, 1.0f), "Not ready");
         }
 
-        ImGui::Separator();
-        ImGui::SeparatorText("Match Settings");
+        menu_theme::heading("Match Settings");
         if (config.matchConfig) {
             ImGui::Text("Kills to win: %d", config.matchConfig->killsToWin);
             ImGui::Text("Max players: %d", config.matchConfig->maxPlayers);
@@ -69,14 +71,14 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         }
 
         ImGui::BeginDisabled(config.startCountdownActive);
-        if (ImGui::Button(localReady ? "Unready" : "Ready")) {
+        if (menu_theme::accentButton(localReady ? "Unready" : "Ready", ImVec2(150.0f, 0.0f))) {
             result.readyChange = !localReady;
         }
 
         if (config.isHost) {
             ImGui::SameLine();
             ImGui::BeginDisabled(!config.canStartMatch);
-            if (ImGui::Button("Start Match")) {
+            if (menu_theme::accentButton("Start Match", ImVec2(150.0f, 0.0f))) {
                 result.startMatchClicked = true;
             }
             ImGui::EndDisabled();
@@ -94,7 +96,7 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
             result.returnToMenuClicked = true;
         }
     }
-    ImGui::End();
+    menu_theme::endPanel();
 
     return result;
 }
