@@ -10,7 +10,7 @@
 #include <cstddef>
 #include <vector>
 
-#define MAX_POINT_LIGHTS 4
+#define MAX_POINT_LIGHTS 6
 #define MAX_SHADOW_COUNT MAX_POINT_LIGHTS
 
 namespace Boilerplate

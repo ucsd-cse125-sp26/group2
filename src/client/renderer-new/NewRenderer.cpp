@@ -353,13 +353,53 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         }
     }
 
+    float globalIntensity = 50000;
     std::vector<PointLight> sampleLights;
     PointLight pl0{};
-    pl0.position = glm::vec3(300, 100.0f, 500);
-    pl0.intensity = 250000;
+    pl0.position = glm::vec3(300, 100.0f, 500); ////////////////////////
+    pl0.intensity = globalIntensity;
     pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
     pl0.range = 500.0f;
     sampleLights.push_back(pl0);
+
+
+    PointLight pl1{};
+    pl1.position = glm::vec3(1920.0f, 450.0f, 1209.0f);//////////////////////
+    pl1.intensity = globalIntensity;
+    pl1.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl1.range = 500.0f;
+    sampleLights.push_back(pl1);
+
+    PointLight pl2{};
+    pl2.position = glm::vec3(1315.0f, 450.0f, -651.0f); ////////////////////////
+    pl2.intensity = globalIntensity;
+    pl2.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl2.range = 500.0f;
+    sampleLights.push_back(pl2);
+
+    PointLight pl3{};
+    pl3.position = glm::vec3(31.0f, 450.0f, -1302.0f);//////////////////////
+    pl3.intensity = globalIntensity;
+    pl3.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl3.range = 500.0f;
+    sampleLights.push_back(pl3);
+
+
+    PointLight pl4{};
+    pl4.position = glm::vec3(-1560.0f, -239.0f, 2079.0f);
+    pl4.intensity = globalIntensity;
+    pl4.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl4.range = 500.0f;
+    sampleLights.push_back(pl4);
+
+
+    PointLight pl5{};
+    pl5.position = glm::vec3(-292.0f, -239.0f, 854.0f); ////////////////////////
+    pl5.intensity = globalIntensity;
+    pl5.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl5.range = 500.0f;
+    sampleLights.push_back(pl5);
+
     setPointLights(sampleLights);
 
     if (firstFrame_ && !Asset::modelInstances_.empty()) {
@@ -368,7 +408,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         firstFrame_ = false;
     }
 
-    drawToShadowMap(cmd, dynamicShadowMaps_, false, true, true);
+    drawToShadowMap(cmd, dynamicShadowMaps_, true, true, true);
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
@@ -448,6 +488,7 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
     glm::mat4 shadowProjection = glm::perspective(
         glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
     shadowProjection[1][1] *= -1;
+    // for (Uint8 iLight = 0; iLight < 1; iLight++) {
     for (Uint8 iLight = 0; iLight < sceneLightInfo_.numPointLights; iLight++) {
         PointLight& light = sceneLightInfo_.pointLights[iLight];
 
