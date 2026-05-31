@@ -16,6 +16,9 @@
 class AssetLoader
 {
 public:
+    static void computeMeshAABB(ModelIdInt id);
+
+    static Asset::AABB rigidTransformAABB(const Asset::AABB &aabb, const glm::mat4 &rigidTransform);
     /// @brief Load a single model from file and register it in Asset::models_.
     /// @param id Unique model identifier.
     /// @param modelFileName Path to the model file.

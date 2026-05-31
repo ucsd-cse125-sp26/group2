@@ -4,6 +4,7 @@
 #include "AssetLoader.hpp"
 
 #include "Asset.hpp"
+#include "glm/ext/scalar_common.hpp"
 
 #include <filesystem>
 #include <glm/gtc/quaternion.hpp>
@@ -132,6 +133,7 @@ bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
         mesh.indexData_.push_back(aiF_i_Indices[2]);
     }
 
+    computeMeshAABB(id);
     return true;
 }
 
@@ -175,6 +177,16 @@ glm::quat rotationFromTransform(const glm::mat4& transform)
     return glm::normalize(glm::quat_cast(basis));
 }
 
+void AssetLoader::computeMeshAABB(const MeshIdInt id)
+{
+    Asset::Mesh& mesh = Asset::meshes_.at(id);
+
+    for (Asset::Vertex v: mesh.vertexData_) {
+       mesh.aabb_.min = glm::min(mesh.aabb_.min,glm::vec4(v.position,1.0f));
+       mesh.aabb_.max = glm::max(mesh.aabb_.max,glm::vec4(v.position,1.0f));
+    }
+
+}
 bool AssetLoader::loadModel(const ModelIdInt id,
                             const std::string& modelFileName,
                             const std::vector<std::string>& /*texFileNames*/,
@@ -290,9 +302,7 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     ///////////////////////////////////////////////////////////////////////////////////////////////
     std::cout << "modelElements_ count: " << Asset::models_[id].modelElements_.size() << std::endl;
 
-    if (!k_flatten) {
-        updateModelTransformCache(id);
-    }
+    updateModelTransformCache(id);
 
     std::cout << debugPrefix << "loadedMeshes" << std::endl;
 
@@ -398,6 +408,11 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string& meshNameSpa
         me_j.cachedTransform_ = glm::mat4(1.0f);
 
         loadMesh(meshNameId, mesh_j_Ai);
+
+        Asset::Mesh &mesh = Asset::meshes_.at(meshNameId);
+        me_j.cachedAabb_ = mesh.aabb_;
+
+
         newModel.modelElements_.push_back(me_j);
         uint32_t childModelElementIndex = static_cast<uint32_t>(newModel.modelElements_.size() - 1);
         currentModelNode.modelElementsIndices_.push_back(childModelElementIndex);
@@ -434,9 +449,35 @@ void AssetLoader::updateModelTransformCache(const ModelIdInt id)
         for (uint32_t modelElementIndex : currentModelNode.modelElementsIndices_) {
             Asset::ModelElement& modelElement_i = newModel.modelElements_[modelElementIndex];
             modelElement_i.cachedTransform_ = worldTransform;
+            Asset::Mesh &mesh = Asset::meshes_.at(modelElement_i.meshId_);
+            modelElement_i.cachedAabb_ = rigidTransformAABB(mesh.aabb_,worldTransform);
         }
     }
 };
+
+Asset::AABB AssetLoader::rigidTransformAABB(const Asset::AABB &aabb, const glm::mat4 &rigidTransform)
+{
+    Asset::AABB transformedAABB;
+
+    glm::vec3 corners[8] {
+        {aabb.min.x, aabb.min.y, aabb.min.z},
+        {aabb.min.x, aabb.min.y, aabb.max.z},
+        {aabb.min.x, aabb.max.y, aabb.min.z},
+        {aabb.min.x, aabb.max.y, aabb.max.z},
+        {aabb.max.x, aabb.min.y, aabb.min.z},
+        {aabb.max.x, aabb.min.y, aabb.max.z},
+        {aabb.max.x, aabb.max.y, aabb.min.z},
+        {aabb.max.x, aabb.max.y, aabb.max.z},
+    };
+
+    for (auto corner : corners) {
+       glm::vec4 transformedCorner = rigidTransform * glm::vec4(corner,1.0f);
+       transformedAABB.min = glm::min(transformedAABB.min,transformedCorner);
+       transformedAABB.max = glm::max(transformedAABB.max,transformedCorner);
+    }
+
+    return transformedAABB;
+}
 
 glm::mat4 AssetLoader::glmFromAiTransform(const aiMatrix4x4& transformAi)
 {

@@ -383,24 +383,29 @@ private:
     void drawFxaaPass(SDL_GPUTexture* sceneColor, SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const;
     void drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
-    void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth);
-    void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd);
+    void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth, const FrustumPlanes& frustumPlanes);
+    void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd, const FrustumPlanes& frustumPlanes);
     void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
 
     void drawModel(ModelIdInt modelId,
                    const glm::mat4& modelTransform,
                    SDL_GPURenderPass* renderPass,
-                   SDL_GPUCommandBuffer* cmd);
+                   SDL_GPUCommandBuffer* cmd,
+                   const FrustumPlanes& frustumPlanes);
+
 
     void drawModelDepth(ModelIdInt modelId,
                         const glm::mat4& modelTransform,
                         SDL_GPURenderPass* renderPass,
-                        SDL_GPUCommandBuffer* cmd);
+                        SDL_GPUCommandBuffer* cmd,
+                        const FrustumPlanes& frustumPlanes);
 
-    void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth);
+    void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth,const FrustumPlanes& frustumPlanes);
 
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
     void drawHud(SDL_GPURenderPass* pass);
+
+    static bool inFrustum(const Asset::AABB &modelElementAABB,const FrustumPlanes &frustumPlanes,const glm::mat4 &modelMat);
 
     // ─── Member state ────────────────────────────────────────────────────────
 
@@ -432,7 +437,7 @@ private:
 
     // constexpr uint32_t shadowSize = 2048;
     //  constexpr uint32_t shadowSize = 512;
-    static const uint32_t shadowSize = 4096;
+    static const uint32_t shadowSize = 1024;
     static const uint32_t staticShadowSize = 4096;
     SDL_GPUTexture* dynamicShadowMaps_ = nullptr;
     SDL_GPUTexture* staticShadowMaps_ = nullptr;
@@ -450,6 +455,7 @@ private:
 
     // Per-frame captured state ───────────────────────────────────────────────
     std::vector<EntityRenderCmd> entities_;
+    // std::vector<Asset::AABB> entityAABBs_;
     WeaponViewmodel weapon_{};
     ParticleSystem* particleSystem_ = nullptr;
 

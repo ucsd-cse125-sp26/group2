@@ -408,7 +408,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         firstFrame_ = false;
     }
 
-    drawToShadowMap(cmd, dynamicShadowMaps_, true, true, true);
+    drawToShadowMap(cmd, dynamicShadowMaps_, false, true, true);
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
@@ -467,12 +467,14 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
 
     SDL_PushGPUVertexUniformData(cmd, 0, &shadowViewProjection, sizeof(glm::mat4));
 
+    FrustumPlanes frustumPlanes = NewCamera::gribbHartmannFrustumPlanes(shadowViewProjection);
+
     if (staticGeometry)
-        drawWorldModelInstances(geometryDepthPass, cmd, true);
+        drawWorldModelInstances(geometryDepthPass, cmd, true,frustumPlanes);
     //SDL_SetGPUDepthBias(geometryDepthPass,);
 
     if (entityGeometry)
-        drawEntityModels(geometryDepthPass, cmd, true);
+        drawEntityModels(geometryDepthPass, cmd, true,frustumPlanes);
     if (skinnedGeometry)
         skinnedRenderer_.drawDepth(geometryDepthPass, cmd);
 
@@ -539,10 +541,11 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
     bindLightShadowInfo(geometryPass, cmd);
 
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+    FrustumPlanes frustumPlanes = camera_.getViewProjectionFrustumPlane();
 
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
-    drawWorldModelInstances(geometryPass, cmd, false);
-    drawEntityModels(geometryPass, cmd, false);
+    drawWorldModelInstances(geometryPass, cmd, false,frustumPlanes);
+    drawEntityModels(geometryPass, cmd, false,frustumPlanes);
 
     drawSkinnedModels(geometryPass, cmd);
     drawParticles(geometryPass, cmd);
@@ -568,7 +571,7 @@ void NewRenderer::drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffe
 
     bindLightShadowInfo(geometryPass, cmd);
 
-    drawWeapon(geometryPass, cmd);
+    drawWeapon(geometryPass, cmd,camera_.getViewProjectionFrustumPlane());
 
     SDL_EndGPURenderPass(geometryPass);
 }
@@ -623,7 +626,7 @@ void NewRenderer::drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuf
     }
 }
 
-void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
+void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd,const FrustumPlanes& frustumPlanes)
 {
     if (!weapon_.visible)
         return;
@@ -638,7 +641,7 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
         return;
     }
 
-    drawModel(weaponModelId, weapon_.transform, renderPass, cmd);
+    drawModel(weaponModelId, weapon_.transform, renderPass, cmd,frustumPlanes);
 
     auto drawAttachment = [&](const ViewmodelAttachment& attachment) {
         if (!attachment.visible)
@@ -648,7 +651,7 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
         const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(attachment.modelIndex)).modelId_;
         if (!Asset::models_.contains(modelId))
             return;
-        drawModel(modelId, attachment.transform, renderPass, cmd);
+        drawModel(modelId, attachment.transform, renderPass, cmd,frustumPlanes);
     };
     drawAttachment(weapon_.hands.right);
     drawAttachment(weapon_.hands.left);
@@ -660,20 +663,20 @@ void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUComman
     skinnedRenderer_.draw(renderPass, cmd);
 }
 
-void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth)
+void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth, const FrustumPlanes& frustumPlanes)
 {
     for (const auto& mInstance : Asset::modelInstances_) {
         if (!mInstance.drawInScenePass)
             continue;
         if (depth) {
-            drawModelDepth(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
+            drawModelDepth(mInstance.modelId_, mInstance.transform_, renderPass, cmd,frustumPlanes);
         } else {
-            drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd);
+            drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd,frustumPlanes);
         }
     }
 }
 
-void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth)
+void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth,const FrustumPlanes& frustumPlanes)
 {
     for (const auto& entityCmd : entities_) {
         if (entityCmd.modelIndex < 0) {
@@ -687,9 +690,9 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommand
         // so tinted entities (e.g. team colors, hit flashes) render correctly.
 
         if (depth) {
-            drawModelDepth(modelId, entityCmd.worldTransform, renderPass, cmd);
+            drawModelDepth(modelId, entityCmd.worldTransform, renderPass, cmd,frustumPlanes);
         } else {
-            drawModel(modelId, entityCmd.worldTransform, renderPass, cmd);
+            drawModel(modelId, entityCmd.worldTransform, renderPass, cmd,frustumPlanes);
         }
     }
 }
@@ -697,10 +700,19 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommand
 void NewRenderer::drawModel(ModelIdInt modelId,
                             const glm::mat4& modelTransform,
                             SDL_GPURenderPass* renderPass,
-                            SDL_GPUCommandBuffer* cmd)
+                            SDL_GPUCommandBuffer* cmd,
+                            const FrustumPlanes& frustumPlanes)
 {
     Asset::Model& model = Asset::models_.at(modelId);
     for (auto& element : model.modelElements_) {
+        glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
+
+        Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
+        if (!inFrustum(mesh.aabb_,frustumPlanes,modelElementMatrix)) continue; //////// Frustum Culling
+
+
+        //if (!inFrustum(element.meshId_,frustumPlanes,modelTransform)) continue; //////// Frustum Culling
+
         const Asset::Material* material = nullptr;
         if (Asset::materials_.contains(element.materialId_))
             material = &Asset::materials_.at(element.materialId_);
@@ -751,10 +763,8 @@ void NewRenderer::drawModel(ModelIdInt modelId,
         SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
         SDL_PushGPUFragmentUniformData(cmd, 1, &materialFlags, sizeof(materialFlags));
 
-        glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
         SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
 
-        Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
         drawMesh(renderPass, mesh);
     }
 }
@@ -762,14 +772,18 @@ void NewRenderer::drawModel(ModelIdInt modelId,
 void NewRenderer::drawModelDepth(ModelIdInt modelId,
                                  const glm::mat4& modelTransform,
                                  SDL_GPURenderPass* renderPass,
-                                 SDL_GPUCommandBuffer* cmd)
+                                 SDL_GPUCommandBuffer* cmd,
+                                 const FrustumPlanes& frustumPlanes )
 {
     Asset::Model& model = Asset::models_.at(modelId);
     for (auto& element : model.modelElements_) {
-        // SDL_Log("drawModelDepth: modelId=%d elements=%zu", modelId, model.modelElements_.size());
         glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
-        SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
+
         Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
+        if (!inFrustum(mesh.aabb_,frustumPlanes,modelElementMatrix)) continue; //////// Frustum Culling
+
+        // SDL_Log("drawModelDepth: modelId=%d elements=%zu", modelId, model.modelElements_.size());
+        SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
         // SDL_Log("  vbuff=%p ibuff=%p indexCount=%u",
         //     (void*)mesh.vBufferInfo_.gpuBuff,
         //     (void*)mesh.iBufferInfo_.gpuBuff,
@@ -1047,6 +1061,18 @@ void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
 void NewRenderer::setEntityRenderList(std::vector<EntityRenderCmd>&& entityList)
 {
     entities_ = std::move(entityList);
+
+    // std::vector<Asset::AABB> aabbs;
+    // aabbs.reserve(entities_.size());
+    //
+    // for (auto entity : entities_) {
+    //     Asset::ModelInstance &entityModelInstance = Asset::modelInstances_.at(entity.modelIndex);
+    //     Asset::Model &entityModel = Asset::models_.at(entityModelInstance.modelId_);
+    //     aabbs.push_back(entity.)
+    // }
+    //
+    //
+    // entityAABBs_ = std::move(aabbs);
 }
 
 void NewRenderer::setModelEmissive(int32_t modelIdUnsanitized, glm::vec4 emissiveColor)
@@ -1126,4 +1152,33 @@ bool NewRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJoints
 void NewRenderer::setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
 {
     skinnedRenderer_.setFrame(palette, instances);
+}
+
+
+
+bool NewRenderer::inFrustum(const Asset::AABB &modelElementAABB,const FrustumPlanes &frustumPlanes,const glm::mat4 &modelMat)
+{
+    Asset::AABB worldAabb = AssetLoader::rigidTransformAABB(modelElementAABB,modelMat);
+
+    auto insidePlane = [](const glm::vec4 &planeNormal, const Asset::AABB& aabb) {
+        const auto positiveVertex = glm::vec4{planeNormal.x >= 0.0f ? aabb.max.x : aabb.min.x,
+                                        planeNormal.y >= 0.0f ? aabb.max.y : aabb.min.y,
+                                        planeNormal.z >= 0.0f ? aabb.max.z : aabb.min.z,
+                                       1.0f};
+
+        return glm::dot(positiveVertex ,planeNormal) >= 0.0f;
+    };
+    bool inFrustumRet = true;
+
+    inFrustumRet &= insidePlane(frustumPlanes.left,worldAabb);
+    inFrustumRet &= insidePlane(frustumPlanes.right,worldAabb);
+
+    inFrustumRet &= insidePlane(frustumPlanes.bottom,worldAabb);
+    inFrustumRet &= insidePlane(frustumPlanes.top,worldAabb);
+
+    inFrustumRet &= insidePlane(frustumPlanes.near,worldAabb);
+    inFrustumRet &= insidePlane(frustumPlanes.far,worldAabb);
+
+
+    return inFrustumRet;
 }
