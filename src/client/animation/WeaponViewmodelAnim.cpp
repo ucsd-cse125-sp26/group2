@@ -35,6 +35,8 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <algorithm>
 #include <unordered_map>
 
@@ -55,6 +57,11 @@ struct WeaponViewmodelAnim::Impl
     bool loop = true;
     bool finished = false;
 
+    int boltJoint = -1;     ///< def_c_bolt index (gun charging handle/bolt), -1 if absent.
+    float fireKick = 0.0f;  ///< 1 just after a shot, decays to 0 over one bolt cycle.
+    glm::vec3 boltSlideAxis{0.0f, 0.0f, -1.0f}; ///< Model-space "backward" (muzzle->bolt), derived at load.
+    std::vector<glm::mat4> jointModelMats;      ///< Model-space bone matrices this frame (for bone queries).
+
     void composeFromLocals()
     {
         ozz::animation::LocalToModelJob l2m;
@@ -65,9 +72,11 @@ struct WeaponViewmodelAnim::Impl
             return;
         const auto& ibm = rig.inverseBindMatrices();
         const int n = rig.numJoints();
-        for (int j = 0; j < n; ++j)
-            skinMats[static_cast<size_t>(j)] =
-                anim_utils::ozzToGlm(models[static_cast<size_t>(j)]) * ibm[static_cast<size_t>(j)];
+        for (int j = 0; j < n; ++j) {
+            const glm::mat4 jm = anim_utils::ozzToGlm(models[static_cast<size_t>(j)]);
+            jointModelMats[static_cast<size_t>(j)] = jm;
+            skinMats[static_cast<size_t>(j)] = jm * ibm[static_cast<size_t>(j)];
+        }
     }
 
     void setRestPose()
@@ -75,6 +84,22 @@ struct WeaponViewmodelAnim::Impl
         const auto rest = rig.skeleton()->joint_rest_poses();
         std::copy(rest.begin(), rest.end(), locals.begin());
         composeFromLocals();
+    }
+
+    // Overlay a quick bolt/charging-handle slide on top of the composed pose.
+    void applyFireKick(float dtSec)
+    {
+        if (fireKick > 0.0f) {
+            fireKick -= dtSec / 0.055f; // ~55ms cycle
+            if (fireKick < 0.0f)
+                fireKick = 0.0f;
+        }
+        if (boltJoint >= 0 && boltJoint < static_cast<int>(skinMats.size()) && fireKick > 0.0f) {
+            // Slide backward along the model-derived barrel axis (muzzle->bolt).
+            const float dist = 4.0f * fireKick;
+            skinMats[static_cast<size_t>(boltJoint)] =
+                glm::translate(glm::mat4(1.0f), boltSlideAxis * dist) * skinMats[static_cast<size_t>(boltJoint)];
+        }
     }
 };
 
@@ -201,6 +226,24 @@ bool WeaponViewmodelAnim::load(const std::string& glbPath, bool flipUVs)
     impl_->models.resize(static_cast<size_t>(numJoints));
     impl_->skinMats.assign(static_cast<size_t>(numJoints), glm::mat4(1.0f));
 
+    impl_->jointModelMats.assign(static_cast<size_t>(numJoints), glm::mat4(1.0f));
+
+    auto boltIt = impl_->rig.jointMap().find("def_c_bolt");
+    impl_->boltJoint = (boltIt != impl_->rig.jointMap().end()) ? boltIt->second : -1;
+
+    // Derive the bolt's slide axis from the rig itself: the bind-pose direction
+    // muzzle_flash -> def_c_bolt is "backward" along the barrel.
+    auto muzIt = impl_->rig.jointMap().find("muzzle_flash");
+    const int muzJoint = (muzIt != impl_->rig.jointMap().end()) ? muzIt->second : -1;
+    if (impl_->boltJoint >= 0 && muzJoint >= 0) {
+        const auto& ibm = impl_->rig.inverseBindMatrices();
+        const glm::vec3 boltPos = glm::vec3(glm::inverse(ibm[static_cast<size_t>(impl_->boltJoint)])[3]);
+        const glm::vec3 muzPos = glm::vec3(glm::inverse(ibm[static_cast<size_t>(muzJoint)])[3]);
+        const glm::vec3 d = boltPos - muzPos;
+        if (glm::length(d) > 1e-4f)
+            impl_->boltSlideAxis = glm::normalize(d);
+    }
+
     Assimp::Importer importer;
     const auto flags =
         static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_LimitBoneWeights);
@@ -251,39 +294,56 @@ void WeaponViewmodelAnim::playRestPose()
         impl_->setRestPose();
 }
 
+void WeaponViewmodelAnim::triggerFire()
+{
+    impl_->fireKick = 1.0f;
+}
+
+glm::vec3 WeaponViewmodelAnim::boneModelPos(const std::string& name) const
+{
+    auto it = impl_->rig.jointMap().find(name);
+    if (it == impl_->rig.jointMap().end())
+        return glm::vec3(0.0f);
+    const int idx = it->second;
+    if (idx < 0 || idx >= static_cast<int>(impl_->jointModelMats.size()))
+        return glm::vec3(0.0f);
+    return glm::vec3(impl_->jointModelMats[static_cast<size_t>(idx)][3]);
+}
+
 void WeaponViewmodelAnim::update(float dtSec)
 {
     if (!impl_->rig.isLoaded())
         return;
-    if (impl_->curClip.empty()) {
-        impl_->setRestPose();
-        return;
-    }
-    auto it = impl_->clips.find(impl_->curClip);
-    if (it == impl_->clips.end() || !it->second) {
-        impl_->setRestPose();
-        return;
-    }
-    const ozz::animation::Animation* clip = it->second.get();
-    const float dur = (impl_->duration > 0.0001f) ? impl_->duration : clip->duration();
 
-    impl_->time += dtSec * impl_->speed;
-    float ratio = (dur > 0.0001f) ? (impl_->time / dur) : 1.0f;
-    if (impl_->loop) {
-        ratio = ratio - std::floor(ratio);
-    } else if (ratio >= 1.0f) {
-        ratio = 1.0f;
-        impl_->finished = true;
-    }
+    bool posed = false;
+    if (!impl_->curClip.empty()) {
+        auto it = impl_->clips.find(impl_->curClip);
+        if (it != impl_->clips.end() && it->second) {
+            const ozz::animation::Animation* clip = it->second.get();
+            const float dur = (impl_->duration > 0.0001f) ? impl_->duration : clip->duration();
 
-    ozz::animation::SamplingJob job;
-    job.animation = clip;
-    job.context = &impl_->context;
-    job.ratio = ratio;
-    job.output = ozz::make_span(impl_->locals);
-    if (!job.Run()) {
-        impl_->setRestPose();
-        return;
+            impl_->time += dtSec * impl_->speed;
+            float ratio = (dur > 0.0001f) ? (impl_->time / dur) : 1.0f;
+            if (impl_->loop) {
+                ratio = ratio - std::floor(ratio);
+            } else if (ratio >= 1.0f) {
+                ratio = 1.0f;
+                impl_->finished = true;
+            }
+
+            ozz::animation::SamplingJob job;
+            job.animation = clip;
+            job.context = &impl_->context;
+            job.ratio = ratio;
+            job.output = ozz::make_span(impl_->locals);
+            if (job.Run()) {
+                impl_->composeFromLocals();
+                posed = true;
+            }
+        }
     }
-    impl_->composeFromLocals();
+    if (!posed)
+        impl_->setRestPose();
+
+    impl_->applyFireKick(dtSec);
 }

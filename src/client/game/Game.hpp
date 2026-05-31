@@ -656,6 +656,19 @@ private:
     WeaponViewmodelAnim weaponVmArms_;     ///< First-person Wraith arms (hands), same clips as the gun.
     bool weaponVmArmsLoaded_ = false;
     int weaponVmArmsModelIdx_ = -1;        ///< Hidden static model of the arms GLB (for its textures).
+    int weaponVmPrevMagAmmo_ = -1;         ///< Tracks mag ammo to detect a shot fired this frame.
+    int shellEjectModelIdx_ = -1;          ///< Spent-casing prop (hidden static; drawn via entity list).
+    struct Casing
+    {
+        glm::vec3 pos{0.0f};
+        glm::vec3 vel{0.0f};
+        glm::mat3 orient{1.0f}; ///< Base orientation: casing long axis (local X) aligned to the barrel at spawn.
+        float angle = 0.0f;     ///< Tumble angle (about the casing's local Z).
+        float spin = 0.0f;      ///< Tumble rate.
+        float age = 0.0f;
+    };
+    std::vector<Casing> casings_;          ///< Live ejected casings (world space, gravity + spin + lifetime).
+    uint32_t casingSpawnCounter_ = 0;      ///< Cheap deterministic jitter source for ejection.
     CpuLbsSkinningBackend skinBackend_;    ///< Phase-1 CPU linear-blend-skinning backend.
     AnimationTesterState animUI_;          ///< Persistent state for the Animation Tester panel.
     HitboxRig clientHitboxRig_;            ///< Hitbox definitions for client-side debug visualization.

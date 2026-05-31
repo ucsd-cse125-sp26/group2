@@ -56,6 +56,10 @@ public:
     /// @brief Currently-playing clip name ("" if rest pose).
     [[nodiscard]] const std::string& currentClip() const;
 
+    /// @brief Kick the bolt/charging-handle bone for one shot (overlaid on the
+    /// current pose by update()).  Call once per shot.
+    void triggerFire();
+
     /// @brief Advance the active clip by dt and recompute the bone palette.
     void update(float dtSec);
 
@@ -64,6 +68,10 @@ public:
 
     /// @brief Per-joint skinning matrices for this frame (size == numJoints()).
     [[nodiscard]] const std::vector<glm::mat4>& skinMatrices() const;
+
+    /// @brief Current model-space position of a named bone (e.g. "def_c_bolt"
+    /// for the chamber/ejection origin).  Zero if absent.
+    [[nodiscard]] glm::vec3 boneModelPos(const std::string& name) const;
 
 private:
     struct Impl;

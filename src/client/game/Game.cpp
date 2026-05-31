@@ -1411,6 +1411,11 @@ bool Game::init(AppContext& ctx)
             } else {
                 SDL_Log("[client] WARNING: R-301 arms (apex_r301_arms.glb) failed to load");
             }
+
+            // Spent-casing prop (hidden static model; spawned + drawn via the entity list on fire).
+            shellEjectModelIdx_ = renderer->loadSceneModel("shelleject_assault_rifle.glb", glm::vec3{0.0f}, 1.0f, true);
+            if (shellEjectModelIdx_ >= 0)
+                renderer->setModelScenePass(shellEjectModelIdx_, false);
         }
 
         const std::string rigPath = assetsDir + "standard_walk.fbx";
@@ -4417,6 +4422,25 @@ SDL_AppResult Game::iterate()
         //     });
         // });
 
+        // Spent-casing physics + render (casings are spawned on fire in the viewmodel step below).
+        if (shellEjectModelIdx_ >= 0 && !casings_.empty()) {
+            const glm::vec3 gravity{0.0f, -650.0f, 0.0f};
+            for (auto& cs : casings_) {
+                cs.vel += gravity * frameTime;
+                cs.pos += cs.vel * frameTime;
+                cs.angle += cs.spin * frameTime;
+                cs.age += frameTime;
+            }
+            casings_.erase(
+                std::remove_if(casings_.begin(), casings_.end(), [](const Casing& c) { return c.age > 1.3f; }),
+                casings_.end());
+            for (const auto& cs : casings_) {
+                const glm::mat4 m = glm::translate(glm::mat4(1.0f), cs.pos) * glm::mat4(cs.orient) *
+                                    glm::rotate(glm::mat4(1.0f), cs.angle, glm::vec3(0.0f, 0.0f, 1.0f));
+                entityCmds.push_back(EntityRenderCmd{.modelIndex = shellEjectModelIdx_, .worldTransform = m});
+            }
+        }
+
         if (collectPerf)
             phaseStats.entityRenderCmds = static_cast<std::uint32_t>(entityCmds.size());
         renderer->setEntityRenderList(std::move(entityCmds));
@@ -5006,12 +5030,44 @@ SDL_AppResult Game::iterate()
         if (weaponVmLoaded_ && currentEquippedType_ == WeaponType::Rifle && vm.visible) {
             bool reloading = false;
             float reloadTotal = 0.0f;
+            int magAmmo = -1;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
                 const GunInstance& gun = getEquippedGun(ws);
                 const WeaponConfig& cfg = getWeaponConfig(gun.type);
                 reloading = gun.isReloading;
                 reloadTotal = cfg.reloadTime;
+                magAmmo = gun.currentMagAmmo;
             });
+            // A shot drops mag ammo this frame (reload raises it, so no false trigger) -> kick bolt + eject casing.
+            if (weaponVmPrevMagAmmo_ >= 0 && magAmmo >= 0 && magAmmo < weaponVmPrevMagAmmo_) {
+                weaponVm_.triggerFire();
+                if (shellEjectModelIdx_ >= 0 && casings_.size() < 64) {
+                    const float cp = std::cos(renderPitch);
+                    const glm::vec3 fwd{std::sin(renderYaw) * cp, -std::sin(renderPitch), std::cos(renderYaw) * cp};
+                    const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3{0.0f, 1.0f, 0.0f}));
+                    const glm::vec3 upv = glm::normalize(glm::cross(rgt, fwd));
+                    const float j = float((casingSpawnCounter_++ * 2654435761u) % 1000u) / 1000.0f - 0.5f;
+                    Casing cs;
+                    // Eject from the real chamber (def_c_bolt) and orient parallel to the barrel
+                    // (def_c_bolt -> muzzle_flash), both taken from the rig and transformed to world.
+                    const glm::vec3 chamberWorld =
+                        glm::vec3(vm.transform * glm::vec4(weaponVm_.boneModelPos("def_c_bolt"), 1.0f));
+                    const glm::vec3 muzzleWorld =
+                        glm::vec3(vm.transform * glm::vec4(weaponVm_.boneModelPos("muzzle_flash"), 1.0f));
+                    glm::vec3 barrelDir = muzzleWorld - chamberWorld;
+                    barrelDir = (glm::length(barrelDir) > 1e-4f) ? glm::normalize(barrelDir) : fwd;
+                    const glm::vec3 refUp =
+                        (std::abs(barrelDir.y) < 0.99f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+                    const glm::vec3 cz = glm::normalize(glm::cross(barrelDir, refUp));
+                    const glm::vec3 cy = glm::cross(cz, barrelDir);
+                    cs.orient = glm::mat3(barrelDir, cy, cz); // local X -> barrel
+                    cs.pos = chamberWorld + rgt * 1.5f;       // ejection port: just right of the chamber
+                    cs.vel = rgt * (150.0f + j * 40.0f) + upv * (120.0f + j * 30.0f) + fwd * (j * 40.0f);
+                    cs.spin = 20.0f + j * 8.0f;
+                    casings_.push_back(cs);
+                }
+            }
+            weaponVmPrevMagAmmo_ = magAmmo;
 
             // On equip, play the draw clip — it ENDS at the "ready" pose, which
             // is the pose-space all the other clips (reload/etc.) live in.  This
@@ -5037,6 +5093,11 @@ SDL_AppResult Game::iterate()
                 weaponVmReloadActive_ = false;
             }
             weaponVm_.update(frameTime);
+
+            // Drive the muzzle origin (tracers/bullets/beams read cachedMuzzleWorld_) from the
+            // rig's muzzle_flash bone, since the R-301 static model has no muzzle mount point.
+            cachedMuzzleWorld_ = glm::vec3(vm.transform * glm::vec4(weaponVm_.boneModelPos("muzzle_flash"), 1.0f));
+            cachedMuzzleValid_ = true;
 
             SkinnedInstance inst;
             inst.worldTransform = vm.transform;
