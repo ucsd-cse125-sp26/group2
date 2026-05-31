@@ -158,13 +158,6 @@ std::optional<glm::vec3> findOptionalTestModelPosition()
     return std::nullopt;
 }
 
-glm::quat assetRotation(const AssetEntry& asset)
-{
-    const glm::vec3 r = glm::radians(asset.renderRotationDegrees);
-    return glm::angleAxis(r.y, glm::vec3{0.0f, 1.0f, 0.0f}) * glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
-           glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
-}
-
 WeaponSpawnerModelParams defaultSpawnerModelParams(WeaponType type)
 {
     return getWeaponSpawnerModelParams(type);
@@ -6864,22 +6857,20 @@ void Game::refreshDroppedWeaponRenderables()
             const AssetEntry& asset = assets_.entry(assetId);
 
             rend.modelIndex = asset.modelIndex;
-            rend.scale = asset.renderScale;
+            const auto weaponIdx = static_cast<std::size_t>(weaponIndex);
+            const WeaponSpawnerModelParams& params = spawnerWeaponParams_[weaponIdx];
+            rend.scale = params.scale;
 
             // Same spin + bob treatment the spawners use, so dropped weapons
             // read as pickups at a glance.
-            static constexpr float k_dropSpinRadiansPerSec = glm::radians(45.0f);
-            static constexpr float k_dropBobAmplitude = 6.0f;
-            static constexpr float k_dropBobHz = 0.6f;
             static constexpr float k_twoPi = 6.28318530718f;
 
             const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
             rend.visible = true;
-            rend.orientation =
-                glm::angleAxis(t * k_dropSpinRadiansPerSec, glm::vec3{0.0f, 1.0f, 0.0f}) * assetRotation(asset);
-            rend.translation = asset.renderTranslation +
-                               glm::vec3{0.0f, std::sin(t * k_twoPi * k_dropBobHz) * k_dropBobAmplitude, 0.0f};
+            rend.orientation = spawnerModelRotation(params, t, true);
+            rend.translation = params.translation +
+                               glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
         });
 }
 
