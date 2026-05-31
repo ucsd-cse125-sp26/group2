@@ -343,28 +343,47 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
             return true;
         };
 
-        // Primary: every joint whose name marks the pelvis/root. Mixamo uses
-        // "mixamorig:Hips"; the Apex legend skeleton (Wraith) uses "def_c_hip".
-        // Match both so converted Apex locomotion clips get their baked forward
-        // translation frozen (otherwise she slides during the loop).
+        // Named mover bones. Mixamo bakes root motion onto "mixamorig:Hips";
+        // the Apex legend skeleton (Wraith) uses "jx_c_delta" (the "delta"
+        // mover bone), with "def_c_hip" as the pelvis. Freeze XZ on any of them.
         for (int j = 0; j < numJoints; ++j) {
             const std::string jointName(jointNames[static_cast<size_t>(j)]);
             if (jointName.find("Hips") != std::string::npos || jointName.find("hip") != std::string::npos
-                || jointName.find("Pelvis") != std::string::npos || jointName.find("pelvis") != std::string::npos)
-                strippedAny |= stripTrack(j, "name match: hip/pelvis");
+                || jointName.find("Pelvis") != std::string::npos || jointName.find("pelvis") != std::string::npos
+                || jointName.find("delta") != std::string::npos || jointName.find("Delta") != std::string::npos)
+                strippedAny |= stripTrack(j, "name match: hip/pelvis/delta");
         }
 
-        // Fallback: if nothing matched by name (non-Mixamo rig), strip the
-        // topmost joint with translation keys.  Ozz orders joints depth-first,
-        // so the first populated track is the uppermost bone carrying motion.
-        if (!strippedAny) {
+        // Belt-and-braces: ALWAYS also freeze the joint that travels the most
+        // horizontally — that is the bone actually carrying baked locomotion
+        // displacement, found regardless of naming. A "topmost track" heuristic
+        // can't be used: every joint gets a single rest-pose translation key
+        // (above), so the first populated track is a static structural node.
+        {
+            int moverJoint = -1;
+            float bestSpan = 0.0f;
             for (int j = 0; j < numJoints; ++j) {
-                if (!raw.tracks[static_cast<size_t>(j)].translations.empty()) {
-                    stripTrack(j, "fallback: topmost translation track");
-                    break;
+                const auto& tr = raw.tracks[static_cast<size_t>(j)].translations;
+                if (tr.size() < 2)
+                    continue;
+                float minX = tr.front().value.x, maxX = minX;
+                float minZ = tr.front().value.z, maxZ = minZ;
+                for (const auto& key : tr) {
+                    minX = std::min(minX, key.value.x);
+                    maxX = std::max(maxX, key.value.x);
+                    minZ = std::min(minZ, key.value.z);
+                    maxZ = std::max(maxZ, key.value.z);
+                }
+                const float span = (maxX - minX) + (maxZ - minZ);
+                if (span > bestSpan) {
+                    bestSpan = span;
+                    moverJoint = j;
                 }
             }
+            if (moverJoint >= 0 && bestSpan > 0.5f)
+                strippedAny |= stripTrack(moverJoint, "largest-horizontal-travel mover");
         }
+        (void)strippedAny;
     }
 
     if (!raw.Validate()) {
