@@ -1378,6 +1378,41 @@ bool Game::init(AppContext& ctx)
     {
         const char* base = SDL_GetBasePath();
         const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
+
+        // Animated first-person R-301 viewmodel (its own skinned rig + clips).
+        {
+            const std::string vmPath = std::string(base ? base : "") + "assets/apex_r301.glb";
+            if (weaponVm_.load(vmPath)) {
+                weaponVmLoaded_ = renderer->setViewmodelRig(weaponVm_.buildRigSources(), weaponVm_.numJoints());
+                // Bind the R-301's diffuse texture (from its loaded static model) to the skinned viewmodel.
+                renderer->setViewmodelTexture(weaponModelIndices_[static_cast<std::size_t>(WeaponType::Rifle)]);
+                SDL_Log("[client] R-301 viewmodel: %d joints, installed=%d",
+                        weaponVm_.numJoints(),
+                        static_cast<int>(weaponVmLoaded_));
+            } else {
+                SDL_Log("[client] WARNING: R-301 viewmodel (apex_r301.glb) failed to load");
+            }
+
+            // First-person Wraith arms (hands) — second skinned viewmodel rig,
+            // driven by the SAME clips so the hands hold the animating gun.
+            const std::string armsPath = std::string(base ? base : "") + "assets/apex_r301_arms.glb";
+            if (weaponVmArms_.load(armsPath)) {
+                weaponVmArmsLoaded_ =
+                    renderer->setViewmodelArmsRig(weaponVmArms_.buildRigSources(), weaponVmArms_.numJoints());
+                // Load the arms GLB as a hidden static model purely to register its embedded textures.
+                weaponVmArmsModelIdx_ = renderer->loadSceneModel("apex_r301_arms.glb", glm::vec3{0.0f}, 1.0f, true);
+                if (weaponVmArmsModelIdx_ >= 0) {
+                    renderer->setModelScenePass(weaponVmArmsModelIdx_, false);
+                    renderer->setViewmodelArmsTexture(weaponVmArmsModelIdx_);
+                }
+                SDL_Log("[client] R-301 arms viewmodel: %d joints, installed=%d",
+                        weaponVmArms_.numJoints(),
+                        static_cast<int>(weaponVmArmsLoaded_));
+            } else {
+                SDL_Log("[client] WARNING: R-301 arms (apex_r301_arms.glb) failed to load");
+            }
+        }
+
         const std::string rigPath = assetsDir + "standard_walk.fbx";
         if (!charRig_.loadFromFBX(rigPath)) {
             SDL_Log("[client] WARNING: rig load failed — animated characters disabled");
@@ -4783,6 +4818,10 @@ SDL_AppResult Game::iterate()
                     }
                 });
 
+                // The R-301 plays a real reload animation, so suppress the
+                // legacy "weapon-down" drop for it.
+                if (weaponVmLoaded_ && currentEquippedType_ == WeaponType::Rifle)
+                    reloadOffset = 0.0f;
                 reloadDownwardOffset_ = reloadOffset;
             }
 
@@ -4962,6 +5001,64 @@ SDL_AppResult Game::iterate()
                 cachedMuzzleValid_ = true;
             }
         }
+        // --- Animated R-301 first-person viewmodel (skinned, replaces the
+        // static gun model + the weapon-down reload with the real Apex clips) ---
+        if (weaponVmLoaded_ && currentEquippedType_ == WeaponType::Rifle && vm.visible) {
+            bool reloading = false;
+            float reloadTotal = 0.0f;
+            registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+                const GunInstance& gun = getEquippedGun(ws);
+                const WeaponConfig& cfg = getWeaponConfig(gun.type);
+                reloading = gun.isReloading;
+                reloadTotal = cfg.reloadTime;
+            });
+
+            // On equip, play the draw clip — it ENDS at the "ready" pose, which
+            // is the pose-space all the other clips (reload/etc.) live in.  This
+            // is the idle base; holding draw's last frame == ready.  (Do NOT use
+            // the skeleton bind pose as idle — it is ~13u off from the animated
+            // poses and makes reload appear to jump/vanish out of frame.)
+            if (!weaponVmEquipped_) {
+                weaponVm_.playClip("draw", /*loop=*/false, 1.0f);
+                if (weaponVmArmsLoaded_)
+                    weaponVmArms_.playClip("draw", /*loop=*/false, 1.0f);
+                weaponVmEquipped_ = true;
+                weaponVmReloadActive_ = false;
+            }
+            if (reloading && !weaponVmReloadActive_) {
+                const float clipDur = weaponVm_.clipDuration("reload");
+                const float speed = (reloadTotal > 0.05f && clipDur > 0.05f) ? (clipDur / reloadTotal) : 1.0f;
+                weaponVm_.playClip("reload", /*loop=*/false, speed);
+                if (weaponVmArmsLoaded_)
+                    weaponVmArms_.playClip("reload", /*loop=*/false, speed);
+                weaponVmReloadActive_ = true;
+            } else if (!reloading && weaponVmReloadActive_) {
+                // Reload ends back at the ready pose, so just hold its last frame.
+                weaponVmReloadActive_ = false;
+            }
+            weaponVm_.update(frameTime);
+
+            SkinnedInstance inst;
+            inst.worldTransform = vm.transform;
+            inst.paletteBase = 0;
+            renderer->setViewmodelFrame(weaponVm_.skinMatrices(), {inst});
+
+            // Hands ride the same clip + the same viewmodel transform as the gun.
+            if (weaponVmArmsLoaded_) {
+                weaponVmArms_.update(frameTime);
+                renderer->setViewmodelArmsFrame(weaponVmArms_.skinMatrices(), {inst});
+            }
+
+            // The animated skinned gun + hands replace the static gun + viewmodel hands.
+            vm.visible = false;
+            vm.hands.right.visible = false;
+            vm.hands.left.visible = false;
+        } else {
+            weaponVmEquipped_ = false; // re-draw next time the rifle is equipped
+            renderer->setViewmodelFrame({}, {});
+            renderer->setViewmodelArmsFrame({}, {});
+        }
+
         renderer->setWeaponViewmodel(vm);
     }
     phaseSnap(phaseStats.viewmodelMs);

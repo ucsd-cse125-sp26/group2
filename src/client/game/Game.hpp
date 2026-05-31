@@ -7,6 +7,7 @@
 #include "animation/AnimationLibrary.hpp"
 #include "animation/AnimationTesterUI.hpp"
 #include "animation/CharacterRig.hpp"
+#include "animation/WeaponViewmodelAnim.hpp"
 #include "animation/SkinningBackend.hpp"
 #include "app/AppContext.hpp"
 #include "debug/ClientPerfRecorder.hpp"
@@ -648,6 +649,13 @@ private:
     int gripPoseTuneWeaponIdx_ = 0;        ///< Which weapon's grip pose is being authored in the tweaker UI.
     float aimAssistParityAccumSec_ = 0.0f; ///< Seconds since the last aim-assist parity check log line (Phase F).
     AnimationLibrary animLibrary_;         ///< Collection of ozz clips on the shared rig.
+    WeaponViewmodelAnim weaponVm_;         ///< Animated first-person R-301 viewmodel (gun rig + clips).
+    bool weaponVmLoaded_ = false;          ///< True once apex_r301.glb loaded into weaponVm_.
+    bool weaponVmReloadActive_ = false;    ///< Edge-trigger so the reload clip plays once per reload.
+    bool weaponVmEquipped_ = false;        ///< Edge-trigger so the draw clip plays once on rifle equip.
+    WeaponViewmodelAnim weaponVmArms_;     ///< First-person Wraith arms (hands), same clips as the gun.
+    bool weaponVmArmsLoaded_ = false;
+    int weaponVmArmsModelIdx_ = -1;        ///< Hidden static model of the arms GLB (for its textures).
     CpuLbsSkinningBackend skinBackend_;    ///< Phase-1 CPU linear-blend-skinning backend.
     AnimationTesterState animUI_;          ///< Persistent state for the Animation Tester panel.
     HitboxRig clientHitboxRig_;            ///< Hitbox definitions for client-side debug visualization.

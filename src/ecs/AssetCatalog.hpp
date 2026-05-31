@@ -59,10 +59,10 @@ inline const AssetDefinition kMedkitModel{
 
 inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAssets{{
     {.name = "weapon_rifle",
-     .filename = "assault_rifle.glb",
+     .filename = "apex_r301.glb", // Apex R-301 (first-person viewmodel mesh); ~34u native, so ~1.0 scale.
      .role = AssetRole::Entity,
      .flipUVs = true,
-     .renderScale = {20.0f, 20.0f, 20.0f}},
+     .renderScale = {1.0f, 1.0f, 1.0f}},
     {.name = "weapon_rocket",
      .filename = "rocket_launcher.glb",
      .role = AssetRole::Entity,

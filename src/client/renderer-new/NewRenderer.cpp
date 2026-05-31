@@ -148,6 +148,8 @@ bool NewRenderer::init(SDL_Window* window)
     camera_ = NewCamera();
 
     skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
+    viewmodelSkinned_.init(device_, colorTarget_, shaderFormat_, /*textured=*/true);
+    viewmodelArmsSkinned_.init(device_, colorTarget_, shaderFormat_, /*textured=*/true);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
     staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
@@ -349,6 +351,8 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
         if (copyPass) {
             skinnedRenderer_.uploadFrame(cmd, copyPass);
+            viewmodelSkinned_.uploadFrame(cmd, copyPass);
+            viewmodelArmsSkinned_.uploadFrame(cmd, copyPass);
             SDL_EndGPUCopyPass(copyPass);
         }
     }
@@ -617,6 +621,9 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
 void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
     skinnedRenderer_.draw(renderPass, cmd);
+    // Animated first-person weapon viewmodel shares the skinned pipeline/format.
+    viewmodelSkinned_.draw(renderPass, cmd);
+    viewmodelArmsSkinned_.draw(renderPass, cmd);
 }
 
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth)
@@ -858,6 +865,8 @@ void NewRenderer::quit()
         }
 
         skinnedRenderer_.shutdown();
+        viewmodelSkinned_.shutdown();
+        viewmodelArmsSkinned_.shutdown();
 
         if (geometryPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, geometryPipeline_);
@@ -1120,4 +1129,62 @@ bool NewRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJoints
 void NewRenderer::setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
 {
     skinnedRenderer_.setFrame(palette, instances);
+}
+
+bool NewRenderer::setViewmodelRig(const std::vector<RigMeshSource>& meshes, int numJoints)
+{
+    return viewmodelSkinned_.setRig(meshes, numJoints);
+}
+
+void NewRenderer::setViewmodelFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
+{
+    viewmodelSkinned_.setFrame(palette, instances);
+}
+
+void NewRenderer::setViewmodelTexture(int modelInstanceIndex)
+{
+    if (modelInstanceIndex < 0 || static_cast<size_t>(modelInstanceIndex) >= Asset::modelInstances_.size())
+        return;
+    const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
+    if (!Asset::models_.contains(modelId))
+        return;
+    Asset::Model& model = Asset::models_.at(modelId);
+    for (auto& element : model.modelElements_) {
+        if (!Asset::materials_.contains(element.materialId_))
+            continue;
+        const Asset::Material& mat = Asset::materials_.at(element.materialId_);
+        if (Asset::textures_.contains(mat.diffuseTexture)) {
+            viewmodelSkinned_.setDiffuseTexture(Asset::textures_.at(mat.diffuseTexture).tex, sampler_);
+            return;
+        }
+    }
+}
+
+bool NewRenderer::setViewmodelArmsRig(const std::vector<RigMeshSource>& meshes, int numJoints)
+{
+    return viewmodelArmsSkinned_.setRig(meshes, numJoints);
+}
+
+void NewRenderer::setViewmodelArmsFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
+{
+    viewmodelArmsSkinned_.setFrame(palette, instances);
+}
+
+void NewRenderer::setViewmodelArmsTexture(int modelInstanceIndex)
+{
+    if (modelInstanceIndex < 0 || static_cast<size_t>(modelInstanceIndex) >= Asset::modelInstances_.size())
+        return;
+    const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
+    if (!Asset::models_.contains(modelId))
+        return;
+    Asset::Model& model = Asset::models_.at(modelId);
+    for (auto& element : model.modelElements_) {
+        if (!Asset::materials_.contains(element.materialId_))
+            continue;
+        const Asset::Material& mat = Asset::materials_.at(element.materialId_);
+        if (Asset::textures_.contains(mat.diffuseTexture)) {
+            viewmodelArmsSkinned_.setDiffuseTexture(Asset::textures_.at(mat.diffuseTexture).tex, sampler_);
+            return;
+        }
+    }
 }

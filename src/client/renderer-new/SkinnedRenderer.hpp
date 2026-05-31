@@ -50,7 +50,16 @@ public:
     /// the device exists.  Does NOT allocate any GPU resources yet; those
     /// are created lazily on the first `setRig` / `setFrame` call.
     /// @param device  Borrowed; the device must outlive this SkinnedRenderer.
-    void init(SDL_GPUDevice* device, SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat);
+    /// @param textured  When true, this instance uses a textured fragment
+    /// shader (samples a diffuse texture set via setDiffuseTexture) instead of
+    /// the untextured debug shader.  Used by the first-person weapon viewmodel.
+    void init(SDL_GPUDevice* device,
+              SDL_GPUTextureFormat& colorTarget,
+              const SDL_GPUShaderFormat& shaderFormat,
+              bool textured = false);
+
+    /// @brief Diffuse texture + sampler bound for all meshes when textured.
+    void setDiffuseTexture(SDL_GPUTexture* tex, SDL_GPUSampler* sampler);
 
     /// @brief Install the shared character rig.  Call ONCE after `init`.
     /// @param meshes     One source-mesh entry per skinned mesh in the rig (typically 1-3 for humanoid rigs).
@@ -185,6 +194,11 @@ private:
     bool rigInstalled_ = false;
     int numJoints_ = 0;
     std::vector<SkinnedMesh> skinnedMeshes_;
+
+    // Textured mode (first-person weapon viewmodel) ──────────────────────────
+    bool textured_ = false;
+    SDL_GPUTexture* diffuseTex_ = nullptr;   ///< Borrowed; bound when textured_.
+    SDL_GPUSampler* diffuseSampler_ = nullptr;
 
     // ─── Owned: per-frame GPU resources (grow on demand) ─────────────────────
     // SDL_GPUBuffer* palettesSsbo_ = nullptr;  ///< STORAGE_READ, mat4[numInstances * numJoints].

@@ -161,13 +161,13 @@ struct RecoilParams
 inline const ViewmodelParams& getViewmodelParams(WeaponType type)
 {
     static constexpr std::array<ViewmodelParams, kRenderableWeaponTypeCount> k_params{{
-        // Rifle — existing tuning
-        {.scale = 39.0f,
-         .forward = 78.0f,
-         .right = 37.0f,
-         .down = -11.0f,
+        // Rifle (Apex R-301) — tuned for the apex_r301.glb animated viewmodel (ready pose).
+        {.scale = 1.0f,
+         .forward = 0.0f,
+         .right = 0.0f,
+         .down = 0.0f,
          .yawOffset = 0.0f,
-         .pitchOffset = -1.0f,
+         .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
         // Rocket — fallback to rifle tuning
         {.scale = 39.0f,

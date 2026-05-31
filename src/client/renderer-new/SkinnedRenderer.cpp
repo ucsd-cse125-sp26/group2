@@ -20,9 +20,11 @@
 
 void SkinnedRenderer::init(SDL_GPUDevice* device,
                            SDL_GPUTextureFormat& colorTarget,
-                           const SDL_GPUShaderFormat& shaderFormat)
+                           const SDL_GPUShaderFormat& shaderFormat,
+                           bool textured)
 {
     device_ = device;
+    textured_ = textured;
     // No GPU allocations here — buffers and pipeline are created on demand
     // (setRig allocates the rig mesh buffers; setFrame triggers SSBO growth).
     //
@@ -193,6 +195,12 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette, const std:
     frameDirty_ = !instances.empty();
 }
 
+void SkinnedRenderer::setDiffuseTexture(SDL_GPUTexture* tex, SDL_GPUSampler* sampler)
+{
+    diffuseTex_ = tex;
+    diffuseSampler_ = sampler;
+}
+
 bool SkinnedRenderer::ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes)
 {
     auto growBuf = [&](SDL_GPUBuffer*& buf, Uint32& cap, Uint32 want, SDL_GPUBufferUsageFlags use) {
@@ -294,6 +302,12 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
 
     SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
+    if (textured_ && diffuseTex_ && diffuseSampler_) {
+        SDL_GPUTextureSamplerBinding texBind{};
+        texBind.texture = diffuseTex_;
+        texBind.sampler = diffuseSampler_;
+        SDL_BindGPUFragmentSamplers(renderPass, 0, &texBind, 1);
+    }
     for (auto sm : skinnedMeshes_) {
         if (!sm.vb || !sm.boneVb || !sm.ib) {
             continue;
@@ -394,8 +408,10 @@ bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, 
     vertexShader.storageBufferCount = 2;
 
     Boilerplate::ShaderInfo fragmentShader{};
-    fragmentShader.path = "shaders-new/debug.frag";
+    fragmentShader.path = textured_ ? "shaders-new/skinned_geometry_textured.frag" : "shaders-new/debug.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    if (textured_)
+        fragmentShader.samplerCount = 1; // diffuse (set 2, binding 0)
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;

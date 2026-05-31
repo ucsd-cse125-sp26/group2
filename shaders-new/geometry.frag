@@ -48,7 +48,6 @@ void main()
     float cosT = max(0.0f, dot(-light_direction, normal));
     vec4 irradiance = light_color * cosT + ambient_color;
 
-    albedo.rgb *= (normal * 0.5f) + 0.5f;
     vec3 diffuse = albedo.rgb * (1.0 - metallic) * irradiance.rgb;
     vec3 metal = albedo.rgb * metallic * light_color.rgb * cosT * (1.0 - 0.5 * roughness);
     color = vec4(diffuse + metal, albedo.a);
