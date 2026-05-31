@@ -57,7 +57,7 @@ layout(location = 0) out vec4 color;
 // Just a single directional light for now...
 //const vec3 light_direction = normalize(-vec3(1.0f,1.0f,1.0f));
 //const vec4 light_color = vec4(1.0f,1.0f,1.0f,1.0f);
-const vec3 ambient_color = vec3(0.08f, 0.08f,0.12f); // dark-blue
+const vec3 ambient_color = 0.5f * vec3(0.08f, 0.08f,0.12f); // dark-blue
 //const vec3 ambient_color = normalize(vec3(0.08f, 0.08f,0.12f)); // dark-blue
 //const vec3 ambient_color = vec3(0.0f, 0.0f,0.0f); // dark-black
 
