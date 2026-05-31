@@ -1,5 +1,5 @@
 /// @file PrematchBanner.hpp
-/// @brief Pre-match overlay: warmup waiting message + countdown integer.
+/// @brief Match phase overlay: warmup waiting message, countdown integer, and post-match result.
 #pragma once
 
 #include "hud/HudWidget.hpp"
@@ -14,4 +14,5 @@ struct PrematchBanner : HudWidget
 private:
     MatchPhase phase_ = MatchPhase::IN_PROGRESS;
     float timeRemaining_ = 0.f;
+    bool matchWon_ = false;
 };

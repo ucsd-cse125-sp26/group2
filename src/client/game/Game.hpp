@@ -698,6 +698,7 @@ private:
 
     // Match State
     MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.
+    ClientId currentWinnerId = ClientId{-1};          ///< ClientId of the current match winner, if in POSTMATCH.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
     bool returnToLobbyRequested = false;         ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
     bool returnToMainMenuRequested_ = false;     ///< Latched true when the pause menu or disconnect requests leaving.

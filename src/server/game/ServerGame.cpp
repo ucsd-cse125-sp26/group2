@@ -673,7 +673,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // unicast to the shooter after the broadcast events block below.
     std::vector<net::shotdebug::ShotDebugCapture> shotDebugReports;
     std::vector<net::shotdebug::ShotDebugCapture>* shotDebugSink = shotDebugEnabled_ ? &shotDebugReports : nullptr;
-    const bool inputAllowed = matchController.getCurrentPhase() != MatchPhase::COUNTDOWN;
+    const bool inputAllowed = isGameplayInputAllowed(matchController.getCurrentPhase());
     {
         // PR-27: stash pending SHOT_INTENTs onto each shooter as a
         // transient `PendingShotIntent` component, keyed by the
@@ -1431,4 +1431,15 @@ void ServerGame::resetPlayersForCountdown()
             registry.emplace_or_replace<WeaponState>(player, weaponState);
             registry.emplace_or_replace<GrenadeState>(player, makeDefaultGrenadeState());
         });
+}
+
+bool ServerGame::isGameplayInputAllowed(MatchPhase phase) const
+{
+    switch (phase) {
+    case MatchPhase::COUNTDOWN:
+    case MatchPhase::FINISHED:
+        return false;
+    default:
+        return true;
+    }
 }

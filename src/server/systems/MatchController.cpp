@@ -23,7 +23,6 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
         break;
     }
     case MatchPhase::COUNTDOWN: {
-        // NOTE: Can still kill players during countdown.
         countdownTimer -= deltaTime;
         if (countdownTimer <= 0.0f) {
             SDL_Log("MatchController: countdown finished, starting match");
@@ -33,8 +32,9 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
         break;
     }
     case MatchPhase::IN_PROGRESS: {
-        if (systems::handleWinCondition(registry, config.killsToWin)) {
+        if (const auto matchWinner = systems::handleWinCondition(registry, config.killsToWin)) {
             SDL_Log("MatchController: player has won, ending match");
+            winnerId = matchWinner->value;
             currentPhase = MatchPhase::FINISHED;
             countdownTimer = k_finishedDuration;
         }
@@ -44,6 +44,7 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
         countdownTimer -= deltaTime;
         if (countdownTimer <= 0.0f) {
             SDL_Log("MatchController: finished duration elapsed");
+            winnerId = -1;
             currentPhase = MatchPhase::LOBBY;
             countdownTimer = 0.0f;
             systems::resetStats(registry);

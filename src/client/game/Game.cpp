@@ -1315,6 +1315,7 @@ bool Game::init(AppContext& ctx)
     });
 
     client->onMatchStateUpdate([this](const MatchStatePacket& packet) {
+        currentWinnerId = ClientId{packet.winnerId};
         currentMatchPhase = packet.phase;
         countdownTimer = packet.countdownTimer;
         if (packet.phase == MatchPhase::LOBBY)
@@ -2343,7 +2344,8 @@ SDL_AppResult Game::iterate()
     // Chat owns the keyboard while open, so gameplay inputs are cleared
     // instead of sampled.
     const bool gamePaused = pauseMenu.isOpen();
-    const bool gameplayInputAllowed = currentMatchPhase != MatchPhase::COUNTDOWN;
+    const bool gameplayInputAllowed =
+        currentMatchPhase != MatchPhase::COUNTDOWN && currentMatchPhase != MatchPhase::FINISHED;
 
     if (gamePaused || !gameplayInputAllowed) {
         clearGameplayInputForChat();
@@ -5831,6 +5833,8 @@ SDL_AppResult Game::iterate()
         // ── Kill feed: convert KillFeedEvent → HudKillFeedEntry ──
         ClientId localClientId{-1};
         registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+        hudState.matchWon =
+            currentMatchPhase == MatchPhase::FINISHED && localClientId.value != -1 && currentWinnerId == localClientId;
 
         thread_local std::vector<HudKillFeedEntry> hudKillEntries;
         hudKillEntries.clear();
