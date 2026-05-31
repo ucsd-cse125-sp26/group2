@@ -850,6 +850,18 @@ void Server::networkLoop()
             }
             SDL_Delay(1);
         }
+
+        std::vector<std::uint64_t> connectionIds;
+        {
+            std::shared_lock<std::shared_mutex> lock(stateMutex_);
+            connectionIds.reserve(clients.size());
+            for (const auto& [_, conn] : clients) {
+                if (conn.connectionId != 0)
+                    connectionIds.push_back(conn.connectionId);
+            }
+        }
+        for (std::uint64_t connectionId : connectionIds)
+            session_.disconnect(connectionId);
         return;
     }
 
@@ -1421,6 +1433,13 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         eventQueue.enqueue(event);
         break;
     }
+    case PacketType::GAMEPLAY_READY: {
+        Event event{};
+        event.type = EventType::GameplayReady;
+        event.clientId = conn.clientId;
+        eventQueue.enqueue(event);
+        break;
+    }
     default:
         SDL_Log("Server: received unknown packet type %d", static_cast<int>(type));
         break;
@@ -1804,12 +1823,19 @@ bool Server::sendVoiceFrameToClients(std::span<const ClientId> recipients,
 bool Server::sendLobbyStateToClient(ClientId clientId, const std::vector<LobbyPlayer>& players)
 {
     const auto count = static_cast<uint32_t>(players.size());
-    // Wire format: [PacketType:1B][localClientId:4B][count:4B][players:count*sizeof(LobbyPlayer)]
-    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(int) + sizeof(uint32_t) + count * sizeof(LobbyPlayer));
+    const auto nameLen = static_cast<std::uint8_t>(std::min<std::size_t>(discoveryConfig_.serverName.size(), 255));
+    // Wire format:
+    // [PacketType:1B][localClientId:4B][count:4B][players:count*sizeof(LobbyPlayer)][serverNameLen:1B][serverName]
+    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(int) + sizeof(uint32_t) + count * sizeof(LobbyPlayer) +
+                             sizeof(std::uint8_t) + nameLen);
     buf[0] = static_cast<uint8_t>(PacketType::LOBBY_STATE);
     std::memcpy(buf.data() + 1, &clientId.value, sizeof(int));
     std::memcpy(buf.data() + 1 + sizeof(int), &count, sizeof(uint32_t));
-    std::memcpy(buf.data() + 1 + sizeof(int) + sizeof(uint32_t), players.data(), count * sizeof(LobbyPlayer));
+    std::uint8_t* payload = buf.data() + 1 + sizeof(int) + sizeof(uint32_t);
+    std::memcpy(payload, players.data(), count * sizeof(LobbyPlayer));
+    payload += count * sizeof(LobbyPlayer);
+    *payload++ = nameLen;
+    std::memcpy(payload, discoveryConfig_.serverName.data(), nameLen);
     return sendToClient(clientId, buf.data(), static_cast<int>(buf.size()));
 }
 

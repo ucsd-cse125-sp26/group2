@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "network/MatchStatus.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -293,8 +295,11 @@ struct HudGameState
     float roundTimeRemaining = 0.f;
     bool isAlive = true;
     bool isBuyPhase = false;
+    MatchPhase currentPhase = MatchPhase::IN_PROGRESS; ///< Current server match phase.
+    bool matchWon = false;                             ///< True if the local player won the finished match.
+    bool forceScoreboardOpen = false;                  ///< True when match flow should show scoreboard automatically.
     bool isReloading = false;
-    float reloadProgress = 0.0f; ///< 0-1
+    float reloadProgress = 0.0f;                       ///< 0-1
 
     // Events (valid for this frame only).
     std::span<const HudKillFeedEntry> killFeedEvents;

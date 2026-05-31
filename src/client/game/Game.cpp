@@ -1315,6 +1315,7 @@ bool Game::init(AppContext& ctx)
     });
 
     client->onMatchStateUpdate([this](const MatchStatePacket& packet) {
+        currentWinnerId = ClientId{packet.winnerId};
         currentMatchPhase = packet.phase;
         countdownTimer = packet.countdownTimer;
         if (packet.phase == MatchPhase::LOBBY)
@@ -1594,6 +1595,8 @@ bool Game::init(AppContext& ctx)
 #endif
 
     SDL_Log("[client] local player spawned at (0, 200, 0), physicsHz=%d", k_physicsHz);
+
+    client->sendGameplayReady();
     return true;
 }
 
@@ -2341,8 +2344,10 @@ SDL_AppResult Game::iterate()
     // Chat owns the keyboard while open, so gameplay inputs are cleared
     // instead of sampled.
     const bool gamePaused = pauseMenu.isOpen();
+    const bool gameplayInputAllowed =
+        currentMatchPhase != MatchPhase::COUNTDOWN && currentMatchPhase != MatchPhase::FINISHED;
 
-    if (gamePaused) {
+    if (gamePaused || !gameplayInputAllowed) {
         clearGameplayInputForChat();
     } else if (chatOpen_)
         clearGameplayInputForChat();
@@ -2357,7 +2362,7 @@ SDL_AppResult Game::iterate()
     registry.view<PlayerVisState, LocalPlayer>().each(
         [&](const PlayerVisState& vis) { localGravFlipped = vis.gravityFlipped; });
 
-    if (mouseCaptured && !chatOpen_ && !gamePaused) {
+    if (mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
@@ -2449,7 +2454,7 @@ SDL_AppResult Game::iterate()
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
 
         // Movement keys: sample once for this whole group of ticks.
-        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused) {
+        if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
             systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
             // Gamepad movement is sampled on the same cadence and ORs into
             // the same flags so kbm + pad stay coherent under physics-sync.
@@ -2528,7 +2533,11 @@ SDL_AppResult Game::iterate()
             // don't have `PlayerSimState` on the client).
             registry.view<LocalPlayer, Position, PreviousPosition>().each(
                 [](const Position& pos, PreviousPosition& prev) { prev.value = pos.value; });
-            systems::runPrediction(registry, k_physicsDt, physics::activeWorld());
+            if (gameplayInputAllowed) {
+                systems::runPrediction(registry, k_physicsDt, physics::activeWorld());
+            } else {
+                registry.view<LocalPlayer, Velocity>().each([](Velocity& vel) { vel = Velocity{}; });
+            }
             storePredictedPlayerState(clientPredictTick);
 
             ++tickCount;
@@ -5823,10 +5832,14 @@ SDL_AppResult Game::iterate()
         // ── Round timer / buy phase ──
         hudState.roundTimeRemaining = countdownTimer;
         hudState.isBuyPhase = (currentMatchPhase == MatchPhase::WARMUP || currentMatchPhase == MatchPhase::COUNTDOWN);
+        hudState.currentPhase = currentMatchPhase;
+        hudState.forceScoreboardOpen = currentMatchPhase == MatchPhase::FINISHED && countdownTimer <= 10.0f;
 
         // ── Kill feed: convert KillFeedEvent → HudKillFeedEntry ──
         ClientId localClientId{-1};
         registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+        hudState.matchWon =
+            currentMatchPhase == MatchPhase::FINISHED && localClientId.value != -1 && currentWinnerId == localClientId;
 
         thread_local std::vector<HudKillFeedEntry> hudKillEntries;
         hudKillEntries.clear();

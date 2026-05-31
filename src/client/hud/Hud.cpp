@@ -22,6 +22,7 @@
 #include "widgets/Minimap.hpp"
 #include "widgets/PickupNotification.hpp"
 #include "widgets/PickupPrompt.hpp"
+#include "widgets/PrematchBanner.hpp"
 #include "widgets/RailgunScopeWidget.hpp"
 #include "widgets/Scoreboard.hpp"
 #include "widgets/ShotgunPelletWidget.hpp"
@@ -212,4 +213,7 @@ void Hud::createWidgets()
     // TeamStatusBar is intentionally omitted in the Voidfall design.
     widgets_.push_back(std::make_unique<Scoreboard>());
     widgets_.push_back(std::make_unique<PickupPrompt>());
+
+    // Pre-match overlay (warmup waiting message + countdown integer).
+    widgets_.push_back(std::make_unique<PrematchBanner>());
 }

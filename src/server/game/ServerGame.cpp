@@ -15,6 +15,7 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/HealthPackSpawner.hpp"
@@ -35,6 +36,7 @@
 #include "ecs/components/PowerupState.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnPoint.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
@@ -55,6 +57,7 @@
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/JumpPadSystem.hpp"
 #include "ecs/systems/KillzoneSystem.hpp"
+#include "ecs/systems/MatchSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
@@ -99,6 +102,14 @@ std::vector<AbilityType> chooseTwoAbilities(const std::array<AbilityType, N>& po
         choices.erase(choices.begin() + static_cast<std::ptrdiff_t>(idx));
     }
     return selected;
+}
+
+AbilityState resetAbilityProgressForMatchStart(const AbilityState& current)
+{
+    AbilityState reset{};
+    reset.primaryChoices = current.primaryChoices;
+    reset.secondaryChoices = current.secondaryChoices;
+    return reset;
 }
 } // namespace
 
@@ -391,6 +402,7 @@ void ServerGame::eventHandler(const Event& event)
     case EventType::Disconnected: {
         GROUP2_PROF_SCOPE("eventDisconnected");
         lobbyManager.removePlayer(event.clientId);
+        matchController.removeExpectedPlayer(event.clientId);
         deletePlayerEntity(event.clientId);
         break;
     }
@@ -524,6 +536,11 @@ void ServerGame::eventHandler(const Event& event)
 
         SDL_Log("ServerGame: host clientId %u requested server shutdown", event.clientId.value);
         shutdown();
+        break;
+    }
+    case EventType::GameplayReady: {
+        GROUP2_PROF_SCOPE("eventGameplayReady");
+        matchController.markGameplayReady(event.clientId);
         break;
     }
     default:
@@ -665,6 +682,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // unicast to the shooter after the broadcast events block below.
     std::vector<net::shotdebug::ShotDebugCapture> shotDebugReports;
     std::vector<net::shotdebug::ShotDebugCapture>* shotDebugSink = shotDebugEnabled_ ? &shotDebugReports : nullptr;
+    const bool inputAllowed = isGameplayInputAllowed(matchController.getCurrentPhase());
     {
         // PR-27: stash pending SHOT_INTENTs onto each shooter as a
         // transient `PendingShotIntent` component, keyed by the
@@ -697,18 +715,16 @@ void ServerGame::tick(float dt, Uint64 nextTick)
                 registry.remove<PendingShotIntent>(entity);
             }
         }
-        GROUP2_PROF_SCOPE("weapon");
-        systems::runWeapon(registry, dt, particleEvents, pendingKillEvents, shotDebugSink);
-    }
-    {
-        GROUP2_PROF_SCOPE("ability");
-        systems::runAbility(registry, abilityRegistry, dt);
-    }
-    {
-        GROUP2_PROF_SCOPE("movement");
-        systems::runMovement(registry, dt, physics::activeWorld());
-    }
-    {
+        if (inputAllowed) {
+            GROUP2_PROF_SCOPE("weapon");
+            systems::runWeapon(registry, dt, particleEvents, pendingKillEvents, shotDebugSink);
+            GROUP2_PROF_SCOPE("ability");
+            systems::runAbility(registry, abilityRegistry, dt);
+            GROUP2_PROF_SCOPE("movement");
+            systems::runMovement(registry, dt, physics::activeWorld());
+        } else {
+            registry.view<Player, Velocity>().each([](Velocity& vel) { vel = Velocity{}; });
+        }
         GROUP2_PROF_SCOPE("collision");
         systems::runCollision(registry, dt, physics::activeWorld());
     }
@@ -793,7 +809,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
                 if (lobbyManager.hostStartMatch(lobbyStartRequester)) {
                     selectMatchAbilityPool();
                     server->resetAppliedInputTicks();
-                    matchController.hostStartedMatch();
+                    matchController.hostStartedMatch(lobbyManager.playerIds());
                     matchController.update(dt, registry, *server);
                 } else {
                     server->broadcastMatchStatus(MatchStatePacket{
@@ -807,8 +823,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
             const MatchPhase previousPhase = matchController.getCurrentPhase();
             matchController.update(dt, registry, *server);
             if (previousPhase != MatchPhase::COUNTDOWN && matchController.getCurrentPhase() == MatchPhase::COUNTDOWN) {
+                // toggle movement on countdown + reset positions
                 selectMatchAbilityPool();
                 server->resetAppliedInputTicks();
+                resetPlayersForCountdown();
             }
             if (previousPhase != MatchPhase::LOBBY && matchController.getCurrentPhase() == MatchPhase::LOBBY)
                 lobbyManager.resetReadyStatuses();
@@ -1376,4 +1394,72 @@ bool ServerGame::setIdleShutdownMinutes(int minutes)
     lastNonEmptyMs_ = SDL_GetTicks();
 
     return true;
+}
+
+void ServerGame::resetPlayersForCountdown()
+{
+    const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
+    const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
+
+    systems::resetStats(registry);
+
+    registry.view<Player, Position, Velocity, PlayerVisState, PlayerSimState, CollisionShape>().each(
+        [&](entt::entity player,
+            Position& pos,
+            Velocity& vel,
+            PlayerVisState& vis,
+            PlayerSimState& sim,
+            CollisionShape&) {
+            pos.value = systems::chooseAndResolveSpawnPosition(registry, player);
+            vel = Velocity{};
+            vis = PlayerVisState{};
+            sim = PlayerSimState{};
+
+            systems::destroyRagdoll(registry, player);
+            registry.remove<RespawnTimer>(player);
+            registry.remove<DeathInfo>(player);
+            if (auto* renderable = registry.try_get<Renderable>(player)) {
+                renderable->visible = true;
+            }
+            registry.emplace_or_replace<InputSnapshot>(player);
+            registry.emplace_or_replace<Health>(player, Health{});
+
+            WeaponState weaponState{};
+            weaponState.current = WeaponSlot::PRIMARY;
+            getSlot(weaponState, WeaponSlot::PRIMARY) = GunInstance{
+                .type = WeaponType::Rifle,
+                .totalAmmo = rifleConfig.defaultAmmoCapacity,
+                .currentMagAmmo = rifleConfig.magazineSize,
+                .fireCooldown = 0.0f,
+            };
+            getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
+                .type = WeaponType::RailGun,
+                .totalAmmo = railConfig.defaultAmmoCapacity,
+                .currentMagAmmo = railConfig.magazineSize,
+                .fireCooldown = 0.0f,
+            };
+
+            registry.emplace_or_replace<WeaponState>(player, weaponState);
+            registry.emplace_or_replace<GrenadeState>(player, makeDefaultGrenadeState());
+            registry.emplace_or_replace<PowerupState>(player, PowerupState{});
+
+            if (const auto* abilityState = registry.try_get<AbilityState>(player)) {
+                registry.emplace_or_replace<AbilityState>(player, resetAbilityProgressForMatchStart(*abilityState));
+            } else {
+                AbilityState freshAbilityState{};
+                applyMatchAbilityChoices(freshAbilityState);
+                registry.emplace<AbilityState>(player, freshAbilityState);
+            }
+        });
+}
+
+bool ServerGame::isGameplayInputAllowed(MatchPhase phase) const
+{
+    switch (phase) {
+    case MatchPhase::COUNTDOWN:
+    case MatchPhase::FINISHED:
+        return false;
+    default:
+        return true;
+    }
 }

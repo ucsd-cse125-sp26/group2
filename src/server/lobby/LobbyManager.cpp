@@ -109,6 +109,13 @@ bool LobbyManager::hostStartMatch(ClientId sender)
         return false;
     }
 
+    if (players.size() < 2) {
+        SDL_Log("LobbyManager: rejecting START_MATCH from host %u because the lobby has only %zu player(s)",
+                sender.value,
+                players.size());
+        return false;
+    }
+
     int nonHostCount = 0;
     for (const auto& player : players) {
         if (player.isHost)
@@ -147,4 +154,13 @@ void LobbyManager::sendLobbyStateToAllPlayers()
     for (const auto& player : players) {
         server->sendLobbyStateToClient(player.id, players);
     }
+}
+
+std::vector<ClientId> LobbyManager::playerIds() const
+{
+    std::vector<ClientId> ids;
+    for (const auto& player : players) {
+        ids.push_back(player.id);
+    }
+    return ids;
 }

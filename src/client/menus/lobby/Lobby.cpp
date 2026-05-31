@@ -36,6 +36,8 @@ bool Lobby::init(AppContext& ctx)
     client->onLobbyState([this](const std::vector<LobbyPlayer>& snapshot, ClientId localId) {
         players = snapshot;
         localClientId = localId;
+        if (const auto latestServerName = client->getLatestServerName(); latestServerName && !latestServerName->empty())
+            serverName = *latestServerName;
     });
 
     client->onLobbyUpdate([this](const LobbyUpdateEvent& update) {
@@ -112,6 +114,9 @@ bool Lobby::init(AppContext& ctx)
     if (const auto latestLobbyState = client->getLatestLobbyState()) {
         players = latestLobbyState->first;
         localClientId = latestLobbyState->second;
+    }
+    if (const auto latestServerName = client->getLatestServerName(); latestServerName && !latestServerName->empty()) {
+        serverName = *latestServerName;
     }
 
     if (const auto latestMatchConfig = client->getLatestMatchConfig()) {
@@ -209,6 +214,9 @@ std::optional<MatchStatePacket> Lobby::consumeStartMatchState()
 
 bool Lobby::canHostStartMatch() const
 {
+    if (players.size() < 2)
+        return false;
+
     for (const auto& player : players) {
         if (player.isHost)
             continue;
