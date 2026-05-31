@@ -52,14 +52,11 @@ void spawnDroppedWeapon(Registry& registry,
 }
 
 /// @brief Try to grant the dropped weapon to a player.
-/// @param pendingDrops  Collects any swap-out gun to re-drop (spawned after
-///                      iteration to avoid invalidating the active view).
 /// @return True if the entity should be destroyed (pickup happened).
 inline bool tryPickup(Registry& registry,
                       Position dropPos,
                       CollisionShape dropShape,
-                      const DroppedWeapon& dw,
-                      std::vector<PendingWeaponDrop>& pendingDrops)
+                      const DroppedWeapon& dw)
 {
     bool consumed = false;
     auto view = registry.view<Player, Position, CollisionShape, InputSnapshot, WeaponState, PlayerVisState>();
@@ -118,17 +115,10 @@ inline bool tryPickup(Registry& registry,
             if (!canAcceptType(targetSlot, dw.type))
                 return;
             GunInstance& slot = getSlot(weapon, targetSlot);
-            // Drop the gun currently in the slot so the player doesn't silently
-            // lose it. Toss it to the player's side so it doesn't sit on top of
-            // the new pickup, with a brief pickup-immunity so it isn't re-grabbed.
-            const glm::vec3 rightAxis{std::cos(input.yaw), 0.0f, -std::sin(input.yaw)};
-            const glm::vec3 dropFrom = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.4f * eyeDir, 0.0f};
-            pendingDrops.push_back(PendingWeaponDrop{
-                .pos = dropFrom,
-                .vel = rightAxis * 180.0f + glm::vec3{0.0f, 120.0f * eyeDir, 0.0f},
-                .gun = slot,
-                .pickupDelay = k_swapDropPickupDelay,
-            });
+            // Dropped-weapon pickups are consumed outright. Unlike world
+            // spawners, they should not immediately create a replacement drop
+            // for the weapon being swapped out, because that reads as the
+            // picked-up entity failing to disappear.
             slot = GunInstance{
                 .type = dw.type,
                 .totalAmmo = dw.totalAmmo,
@@ -143,15 +133,14 @@ inline bool tryPickup(Registry& registry,
 
 void runDroppedWeapons(Registry& registry, float dt)
 {
-    // Two-phase: collect entities to destroy and any swap-out drops, then apply
-    // them. Avoids mutating the view's storage mid-iteration.
+    // Two-phase: collect entities to destroy, then apply after iteration.
+    // Avoids mutating the view's storage mid-iteration.
     std::vector<entt::entity> toDestroy;
-    std::vector<PendingWeaponDrop> pendingDrops;
     auto view = registry.view<DroppedWeapon, Position, CollisionShape>();
     view.each([&](entt::entity e, DroppedWeapon& dw, const Position& pos, const CollisionShape& shape) {
         if (dw.pickupDelay > 0.0f) {
             dw.pickupDelay = std::max(0.0f, dw.pickupDelay - dt);
-        } else if (tryPickup(registry, pos, shape, dw, pendingDrops)) {
+        } else if (tryPickup(registry, pos, shape, dw)) {
             toDestroy.push_back(e);
             return;
         }
@@ -162,9 +151,6 @@ void runDroppedWeapons(Registry& registry, float dt)
     });
     for (entt::entity e : toDestroy) {
         registry.destroy(e);
-    }
-    for (const PendingWeaponDrop& d : pendingDrops) {
-        spawnDroppedWeapon(registry, d.pos, d.vel, d.gun, d.pickupDelay);
     }
 }
 

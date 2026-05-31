@@ -116,6 +116,10 @@ constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponN
     "Rifle", "Rocket", "RailGun", "EnergyGun", "Shotgun"};
 constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponDisplayNames{
     "Rifle (R-301)", "Rocket", "RailGun (Triple Take)", "EnergyGun (Wingman)", "Shotgun"};
+struct DroppedWeaponRenderableTag
+{
+};
+
 // (kThirdPersonWeaponPitchMax was used by the removed buildThirdPersonWeaponAttachment;
 // the bone-parented weapon path doesn't pitch-clamp the weapon — the spine bend
 // max-pitch in CharacterAnimator handles that.)
@@ -6842,9 +6846,26 @@ void Game::refreshRemoteHealthPackRenderables()
 
 void Game::refreshDroppedWeaponRenderables()
 {
+    std::vector<entt::entity> staleDroppedWeaponRenderables;
+    registry.view<Renderable, DroppedWeaponRenderableTag>().each([&](entt::entity e, const Renderable&) {
+        if (registry.all_of<DroppedWeapon, Position, CollisionShape>(e))
+            return;
+
+        staleDroppedWeaponRenderables.push_back(e);
+    });
+    for (entt::entity e : staleDroppedWeaponRenderables) {
+        if (auto* rend = registry.try_get<Renderable>(e)) {
+            rend->visible = false;
+            rend->modelIndex = -1;
+        }
+        if (registry.all_of<DroppedWeaponRenderableTag>(e))
+            registry.remove<DroppedWeaponRenderableTag>(e);
+    }
+
     registry.view<Position, DroppedWeapon, CollisionShape>().each(
         [&](entt::entity e, const Position&, const DroppedWeapon& dw, const CollisionShape&) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            registry.emplace_or_replace<DroppedWeaponRenderableTag>(e);
             const int weaponIndex = static_cast<int>(dw.type);
             if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
                 weaponAssetIds_[static_cast<std::size_t>(weaponIndex)] < 0)
