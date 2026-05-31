@@ -4,6 +4,7 @@
 #pragma once
 
 #include "config/InputBindings.hpp"
+#include "config/UserSettings.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -285,8 +286,11 @@ inline void runWeaponKeys(Registry& registry, const InputBindings& bindings)
 
 /// @brief Legacy combined sampler — calls both runMouseLook and runMovementKeys.
 /// @param registry          The ECS registry.
-/// @param mouseSensitivity  Radians per pixel (default 0.001).
-inline void runInputSample(Registry& registry, const InputBindings& bindings, float mouseSensitivity = 0.001f)
+/// @param mouseSensitivity  Radians per pixel.
+inline void runInputSample(
+    Registry& registry,
+    const InputBindings& bindings,
+    float mouseSensitivity = user_settings::kDefaultMouseSensitivity)
 {
     runMouseLook(registry, mouseSensitivity);
     runMovementKeys(registry, bindings);

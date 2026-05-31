@@ -3,6 +3,7 @@
 
 #include "debug/DebugUI.hpp"
 
+#include "config/UserSettings.hpp"
 #include "client/systems/GamepadAimAssistSystem.hpp"
 #include "ecs/components/AbilityState.hpp"
 #include "ecs/components/CollisionShape.hpp"
@@ -287,8 +288,15 @@ void DebugUI::buildInspectorContents(const Registry& registry,
     // Settings
     ImGui::SeparatorText("Settings");
 
-    // Logarithmic slider so both ends of the range are equally reachable.
-    ImGui::SliderFloat("Mouse Sensitivity", &mouseSensitivity, 0.0001f, 0.0200f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    float displayedMouseSensitivity = mouseSensitivity * user_settings::kMouseSensitivityDisplayScale;
+    ImGui::SliderFloat("Mouse Sensitivity",
+                       &displayedMouseSensitivity,
+                       user_settings::kMinMouseSensitivity * user_settings::kMouseSensitivityDisplayScale,
+                       user_settings::kMaxMouseSensitivity * user_settings::kMouseSensitivityDisplayScale,
+                       "%.3f");
+    mouseSensitivity = std::clamp(displayedMouseSensitivity / user_settings::kMouseSensitivityDisplayScale,
+                                  user_settings::kMinMouseSensitivity,
+                                  user_settings::kMaxMouseSensitivity);
 
     // Gamepad right-stick look speed in radians/second at full deflection.
     // Linear feels right here — the useful range is much narrower than mouse
