@@ -111,7 +111,12 @@ void main()
 
     }
 
-    albedo.rgb *= (normal * 0.5f) + 0.5f;
+    // Normal-direction tint as a cheap spatial-orientation aid for the world
+    // (gated by MaterialFlags._pad0).  The first-person viewmodel pushes this
+    // flag as 0 so the gun/hands show their true textures.
+    if (materialFlags._pad0 != 0u) {
+        albedo.rgb *= (normal * 0.5f) + 0.5f;
+    }
     vec3 diffuse = albedo.rgb * (1.0 - metallic) * irradiance;
     vec3 metal = albedo.rgb * metallic * irradiance * (1.0 - 0.5 * roughness);
     color = vec4(diffuse + metal, albedo.a);

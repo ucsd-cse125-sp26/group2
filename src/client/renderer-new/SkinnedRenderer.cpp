@@ -303,10 +303,24 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
     SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
     if (textured_ && diffuseTex_ && diffuseSampler_) {
-        SDL_GPUTextureSamplerBinding texBind{};
-        texBind.texture = diffuseTex_;
-        texBind.sampler = diffuseSampler_;
-        SDL_BindGPUFragmentSamplers(renderPass, 0, &texBind, 1);
+        // Bind diffuse to material slots 0,1,2 (geometry_shadowed.frag declares
+        // diffuse/normal/mr); normal+mr are disabled via MaterialFlags so the
+        // duplicate binds are harmless and slots are never left unbound.  The 2
+        // point-light shadow cubemaps (slots 3,4) and the light UBO (frag uniform
+        // slot 2) persist from NewRenderer::bindLightShadowInfo this pass.
+        SDL_GPUTextureSamplerBinding b{};
+        b.texture = diffuseTex_;
+        b.sampler = diffuseSampler_;
+        SDL_GPUTextureSamplerBinding binds[3] = {b, b, b};
+        SDL_BindGPUFragmentSamplers(renderPass, 0, binds, 3);
+
+        glm::vec4 materialDiffuse(1.0f, 1.0f, 1.0f, 1.0f);
+        SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
+        struct MaterialFlags
+        {
+            Uint32 useTexture, useNormalTexture, useMetallicRoughnessTexture, pad;
+        } flags{1u, 0u, 0u, 0u};
+        SDL_PushGPUFragmentUniformData(cmd, 1, &flags, sizeof(flags));
     }
     for (auto sm : skinnedMeshes_) {
         if (!sm.vb || !sm.boneVb || !sm.ib) {
@@ -408,10 +422,15 @@ bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, 
     vertexShader.storageBufferCount = 2;
 
     Boilerplate::ShaderInfo fragmentShader{};
-    fragmentShader.path = textured_ ? "shaders-new/skinned_geometry_textured.frag" : "shaders-new/debug.frag";
+    // Textured viewmodel shares the world's lit shader so it gets the same
+    // point lights + shadows (the shadow maps + light UBO are already bound on
+    // the geometry pass by NewRenderer::bindLightShadowInfo).
+    fragmentShader.path = textured_ ? "shaders-new/geometry_shadowed.frag" : "shaders-new/debug.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    if (textured_)
-        fragmentShader.samplerCount = 1; // diffuse (set 2, binding 0)
+    if (textured_) {
+        fragmentShader.samplerCount = 5;       // diffuse, normal, mr + 2 point-light shadow cubemaps
+        fragmentShader.uniformBufferCount = 3; // Material, MaterialFlags, lightBlock
+    }
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;

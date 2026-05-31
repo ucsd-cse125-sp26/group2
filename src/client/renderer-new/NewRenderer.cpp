@@ -712,7 +712,7 @@ void NewRenderer::drawModel(ModelIdInt modelId,
             useTexture ? 1u : 0u,
             normalTexture != texture_ ? 1u : 0u,
             metallicRoughnessTexture != texture_ ? 1u : 0u,
-            0u,
+            1u, // _pad0 repurposed: apply normal-direction tint (world spatial-orientation aid)
         };
         SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
         SDL_PushGPUFragmentUniformData(cmd, 1, &materialFlags, sizeof(materialFlags));
