@@ -57,6 +57,7 @@
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/JumpPadSystem.hpp"
 #include "ecs/systems/KillzoneSystem.hpp"
+#include "ecs/systems/MatchSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
@@ -101,6 +102,14 @@ std::vector<AbilityType> chooseTwoAbilities(const std::array<AbilityType, N>& po
         choices.erase(choices.begin() + static_cast<std::ptrdiff_t>(idx));
     }
     return selected;
+}
+
+AbilityState resetAbilityProgressForMatchStart(const AbilityState& current)
+{
+    AbilityState reset{};
+    reset.primaryChoices = current.primaryChoices;
+    reset.secondaryChoices = current.secondaryChoices;
+    return reset;
 }
 } // namespace
 
@@ -1392,6 +1401,8 @@ void ServerGame::resetPlayersForCountdown()
     const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
     const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
 
+    systems::resetStats(registry);
+
     registry.view<Player, Position, Velocity, PlayerVisState, PlayerSimState, CollisionShape>().each(
         [&](entt::entity player,
             Position& pos,
@@ -1430,6 +1441,15 @@ void ServerGame::resetPlayersForCountdown()
 
             registry.emplace_or_replace<WeaponState>(player, weaponState);
             registry.emplace_or_replace<GrenadeState>(player, makeDefaultGrenadeState());
+            registry.emplace_or_replace<PowerupState>(player, PowerupState{});
+
+            if (const auto* abilityState = registry.try_get<AbilityState>(player)) {
+                registry.emplace_or_replace<AbilityState>(player, resetAbilityProgressForMatchStart(*abilityState));
+            } else {
+                AbilityState freshAbilityState{};
+                applyMatchAbilityChoices(freshAbilityState);
+                registry.emplace<AbilityState>(player, freshAbilityState);
+            }
         });
 }
 
