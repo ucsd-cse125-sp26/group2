@@ -5,8 +5,6 @@
 
 #include <cstdint>
 
-inline constexpr std::uint8_t kInvalidGrenadeSelectIndex = 0xff;
-
 /// @brief One tick of player input, stamped with the tick it was sampled on.
 ///
 /// Sent client → server each tick.
@@ -41,10 +39,10 @@ struct InputSnapshot
     std::int8_t debugSetSecondaryWeapon{-1};
     bool killSelf{false};                                        ///< Debug: kill self (rising-edge only).
     bool skipRespawn{false};                                     ///< Skip respawn timer (space while dead).
-    bool throwGrenade{false};                                    ///< Quick G press: throw the selected grenade.
-    bool grenadeMenuHeld{false};                                 ///< True while the held-G radial menu is open.
-    std::uint8_t grenadeSelectIndex{kInvalidGrenadeSelectIndex}; ///< Hovered radial grenade index, or invalid.
-    bool ability1{false};                                        ///< Activate ability 1
+    bool throwGrenade{false};      ///< Tap-G (no cycle): throw the selected grenade. Edge-pulsed once.
+    bool grenadeCycleNext{false};  ///< Hold-G + Shoot: select next grenade type. Edge-pulsed once.
+    bool grenadeCyclePrev{false};  ///< Hold-G + Scope: select previous grenade type. Edge-pulsed once.
+    bool ability1{false};          ///< Activate ability 1
     bool ability2{false};                                        ///< Activate ability 2
     bool abilitySelectHeld{false};                               ///< True while holding the ability-selection modifier.
     bool abilitySelectLeft{false};      ///< Choose the left pending ability option (edge-triggered).

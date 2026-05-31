@@ -72,6 +72,7 @@
 #include "perf/Parallel.hpp"
 #include "perf/Profiler.hpp"
 #include "perf/ShotLog.hpp"
+#include "server/game/LagCompMath.hpp"
 #include "server/systems/HitboxHistorySystem.hpp"
 
 #include <SDL3/SDL.h>
@@ -1202,12 +1203,16 @@ void ServerGame::updateLagCompTargets()
     {
         uint16_t rttMs;
         uint8_t interpDelaySnapshots;
+        uint16_t interpDelayMs;
     };
     static thread_local std::unordered_map<ClientId, NetCacheEntry> netById;
     netById.clear();
     netById.reserve(netCache.size());
     for (const auto& s : netCache)
-        netById.emplace(s.id, NetCacheEntry{.rttMs = s.rttMs, .interpDelaySnapshots = s.interpDelaySnapshots});
+        netById.emplace(
+            s.id,
+            NetCacheEntry{
+                .rttMs = s.rttMs, .interpDelaySnapshots = s.interpDelaySnapshots, .interpDelayMs = s.interpDelayMs});
 
     // Snapshot interval in physics ticks — used to convert the
     // client's interpDelaySnapshots into a tick count.  Read from
@@ -1223,24 +1228,25 @@ void ServerGame::updateLagCompTargets()
         const auto netIt = netById.find(clientId);
         const uint16_t rttMs = (netIt != netById.end()) ? netIt->second.rttMs : 0;
         const uint8_t interpDelaySnapshots = (netIt != netById.end()) ? netIt->second.interpDelaySnapshots : 0;
-        // PR-20.7: full-RTT (NOT half-RTT) in ticks.  Round-to-nearest
-        // via integer-only `(rttMs * Hz + 500) / 1000`.  See the long
-        // header comment on this function for the derivation; in
-        // short, our client renders remote players at
-        // `most_recent_snapshot_apply − cl_interp` rather than
-        // predicting them forward to estimated server-now, so the
-        // rewind has to absorb both the inbound and outbound legs of
-        // the RTT — not just the outbound half.
-        const uint32_t rttTicks = (static_cast<uint32_t>(rttMs) * static_cast<uint32_t>(tickRateHz) + 500u) / 1000u;
+        const uint16_t interpDelayMs = (netIt != netById.end()) ? netIt->second.interpDelayMs : 0;
 
-        // PR-12: client render-delay term.  The client renders remote
-        // entities at `most_recent_apply − interpDelaySnapshots ×
-        // snapshotInterval`; the rewind subtracts this on top of the
-        // full-RTT term so the server lands on exactly the historical
-        // capsule state the client SAW on screen at fire time.
-        const uint32_t interpDelayTicks = static_cast<uint32_t>(interpDelaySnapshots) * snapshotEveryNTicksLocal;
-
-        const uint32_t lagTicks = std::min<uint32_t>(rttTicks + interpDelayTicks, k_maxLagCompTicks);
+        // PR-20.7: full-RTT (NOT half-RTT) — our client renders remotes at
+        // `most_recent_snapshot_apply − cl_interp` rather than predicting
+        // them forward to estimated server-now, so the rewind absorbs both
+        // RTT legs.  PR-12: plus the client's render-delay term so the
+        // server lands on exactly the historical capsule state the client
+        // SAW on screen at fire time.  PR-31: that render-delay term now
+        // prefers the client's *measured* `interpDelayMs` (EMA of observed
+        // snapshot cadence) over `interpDelaySnapshots × nominal cadence`,
+        // so the rewind tracks the real render time under jitter / warm-up;
+        // it falls back to the snapshot-count path when ms is 0.  See
+        // server::lagcomp::computeRewindTicks for the full derivation.
+        const uint32_t lagTicks = server::lagcomp::computeRewindTicks(rttMs,
+                                                                      interpDelayMs,
+                                                                      interpDelaySnapshots,
+                                                                      snapshotEveryNTicksLocal,
+                                                                      static_cast<uint32_t>(tickRateHz),
+                                                                      k_maxLagCompTicks);
         const uint32_t targetTick = (lagTicks == 0 || lagTicks >= currentServerTick)
                                         ? 0u // explicit "no rewind" sentinel
                                         : (currentServerTick - lagTicks);

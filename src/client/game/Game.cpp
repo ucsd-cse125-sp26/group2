@@ -16,6 +16,7 @@
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
+#include "config/InputBindings.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
 #include "ecs/abilities/AbilityTuning.hpp"
@@ -1685,8 +1686,16 @@ void Game::appendLocalChatMessage(std::string_view message)
 
 void Game::clearGameplayInputForChat()
 {
-    systems::grenadeRadialActive = false;
     systems::pendingGrenadeThrow = false;
+    systems::pendingGrenadeCycleNext = false;
+    systems::pendingGrenadeCyclePrev = false;
+    systems::grenadeCycledThisHold = false;
+    systems::prevGrenadeCycleNext = false;
+    systems::prevGrenadeCyclePrev = false;
+    systems::prevGamepadGrenadeKey = false;
+    systems::gamepadGrenadeCycledThisHold = false;
+    systems::prevGamepadGrenadeCycleNext = false;
+    systems::prevGamepadGrenadeCyclePrev = false;
     systems::prevKillSelfKey = false;
     systems::prevGrenadeKey = false;
     systems::prevAbilitySelectLeft = false;
@@ -1713,8 +1722,8 @@ void Game::clearGameplayInputForChat()
         snap.killSelf = false;
         snap.skipRespawn = false;
         snap.throwGrenade = false;
-        snap.grenadeMenuHeld = false;
-        snap.grenadeSelectIndex = kInvalidGrenadeSelectIndex;
+        snap.grenadeCycleNext = false;
+        snap.grenadeCyclePrev = false;
         snap.ability1 = false;
         snap.ability2 = false;
         snap.abilitySelectHeld = false;
@@ -1733,6 +1742,30 @@ SDL_AppResult Game::event(SDL_Event* event)
 
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
+
+    // Track the last-used input device so HUD prompts show the matching glyphs.
+    // Keyboard/mouse activity flips back to KBM; gamepad buttons or stick/trigger
+    // motion past a deadzone flip to Controller (a raw deadzone keeps stick drift
+    // from stealing the glyphs from a mouse player who happens to have a pad
+    // plugged in).
+    switch (event->type) {
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_MOTION:
+    case SDL_EVENT_MOUSE_WHEEL:
+        lastInputDevice_ = BindingDevice::KeyboardMouse;
+        break;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        lastInputDevice_ = BindingDevice::Controller;
+        break;
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+        // SDL axes are int16; ~40% deflection clears stick/trigger rest noise.
+        if (std::abs(event->gaxis.value) > 13000)
+            lastInputDevice_ = BindingDevice::Controller;
+        break;
+    default:
+        break;
+    }
 
     // Resize HUD offscreen target when the window pixel size changes.
     if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
@@ -2408,7 +2441,7 @@ SDL_AppResult Game::iterate()
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
             systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
-        systems::runWeaponKeys(registry, userSettings->inputBindings, frameTime);
+        systems::runWeaponKeys(registry, userSettings->inputBindings);
 
         // Gamepad samplers run AFTER kbm so they OR into the same flags —
         // a player can use kbm and pad simultaneously without either source
@@ -2488,11 +2521,15 @@ SDL_AppResult Game::iterate()
     int ticksThisFrame = 0;
     bool grantAbilityLevelThisFrame = false;
     bool throwGrenadeThisFrame = false;
+    bool grenadeCycleNextThisFrame = false;
+    bool grenadeCyclePrevThisFrame = false;
 
     if (accumulator >= k_physicsDt) {
         grantAbilityLevelThisFrame = debugUI.pendingAbilityLevelGrant_;
         debugUI.pendingAbilityLevelGrant_ = false;
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
+        grenadeCycleNextThisFrame = systems::consumePendingGrenadeCycleNext();
+        grenadeCyclePrevThisFrame = systems::consumePendingGrenadeCyclePrev();
 
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
@@ -2563,7 +2600,12 @@ SDL_AppResult Game::iterate()
             registry.view<InputSnapshot, LocalPlayer>().each([this, grantAbilityLevelThisFrame](InputSnapshot& snap) {
                 snap.tick = clientPredictTick;
                 snap.debugGrantAbilityLevel = grantAbilityLevelThisFrame;
+                // Grenade throw/cycle are edge events: keep them false during
+                // prediction ticks so the local sim never double-applies them.
+                // They're stamped onto the sent snapshot once, after the loop.
                 snap.throwGrenade = false;
+                snap.grenadeCycleNext = false;
+                snap.grenadeCyclePrev = false;
             });
             registry.view<LocalPlayer, InputSnapshot>().each(
                 [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
@@ -2593,9 +2635,17 @@ SDL_AppResult Game::iterate()
         // ticks are pulled from `Client::inputRing_` (which the
         // sendInputSnapshot path appends to internally).
         registry.view<LocalPlayer, InputSnapshot>().each(
-            [throwGrenadeThisFrame](InputSnapshot& snap) { snap.throwGrenade = throwGrenadeThisFrame; });
+            [throwGrenadeThisFrame, grenadeCycleNextThisFrame, grenadeCyclePrevThisFrame](InputSnapshot& snap) {
+                snap.throwGrenade = throwGrenadeThisFrame;
+                snap.grenadeCycleNext = grenadeCycleNextThisFrame;
+                snap.grenadeCyclePrev = grenadeCyclePrevThisFrame;
+            });
         systems::runInputSend(registry, *client);
-        registry.view<LocalPlayer, InputSnapshot>().each([](InputSnapshot& snap) { snap.throwGrenade = false; });
+        registry.view<LocalPlayer, InputSnapshot>().each([](InputSnapshot& snap) {
+            snap.throwGrenade = false;
+            snap.grenadeCycleNext = false;
+            snap.grenadeCyclePrev = false;
+        });
 
         phaseSnap(phaseStats.physicsMs);
 
@@ -5821,6 +5871,7 @@ SDL_AppResult Game::iterate()
     if (hud_.getOutputTexture()) {
         HudGameState hudState{};
         hudState.bindings = &userSettings->inputBindings;
+        hudState.activeInputDevice = lastInputDevice_;
 
         // ── Local player health, armor, alive ──
         registry.view<LocalPlayer, Health>().each([&](const Health& hp) {
@@ -5866,10 +5917,6 @@ SDL_AppResult Game::iterate()
         registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& snap) {
             scopeHeld = snap.scoped;
             hudState.abilitySelection.modifierHeld = snap.abilitySelectHeld;
-            hudState.grenadeRadial.open = snap.grenadeMenuHeld;
-            if (snap.grenadeSelectIndex < kHudGrenadeSlots) {
-                hudState.grenadeRadial.selectedIndex = static_cast<int>(snap.grenadeSelectIndex);
-            }
         });
 
         // ── Weapon / ammo ──
@@ -6161,10 +6208,7 @@ SDL_AppResult Game::iterate()
                 const float cooldown = getGrenadeConfig(selected).throwCooldown;
                 hudState.equipment.grenadeCharge =
                     cooldown > 0.0f ? 1.0f - std::clamp(grenades.cooldown / cooldown, 0.0f, 1.0f) : 1.0f;
-                const int selectedIndex = static_cast<int>(grenadeTypeIndex(selected));
-                if (hudState.grenadeRadial.selectedIndex < 0) {
-                    hudState.grenadeRadial.selectedIndex = selectedIndex;
-                }
+                hudState.grenadeRadial.selectedIndex = static_cast<int>(grenadeTypeIndex(selected));
 
                 for (std::size_t i = 0; i < kGrenadeTypes.size() && i < hudState.grenadeRadial.items.size(); ++i) {
                     const WeaponType type = kGrenadeTypes[i];

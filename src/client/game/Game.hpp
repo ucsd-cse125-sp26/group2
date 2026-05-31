@@ -272,6 +272,10 @@ private:
     /// device on SDL_EVENT_GAMEPAD_REMOVED so we don't tear down a different
     /// controller when a second one disconnects.
     SDL_JoystickID activeGamepadId_ = 0;
+    /// @brief Last input device the player actually used, for HUD glyph
+    /// selection. Flips to Controller on gamepad button/stick/trigger input and
+    /// back to KeyboardMouse on key/mouse input. Value-init is KeyboardMouse (0).
+    BindingDevice lastInputDevice_{};
     /// @brief Right-stick look speed in radians per second at full deflection.
     /// 6.0 rad/s ≈ 343°/s — most testers found 3.0 too sluggish for tracking
     /// players during firefights; this is in line with mainstream console FPS

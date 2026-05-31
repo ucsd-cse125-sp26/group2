@@ -237,17 +237,19 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
     ImDrawList* background = ImGui::GetBackgroundDrawList();
     background->AddRectFilled({0.0f, 0.0f}, display, IM_COL32(0, 0, 0, 150));
 
-    const ImVec2 windowSize = settingsOpen ? ImVec2{740.0f, 760.0f} : ImVec2{420.0f, 250.0f};
     ImGui::SetNextWindowPos({display.x * 0.5f, display.y * 0.5f}, ImGuiCond_Always, {0.5f, 0.5f});
-    ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
 
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                                   ImGuiWindowFlags_NoSavedSettings;
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
+    if (settingsOpen) {
+        flags |= ImGuiWindowFlags_NoResize;
+        ImGui::SetNextWindowSize(ImVec2{740.0f, 760.0f}, ImGuiCond_Always);
+    } else {
+        // Auto-fit the compact pause page so it always fits its buttons and never scrolls.
+        flags |= ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+    }
     if (ImGui::Begin("Paused", nullptr, flags)) {
-        const float buttonWidth = ImGui::GetContentRegionAvail().x;
+        const float buttonWidth = settingsOpen ? ImGui::GetContentRegionAvail().x : 360.0f;
         if (!settingsOpen) {
-            menu_theme::heading("Game Paused");
-
             if (menu_theme::accentButton("Resume", {buttonWidth, 36.0f})) {
                 result.resumeGame = true;
             }

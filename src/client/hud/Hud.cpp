@@ -14,7 +14,6 @@
 #include "widgets/DamageNumberWidget.hpp"
 #include "widgets/EnemyWorldHealthBar.hpp"
 #include "widgets/EquipmentSlots.hpp"
-#include "widgets/GrenadeRadialWidget.hpp"
 #include "widgets/GrenadeSlotsWidget.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
@@ -193,7 +192,6 @@ void Hud::createWidgets()
     // Directional damage arcs around the reticle.
     widgets_.push_back(std::make_unique<DamageIndicator>());
     widgets_.push_back(std::make_unique<AbilitySelectionWidget>());
-    widgets_.push_back(std::make_unique<GrenadeRadialWidget>());
 
     // Top right: killfeed.
     widgets_.push_back(std::make_unique<KillFeed>());

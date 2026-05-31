@@ -47,7 +47,7 @@ void PickupPrompt::update(float /*dt*/, const HudGameState& state, HudTweenPool&
     visible = state.isAlive && state.pickupAvailable;
     weaponId_ = state.pickupWeaponId;
     if (state.bindings) {
-        keyLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Pickup));
+        keyLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Pickup, state.activeInputDevice));
     }
 }
 

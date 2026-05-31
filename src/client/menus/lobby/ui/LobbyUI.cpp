@@ -71,14 +71,17 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         }
 
         ImGui::BeginDisabled(config.startCountdownActive);
-        if (menu_theme::accentButton(localReady ? "Unready" : "Ready", ImVec2(150.0f, 0.0f))) {
+        const float actionSpacing = ImGui::GetStyle().ItemSpacing.x;
+        const float actionFullWidth = ImGui::GetContentRegionAvail().x;
+        const float actionWidth = config.isHost ? (actionFullWidth - actionSpacing) * 0.5f : actionFullWidth;
+        if (menu_theme::accentButton(localReady ? "Unready" : "Ready", ImVec2(actionWidth, 0.0f))) {
             result.readyChange = !localReady;
         }
 
         if (config.isHost) {
             ImGui::SameLine();
             ImGui::BeginDisabled(!config.canStartMatch);
-            if (menu_theme::accentButton("Start Match", ImVec2(150.0f, 0.0f))) {
+            if (menu_theme::accentButton("Start Match", ImVec2(actionWidth, 0.0f))) {
                 result.startMatchClicked = true;
             }
             ImGui::EndDisabled();

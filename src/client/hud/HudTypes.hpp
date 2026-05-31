@@ -13,6 +13,9 @@
 #include <string>
 
 class InputBindings;
+/// Opaque enum declaration — value 0 is KeyboardMouse (see config/InputBindings.hpp).
+/// Lets HudGameState store the active device without pulling in the full header.
+enum class BindingDevice : std::uint8_t;
 
 // ── Colors ──────────────────────────────────────────────────────────────────
 
@@ -284,6 +287,7 @@ struct HudShotgunBlast
 struct HudGameState
 {
     const InputBindings* bindings = nullptr; ///< Live input bindings for HUD key prompts.
+    BindingDevice activeInputDevice{};       ///< Last-used input device; selects KBM vs controller glyphs (0 == KBM).
 
     int health = 100, maxHealth = 100;
     int armor = 0, maxArmor = 100;

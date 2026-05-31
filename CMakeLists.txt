@@ -829,8 +829,6 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeSlotsWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeSlotsWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ChatWidget.cpp"
@@ -1883,6 +1881,20 @@ endif()
 set_compiler_warnings(audio_math_tests)
 enable_sanitizers(audio_math_tests)
 add_test(NAME audio_math_tests COMMAND audio_math_tests)
+
+add_executable(lag_comp_math_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/lag_comp_math_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/LagCompMath.hpp"
+)
+target_include_directories(lag_comp_math_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(lag_comp_math_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(lag_comp_math_tests)
+enable_sanitizers(lag_comp_math_tests)
+add_test(NAME lag_comp_math_tests COMMAND lag_comp_math_tests)
 
 add_executable(voice_jitter_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/voice_jitter_tests.cpp"

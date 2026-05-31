@@ -27,7 +27,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
             ImGui::TextUnformatted("Server Name");
             ImGui::TableSetColumnIndex(1);
             ImGui::BeginDisabled(inputs.serverRunning);
-            ImGui::SetNextItemWidth(240.0f);
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
             ImGui::InputText("##ServerName", &draft.serverName);
             draft.serverName = server_name::clampUtf8Bytes(draft.serverName);
             ImGui::EndDisabled();
@@ -36,14 +36,14 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
             ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted("Kill Threshold to Win");
             ImGui::TableSetColumnIndex(1);
-            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
             ImGui::SliderInt("##KillsToWin", &draft.killsToWin, 1, 100);
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted("Max Players");
             ImGui::TableSetColumnIndex(1);
-            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
             ImGui::SliderInt("##MaxPlayers", &draft.maxPlayers, 2, 128);
 
             ImGui::TableNextRow();
