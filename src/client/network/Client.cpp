@@ -53,6 +53,11 @@ ConnectError Client::init(const char* addr,
     }
 
     transportConfig_ = transport;
+    latestLobbyPlayers_.reset();
+    latestLobbyLocalId_.reset();
+    latestServerName_.reset();
+    latestMatchState_.reset();
+    latestMatchConfig_.reset();
 
     if (const char* envDelay = SDL_getenv("GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS")) {
         const int parsed = SDL_atoi(envDelay);
@@ -1408,16 +1413,29 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         constexpr std::uint32_t k_maxLobbyPlayers = 256;
         if (count > k_maxLobbyPlayers)
             break;
-        const size_t expectedSize =
-            sizeof(int) + sizeof(uint32_t) + static_cast<std::size_t>(count) * sizeof(LobbyPlayer);
-        if (static_cast<std::size_t>(payloadSize) != expectedSize)
+        const size_t playersOffset = sizeof(int) + sizeof(uint32_t);
+        const size_t playersBytes = static_cast<std::size_t>(count) * sizeof(LobbyPlayer);
+        const size_t minExpectedSize = playersOffset + playersBytes;
+        if (static_cast<std::size_t>(payloadSize) < minExpectedSize)
             break;
 
         std::vector<LobbyPlayer> players(count);
-        std::memcpy(players.data(), payload + sizeof(int) + sizeof(uint32_t), count * sizeof(LobbyPlayer));
+        std::memcpy(players.data(), payload + playersOffset, playersBytes);
+
+        std::optional<std::string> serverName;
+        if (static_cast<std::size_t>(payloadSize) > minExpectedSize) {
+            const auto nameLen = static_cast<std::uint8_t>(payload[minExpectedSize]);
+            const size_t expectedSize = minExpectedSize + sizeof(std::uint8_t) + nameLen;
+            if (static_cast<std::size_t>(payloadSize) != expectedSize)
+                break;
+            serverName =
+                std::string(reinterpret_cast<const char*>(payload + minExpectedSize + sizeof(std::uint8_t)), nameLen);
+        }
 
         latestLobbyPlayers_ = players;
         latestLobbyLocalId_ = localId;
+        if (serverName)
+            latestServerName_ = *serverName;
 
         if (lobbyStateFn_)
             lobbyStateFn_(players, localId);

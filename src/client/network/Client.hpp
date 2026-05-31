@@ -222,6 +222,9 @@ public:
     /// @brief Return the latest lobby roster received from the server, if any.
     std::optional<std::pair<std::vector<LobbyPlayer>, ClientId>> getLatestLobbyState() const;
 
+    /// @brief Return the latest server display name received from the server, if any.
+    std::optional<std::string> getLatestServerName() const { return latestServerName_; }
+
     /// @brief Latest server-acked client predict tick.
     ///
     /// Phase 5b: when the server applies an INPUT packet stamped with
@@ -416,7 +419,8 @@ private:
         latestMatchState_;                         ///< Most-recent MATCH_STATE packet; populated by dispatchMessage.
     std::optional<MatchConfig> latestMatchConfig_; ///< Most-recent MATCH_CONFIG packet; populated by dispatchMessage.
     std::optional<std::vector<LobbyPlayer>> latestLobbyPlayers_; ///< Most-recent lobby roster received from the server.
-    std::optional<ClientId> latestLobbyLocalId_; ///< This client's ID as reported in the LOBBY_STATE packet.
+    std::optional<ClientId> latestLobbyLocalId_;  ///< This client's ID as reported in the LOBBY_STATE packet.
+    std::optional<std::string> latestServerName_; ///< Server display name reported by the latest LOBBY_STATE packet.
 
     // ── PR-10 + PR-14 (server-perf): snapshot delta encoding state ────
     //
