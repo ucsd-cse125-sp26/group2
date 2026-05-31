@@ -31,11 +31,8 @@ void spawnDroppedWeapon(Registry& registry,
 {
     const entt::entity e = registry.create();
     registry.emplace<Position>(e, pos);
-    // Compact weapon-sized AABB so the model rests near the floor under
-    // gravity; the pickup overlap test still gets a generous catch radius
-    // once the player's own AABB is added in.
     CollisionShape dropShape{};
-    dropShape.halfExtents = glm::vec3{12.0f, 6.0f, 12.0f};
+    dropShape.halfExtents = k_weaponPickupHalfExtents;
     registry.emplace<CollisionShape>(e, dropShape);
     // Velocity + RigidBody so DynamicsSystem ticks it with gravity and resolves
     // it against the world. linearDamping bleeds momentum so it doesn't skid.
@@ -121,9 +118,9 @@ inline bool tryPickup(Registry& registry,
             if (!canAcceptType(targetSlot, dw.type))
                 return;
             GunInstance& slot = getSlot(weapon, targetSlot);
-            // Drop the gun currently in the slot so the player doesn't silently
-            // lose it. Toss it to the player's side so it doesn't sit on top of
-            // the new pickup, with a brief pickup-immunity so it isn't re-grabbed.
+            // Match weapon spawner swap behavior: consume the picked-up drop,
+            // then toss the weapon being replaced to the player's side with
+            // brief pickup-immunity so it is not instantly re-grabbed.
             const glm::vec3 rightAxis{std::cos(input.yaw), 0.0f, -std::sin(input.yaw)};
             const glm::vec3 dropFrom = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.4f * eyeDir, 0.0f};
             pendingDrops.push_back(PendingWeaponDrop{
@@ -163,11 +160,15 @@ void runDroppedWeapons(Registry& registry, float dt)
             toDestroy.push_back(e);
         }
     });
-    for (entt::entity e : toDestroy) {
-        registry.destroy(e);
-    }
+    // Spawn replacements before destroying consumed drops so EnTT cannot reuse
+    // the picked-up entity id for the swapped-out weapon in the same tick.
+    // This keeps the pickup removal visible as a real destroy/create pair to
+    // clients instead of a single dropped entity appearing to persist.
     for (const PendingWeaponDrop& d : pendingDrops) {
         spawnDroppedWeapon(registry, d.pos, d.vel, d.gun, d.pickupDelay);
+    }
+    for (entt::entity e : toDestroy) {
+        registry.destroy(e);
     }
 }
 

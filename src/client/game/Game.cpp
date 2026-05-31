@@ -116,6 +116,10 @@ constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponN
     "Rifle", "Rocket", "RailGun", "EnergyGun", "Shotgun"};
 constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponDisplayNames{
     "Rifle (R-301)", "Rocket", "RailGun (Triple Take)", "EnergyGun (Wingman)", "Shotgun"};
+struct DroppedWeaponRenderableTag
+{
+};
+
 // (kThirdPersonWeaponPitchMax was used by the removed buildThirdPersonWeaponAttachment;
 // the bone-parented weapon path doesn't pitch-clamp the weapon — the spine bend
 // max-pitch in CharacterAnimator handles that.)
@@ -156,13 +160,6 @@ std::optional<glm::vec3> findOptionalTestModelPosition()
             return spawner.pos + kOptionalTestModelRifleSpawnerOffset;
     }
     return std::nullopt;
-}
-
-glm::quat assetRotation(const AssetEntry& asset)
-{
-    const glm::vec3 r = glm::radians(asset.renderRotationDegrees);
-    return glm::angleAxis(r.y, glm::vec3{0.0f, 1.0f, 0.0f}) * glm::angleAxis(r.x, glm::vec3{1.0f, 0.0f, 0.0f}) *
-           glm::angleAxis(r.z, glm::vec3{0.0f, 0.0f, 1.0f});
 }
 
 WeaponSpawnerModelParams defaultSpawnerModelParams(WeaponType type)
@@ -5140,6 +5137,7 @@ SDL_AppResult Game::iterate()
             debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
             debugUI.buildContactDebugUI(hbVP, winWf, winHf);
             debugUI.buildWeaponSpawnerUI(registry, hbVP, winWf, winHf);
+            debugUI.buildDroppedWeaponUI(registry, hbVP, winWf, winHf);
             debugUI.buildSpawnPointUI(registry, hbVP, winWf, winHf);
             // PR-20: CSGO sv_showimpacts-style shot debug.  Window
             // toggles + ring-buffer slider + per-shot summary table;
@@ -6848,9 +6846,26 @@ void Game::refreshRemoteHealthPackRenderables()
 
 void Game::refreshDroppedWeaponRenderables()
 {
+    std::vector<entt::entity> staleDroppedWeaponRenderables;
+    registry.view<Renderable, DroppedWeaponRenderableTag>().each([&](entt::entity e, const Renderable&) {
+        if (registry.all_of<DroppedWeapon, Position, CollisionShape>(e))
+            return;
+
+        staleDroppedWeaponRenderables.push_back(e);
+    });
+    for (entt::entity e : staleDroppedWeaponRenderables) {
+        if (auto* rend = registry.try_get<Renderable>(e)) {
+            rend->visible = false;
+            rend->modelIndex = -1;
+        }
+        if (registry.all_of<DroppedWeaponRenderableTag>(e))
+            registry.remove<DroppedWeaponRenderableTag>(e);
+    }
+
     registry.view<Position, DroppedWeapon, CollisionShape>().each(
         [&](entt::entity e, const Position&, const DroppedWeapon& dw, const CollisionShape&) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
+            registry.emplace_or_replace<DroppedWeaponRenderableTag>(e);
             const int weaponIndex = static_cast<int>(dw.type);
             if (weaponIndex < 0 || weaponIndex >= static_cast<int>(kWeaponAssets.size()) ||
                 weaponAssetIds_[static_cast<std::size_t>(weaponIndex)] < 0)
@@ -6864,22 +6879,20 @@ void Game::refreshDroppedWeaponRenderables()
             const AssetEntry& asset = assets_.entry(assetId);
 
             rend.modelIndex = asset.modelIndex;
-            rend.scale = asset.renderScale;
+            const auto weaponIdx = static_cast<std::size_t>(weaponIndex);
+            const WeaponSpawnerModelParams& params = spawnerWeaponParams_[weaponIdx];
+            rend.scale = params.scale;
 
             // Same spin + bob treatment the spawners use, so dropped weapons
             // read as pickups at a glance.
-            static constexpr float k_dropSpinRadiansPerSec = glm::radians(45.0f);
-            static constexpr float k_dropBobAmplitude = 6.0f;
-            static constexpr float k_dropBobHz = 0.6f;
             static constexpr float k_twoPi = 6.28318530718f;
 
             const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
             rend.visible = true;
-            rend.orientation =
-                glm::angleAxis(t * k_dropSpinRadiansPerSec, glm::vec3{0.0f, 1.0f, 0.0f}) * assetRotation(asset);
-            rend.translation = asset.renderTranslation +
-                               glm::vec3{0.0f, std::sin(t * k_twoPi * k_dropBobHz) * k_dropBobAmplitude, 0.0f};
+            rend.orientation = spawnerModelRotation(params, t, true);
+            rend.translation = params.translation +
+                               glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
         });
 }
 
