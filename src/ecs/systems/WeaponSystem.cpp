@@ -629,6 +629,7 @@ inline void handleFire(Registry& registry,
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
             applyDamage(config.dps * dt * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+            applyBulletSlow(hit.entity, registry);
         }
 
         // Update BeamState (synced to clients via registry snapshot).
@@ -706,6 +707,7 @@ inline void handleFire(Registry& registry,
             auto outGoingDamage =
                 (config.damage + (config.chargeDamage * (gun.chargeTime / config.maxChargeTime))) * multiplier;
             chargeDealtDamage = applyDamage(outGoingDamage, hit.entity, shooter, registry, killEvents, hit.region);
+            applyBulletSlow(hit.entity, registry);
             if (hit.region == BodyRegion::Head && combatLogEnabled()) {
                 SDL_Log("[weapon] HEADSHOT! charge weapon hit %d in head for %.0f damage",
                         static_cast<int>(hit.entity),
@@ -785,6 +787,7 @@ inline void handleFire(Registry& registry,
                 const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
                 dealtDamage =
                     applyDamage(config.damage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+                applyBulletSlow(hit.entity, registry);
                 if (hit.region == BodyRegion::Head && combatLogEnabled()) {
                     SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",
                             static_cast<int>(shooter),
@@ -846,7 +849,7 @@ inline void handleFire(Registry& registry,
             // HUD widget reads per-pellet hit/headshot from the replicated
             // NetParticleEvents.
             static constexpr int k_pelletCount = 11;
-            static constexpr float k_spreadRad = 0.0436f; // ~2.5° (outer ring) — tightened 50%
+            static constexpr float k_spreadRad = 0.218f; // ~12.5° (outer ring) — 5× the original 0.0436 baseline
             // Pre-computed offsets in tangent plane. Order MUST match
             // ShotgunPelletWidget's k_pelletPositions so widget colours line
             // up with the actual ray that was fired.

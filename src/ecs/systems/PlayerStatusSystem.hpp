@@ -23,6 +23,16 @@ const float healingRate = 20.0f; ///< Passive healing amount per second.
 /// @param playerHealth Entity's health component (modified in place).
 void applyHeal(float amount, Health& playerHealth);
 
+/// @brief Refresh the bullet-hit movement slow on a player.
+///
+/// Sets the player's `PlayerSimState::bulletSlowTimer` to
+/// `tms::k_bulletHitSlowDuration`, so the next ground-movement tick clamps the
+/// wish speed to `k_bulletHitSlowFactor` of normal. Hitscan call sites in
+/// WeaponSystem invoke this alongside applyDamage so getting shot punishes the
+/// target's mobility; explosion / fire / killzone damage paths skip it.
+/// No-op if `player` lacks PlayerSimState (e.g. a hit dummy).
+void applyBulletSlow(entt::entity player, Registry& registry);
+
 /// @brief Apply damage to a player, splitting across armor then health.
 ///
 /// Resets the heal cooldown timer.  If health reaches zero, triggers death

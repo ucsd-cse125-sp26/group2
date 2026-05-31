@@ -21,10 +21,12 @@
 #include "ecs/components/PowerupState.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnTimer.hpp"
+#include "ecs/components/RigidBody.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/SweptCollision.hpp"
+#include "ecs/physics/TitanfallConstants.hpp"
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/DroppedWeaponSystem.hpp"
@@ -255,7 +257,21 @@ inline void handleDeath(entt::entity& player,
         auto spawnDrop = [&](const GunInstance& g, float side) {
             const entt::entity e = registry.create();
             registry.emplace<Position>(e, deathPos.value + rightAxis * (side * k_dropSideOffset));
-            registry.emplace<CollisionShape>(e);
+            // Compact weapon-sized AABB so the visual model rests near the
+            // floor under gravity. The pickup overlap test still gets a
+            // generous catch radius once the player's own AABB is added in.
+            CollisionShape dropShape{};
+            dropShape.halfExtents = glm::vec3{12.0f, 6.0f, 12.0f};
+            registry.emplace<CollisionShape>(e, dropShape);
+            // Give the entity a Velocity + RigidBody so DynamicsSystem ticks
+            // it with gravity and resolves it against the world. linearDamping
+            // bleeds momentum so the drop doesn't skid forever after the
+            // initial fall.
+            registry.emplace<Velocity>(e);
+            RigidBody rb{};
+            rb.linearDamping = 2.0f;
+            rb.angularDamping = 4.0f;
+            registry.emplace<RigidBody>(e, rb);
             registry.emplace<DroppedWeapon>(e,
                                             DroppedWeapon{
                                                 .type = g.type,
@@ -333,6 +349,16 @@ inline float absorbDamage(float& pool, float damage)
     const float absorbed = std::min(pool, damage);
     pool -= absorbed;
     return damage - absorbed;
+}
+
+void applyBulletSlow(entt::entity player, Registry& registry)
+{
+    if (!registry.valid(player))
+        return;
+    auto* sim = registry.try_get<PlayerSimState>(player);
+    if (sim == nullptr)
+        return;
+    sim->bulletSlowTimer = tms::k_bulletHitSlowDuration;
 }
 
 float applyDamage(float damage,
