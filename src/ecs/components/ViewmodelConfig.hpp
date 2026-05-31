@@ -228,7 +228,10 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
         // Rifle — middleweight, full spine bend, moderate recoil.
         // Locomotion anchor hand-tuned via the 3P Weapon Tweaker; other
         // stances stay on the generic defaults until they're tuned.
-        {.scale = 10.0f,
+        // Scale 1.0: the R-301 GLB is ~34u native (same mesh as the 1.0-scale
+        // viewmodel), so it needs no extra scaling in third person. (Was 10.0
+        // for the old tiny assault-rifle model.)
+        {.scale = 1.0f,
          .spineBendMultiplier = 1.0f,
          .hipLeanMultiplier = 0.1f,
          .recoilKickRad = 0.05f,

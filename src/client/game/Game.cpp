@@ -1418,8 +1418,11 @@ bool Game::init(AppContext& ctx)
                 renderer->setModelScenePass(shellEjectModelIdx_, false);
         }
 
-        const std::string rigPath = assetsDir + "standard_walk.fbx";
-        if (!charRig_.loadFromFBX(rigPath)) {
+        // Third-person character rig: Wraith (Apex skeleton). Apex locomotion clips are
+        // wired below (clipFile()); Mixamo-name procedural features in CharacterAnimator
+        // degrade gracefully on this skeleton.
+        const std::string rigPath = std::string(base ? base : "") + "assets/wraith.glb";
+        if (!charRig_.loadFromFBX(rigPath, /*flipUVs=*/true)) {
             SDL_Log("[client] WARNING: rig load failed — animated characters disabled");
         } else {
             SDL_Log("[client] rig loaded — %d joints, %zu mesh(es)", charRig_.numJoints(), charRig_.meshes().size());
@@ -1435,27 +1438,40 @@ bool Game::init(AppContext& ctx)
             // player's standing hitbox height, and compute the vertical
             // offset so the model's feet sit at the bottom of the AABB.
             {
-                float meshMinY = 0.0f;
-                float meshMaxY = 1.0f;
-                charRig_.verticalBounds(meshMinY, meshMaxY);
-                rigMeshMinY_ = meshMinY;
-
-                const float meshHeight = meshMaxY - meshMinY;
-                const float targetHeight = 2.0f * tms::k_standingHalfHeight; // 72 units
-                if (meshHeight > 0.001f) {
-                    kRigScale_ = targetHeight / meshHeight;
-                } else {
-                    kRigScale_ = 1.0f;
+                // The Apex locomotion clips are authored STANDING with the feet
+                // at model Y≈0, but wraith.glb's BIND pose is the cast's native
+                // rest — authored lying down (long axis along +Y in the source).
+                // So a naive Y-extent would measure her depth, not her height.
+                // Use the largest axis extent of the bind mesh as the height
+                // (orientation-independent), and place the feet at model Y≈0
+                // where the standing clips put them.
+                float mnx = std::numeric_limits<float>::max(), mny = mnx, mnz = mnx;
+                float mxx = std::numeric_limits<float>::lowest(), mxy = mxx, mxz = mxx;
+                for (const auto& mesh : charRig_.meshes()) {
+                    for (const auto& vert : mesh.baseVertices) {
+                        mnx = std::min(mnx, vert.position.x);
+                        mxx = std::max(mxx, vert.position.x);
+                        mny = std::min(mny, vert.position.y);
+                        mxy = std::max(mxy, vert.position.y);
+                        mnz = std::min(mnz, vert.position.z);
+                        mxz = std::max(mxz, vert.position.z);
+                    }
                 }
-                // Offset: move the model so its feet (meshMinY) align with
-                // the bottom of the standing AABB (pos.y - standingHalfHeight).
-                // Translation is relative to the entity's Position (AABB centre),
-                // so: translation.y = -halfHeight - meshMinY * scale.
+                const float extX = mxx - mnx, extY = mxy - mny, extZ = mxz - mnz;
+                const float maxExtent = std::max(extX, std::max(extY, extZ));
+                const float targetHeight = 2.0f * tms::k_standingHalfHeight; // 72 units
+                kRigScale_ = (maxExtent > 0.001f) ? (targetHeight / maxExtent) : 1.0f;
+                // Standing locomotion clips put the feet at model Y≈0, so the
+                // model bottom that should align with the AABB bottom is 0 (not
+                // the lying-bind's min-Y). All the -halfHeight - rigMeshMinY_*scale
+                // vertical placements then resolve to -halfHeight.
+                rigMeshMinY_ = 0.0f;
                 kRigVerticalOffset_ = -tms::k_standingHalfHeight - rigMeshMinY_ * kRigScale_;
-                SDL_Log("[client] rig auto-scale: meshY=[%.1f, %.1f] height=%.1f -> scale=%.4f, vertOffset=%.1f",
-                        static_cast<double>(meshMinY),
-                        static_cast<double>(meshMaxY),
-                        static_cast<double>(meshHeight),
+                SDL_Log("[client] rig auto-scale: ext[%.1f,%.1f,%.1f] maxExt=%.1f -> scale=%.4f, vertOffset=%.1f",
+                        static_cast<double>(extX),
+                        static_cast<double>(extY),
+                        static_cast<double>(extZ),
+                        static_cast<double>(maxExtent),
                         static_cast<double>(kRigScale_),
                         static_cast<double>(kRigVerticalOffset_));
             }
@@ -1476,17 +1492,32 @@ bool Game::init(AppContext& ctx)
             // is parented to this bone after IK (AAA pattern: weapon follows
             // hand, not vice versa), so we look it up once at rig load and
             // reuse the index every frame in the candidate writeback loop.
-            if (auto it = charRig_.jointMap().find("mixamorig:RightHand"); it != charRig_.jointMap().end()) {
-                rightHandJointIdx_ = it->second;
-                SDL_Log("[client] right-hand bone index = %d", rightHandJointIdx_);
-            } else {
-                SDL_Log("[client] WARNING: right-hand bone not found — weapon parenting disabled");
+            {
+                // Apex (Wraith) right-hand/prop bone, with Mixamo fallback.
+                const char* handNames[] = {"ja_r_propHand", "def_r_wrist", "def_r_hand", "mixamorig:RightHand"};
+                rightHandJointIdx_ = -1;
+                for (const char* n : handNames) {
+                    if (auto it = charRig_.jointMap().find(n); it != charRig_.jointMap().end()) {
+                        rightHandJointIdx_ = it->second;
+                        SDL_Log("[client] right-hand bone '%s' index = %d", n, rightHandJointIdx_);
+                        break;
+                    }
+                }
+                if (rightHandJointIdx_ < 0)
+                    SDL_Log("[client] WARNING: right-hand bone not found — weapon parenting disabled");
             }
-            if (auto it = charRig_.jointMap().find("mixamorig:Spine2"); it != charRig_.jointMap().end()) {
-                spine2JointIdx_ = it->second;
-                SDL_Log("[client] Spine2 bone index = %d", spine2JointIdx_);
-            } else {
-                SDL_Log("[client] WARNING: Spine2 bone not found — chest-anchored right-hand IK disabled");
+            {
+                const char* spineNames[] = {"def_c_spineC", "def_c_spineB", "mixamorig:Spine2"};
+                spine2JointIdx_ = -1;
+                for (const char* n : spineNames) {
+                    if (auto it = charRig_.jointMap().find(n); it != charRig_.jointMap().end()) {
+                        spine2JointIdx_ = it->second;
+                        SDL_Log("[client] chest bone '%s' index = %d", n, spine2JointIdx_);
+                        break;
+                    }
+                }
+                if (spine2JointIdx_ < 0)
+                    SDL_Log("[client] WARNING: chest bone not found — chest-anchored right-hand IK disabled");
             }
 
             // Load per-weapon hand grip poses (Phase C of the AAA IK overhaul).

@@ -108,65 +108,71 @@ const char* clipName(ClipId id)
 
 const char* clipFile(ClipId id)
 {
+    // Apex light-legend (Wraith) locomotion, converted from
+    // bulk_anims/animseq/humans/class/light/mp_pilot_light_core/*.cast onto
+    // Wraith's own skeleton (see assets/anims_apex/). Every ClipId resolves to
+    // a real Apex clip — states without a dedicated base clip (strafes, turns,
+    // starts/stops/pivots) reuse the nearest motion so nothing falls back to
+    // the T-pose. Dedicated strafe/transition clips are a later refinement.
     switch (id) {
     case ClipId::Idle:
-        return "male_locomotion_pack/idle.fbx";
+        return "anims_apex/apex_idle_stand.glb";
     case ClipId::Walk:
-        return "male_locomotion_pack/walking.fbx";
+        return "anims_apex/apex_walk_f.glb";
     case ClipId::Run:
-        return "male_locomotion_pack/standard run.fbx";
+        return "anims_apex/apex_run_f.glb";
     case ClipId::RunBackward:
-        return "running_backward.fbx";
+        return "anims_apex/apex_run_b.glb";
     case ClipId::SlowRun:
-        return "slow_run.fbx";
+        return "anims_apex/apex_run_f.glb";
     case ClipId::Slide:
-        return "running_slide.fbx";
+        return "anims_apex/apex_slide.glb";
     case ClipId::WallRun:
-        return "wall_run.fbx";
+        return "anims_apex/apex_wallrun.glb";
     case ClipId::Jump:
-        return "male_locomotion_pack/jump.fbx";
-    case ClipId::StrafeLeft:
-        return "male_locomotion_pack/left strafe.fbx";
+        return "anims_apex/apex_jump_f.glb";
+    case ClipId::StrafeLeft: // no base strafe clip yet → reuse run
+        return "anims_apex/apex_run_f.glb";
     case ClipId::StrafeRight:
-        return "male_locomotion_pack/right strafe.fbx";
+        return "anims_apex/apex_run_f.glb";
     case ClipId::StrafeLeftWalk:
-        return "male_locomotion_pack/left strafe walking.fbx";
+        return "anims_apex/apex_walk_f.glb";
     case ClipId::StrafeRightWalk:
-        return "male_locomotion_pack/right strafe walking.fbx";
+        return "anims_apex/apex_walk_f.glb";
     case ClipId::TurnLeft90:
-        return "male_locomotion_pack/left turn 90.fbx";
+        return "anims_apex/apex_idle_stand.glb";
     case ClipId::TurnRight90:
-        return "male_locomotion_pack/right turn 90.fbx";
+        return "anims_apex/apex_idle_stand.glb";
     case ClipId::CrouchIdle:
-        return "crouch/Idle Crouching.fbx";
+        return "anims_apex/apex_idle_crouch.glb";
     case ClipId::CrouchWalk:
-        return "crouch/Walk Crouching Forward.fbx";
+        return "anims_apex/apex_crouchwalk_f.glb";
     case ClipId::CrouchWalkLeft:
-        return "crouch/Walk Crouching Left.fbx";
+        return "anims_apex/apex_crouchwalk_f.glb";
     case ClipId::CrouchWalkRight:
-        return "crouch/Walk Crouching Right.fbx";
+        return "anims_apex/apex_crouchwalk_f.glb";
     case ClipId::CrouchWalkBackward:
-        return "crouch/Walk Crouching Backward.fbx";
+        return "anims_apex/apex_crouchwalk_b.glb";
     case ClipId::StartForward:
-        return "loco/start_forward.fbx";
+        return "anims_apex/apex_walk_f.glb";
     case ClipId::StartBackward:
-        return "loco/start_backward.fbx";
+        return "anims_apex/apex_walk_b.glb";
     case ClipId::StartLeft:
-        return "loco/start_left.fbx";
+        return "anims_apex/apex_walk_f.glb";
     case ClipId::StartRight:
-        return "loco/start_right.fbx";
+        return "anims_apex/apex_walk_f.glb";
     case ClipId::StopForward:
-        return "loco/stop_forward.fbx";
+        return "anims_apex/apex_idle_stand.glb";
     case ClipId::StopBackward:
-        return "loco/stop_backward.fbx";
+        return "anims_apex/apex_idle_stand.glb";
     case ClipId::StopLeft:
-        return "loco/stop_left.fbx";
+        return "anims_apex/apex_idle_stand.glb";
     case ClipId::StopRight:
-        return "loco/stop_right.fbx";
+        return "anims_apex/apex_idle_stand.glb";
     case ClipId::PivotLeft:
-        return "loco/pivot_left.fbx";
+        return "anims_apex/apex_idle_stand.glb";
     case ClipId::PivotRight:
-        return "loco/pivot_right.fbx";
+        return "anims_apex/apex_idle_stand.glb";
     case ClipId::_Count:
         return "";
     }
@@ -337,11 +343,15 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
             return true;
         };
 
-        // Primary: every joint whose name contains "Hips" (Mixamo: "mixamorig:Hips").
+        // Primary: every joint whose name marks the pelvis/root. Mixamo uses
+        // "mixamorig:Hips"; the Apex legend skeleton (Wraith) uses "def_c_hip".
+        // Match both so converted Apex locomotion clips get their baked forward
+        // translation frozen (otherwise she slides during the loop).
         for (int j = 0; j < numJoints; ++j) {
             const std::string jointName(jointNames[static_cast<size_t>(j)]);
-            if (jointName.find("Hips") != std::string::npos)
-                strippedAny |= stripTrack(j, "name match: Hips");
+            if (jointName.find("Hips") != std::string::npos || jointName.find("hip") != std::string::npos
+                || jointName.find("Pelvis") != std::string::npos || jointName.find("pelvis") != std::string::npos)
+                strippedAny |= stripTrack(j, "name match: hip/pelvis");
         }
 
         // Fallback: if nothing matched by name (non-Mixamo rig), strip the
