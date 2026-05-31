@@ -1382,7 +1382,7 @@ bool Game::init(AppContext& ctx)
         // Animated first-person R-301 viewmodel (its own skinned rig + clips).
         {
             const std::string vmPath = std::string(base ? base : "") + "assets/apex_r301.glb";
-            if (weaponVm_.load(vmPath)) {
+            if (weaponVm_.load(vmPath, /*flipUVs=*/true)) {
                 weaponVmLoaded_ = renderer->setViewmodelRig(weaponVm_.buildRigSources(), weaponVm_.numJoints());
                 // Bind the R-301's diffuse texture (from its loaded static model) to the skinned viewmodel.
                 renderer->setViewmodelTexture(weaponModelIndices_[static_cast<std::size_t>(WeaponType::Rifle)]);
@@ -1396,7 +1396,7 @@ bool Game::init(AppContext& ctx)
             // First-person Wraith arms (hands) — second skinned viewmodel rig,
             // driven by the SAME clips so the hands hold the animating gun.
             const std::string armsPath = std::string(base ? base : "") + "assets/apex_r301_arms.glb";
-            if (weaponVmArms_.load(armsPath)) {
+            if (weaponVmArms_.load(armsPath, /*flipUVs=*/true)) {
                 weaponVmArmsLoaded_ =
                     renderer->setViewmodelArmsRig(weaponVmArms_.buildRigSources(), weaponVmArms_.numJoints());
                 // Load the arms GLB as a hidden static model purely to register its embedded textures.

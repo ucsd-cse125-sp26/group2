@@ -58,5 +58,5 @@ void main()
     frag_normal = normalize(normalMat * vn);
     frag_tangent = vec4(normalize(mat3(model) * tangent.xyz), tangent.w);
     frag_worldPos = worldPos.xyz;
-    frag_vt = vt;
+    frag_vt = vt; // UVs are flipped at load time (CharacterRig flipUVs) to match textures.
 }

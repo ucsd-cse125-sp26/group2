@@ -50,7 +50,7 @@ public:
     /// @brief Load rig from an FBX file.
     /// @param path  Absolute path to an FBX with a skin-weighted mesh.
     /// @return True on success (skeleton built + at least one skinned mesh).
-    bool loadFromFBX(const std::string& path);
+    bool loadFromFBX(const std::string& path, bool flipUVs = false);
 
     /// @brief True after a successful loadFromFBX().
     [[nodiscard]] bool isLoaded() const noexcept;

@@ -31,7 +31,7 @@ public:
 
     /// @brief Load the skinned weapon GLB: rig (skeleton + meshes) + ALL baked
     /// animation clips contained in the file (keyed by their glTF animation name).
-    bool load(const std::string& glbPath);
+    bool load(const std::string& glbPath, bool flipUVs = false);
 
     [[nodiscard]] bool isLoaded() const;
     [[nodiscard]] int numJoints() const;

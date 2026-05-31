@@ -188,9 +188,9 @@ buildClip(const CharacterRig& rig, const aiAnimation* anim)
 }
 } // namespace
 
-bool WeaponViewmodelAnim::load(const std::string& glbPath)
+bool WeaponViewmodelAnim::load(const std::string& glbPath, bool flipUVs)
 {
-    if (!impl_->rig.loadFromFBX(glbPath)) {
+    if (!impl_->rig.loadFromFBX(glbPath, flipUVs)) {
         SDL_Log("WeaponViewmodelAnim: failed to load rig from '%s'", glbPath.c_str());
         return false;
     }
