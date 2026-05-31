@@ -351,6 +351,38 @@ inline float absorbDamage(float& pool, float damage)
     return damage - absorbed;
 }
 
+/// @brief Absorb damage through a shield pool with reduced effectiveness.
+///
+/// `effectiveness` scales how fast the pool drains: removing one point of the
+/// pool consumes `1 / effectiveness` points of the incoming damage budget. With
+/// `effectiveness == 1` this is identical to `absorbDamage`; with `0.2` the pool
+/// is 5× as tanky (a 100-shield needs 500 damage to break). Returns the leftover
+/// damage budget after the pool is exhausted (always full-value, to be applied to
+/// the next, less-resistant layer).
+inline float absorbDamageScaled(float& pool, float damage, float effectiveness)
+{
+    if (effectiveness >= 1.0f)
+        return absorbDamage(pool, damage);
+
+    if (pool < 0) {
+        pool = 0;
+        return damage;
+    }
+    if (effectiveness <= 0.0f) {
+        // Pathological case: shield is immune. Consume nothing, block everything.
+        return 0.0f;
+    }
+
+    // Damage budget required to fully drain this pool at the reduced rate.
+    const float budgetToClear = pool / effectiveness;
+    if (damage >= budgetToClear) {
+        pool = 0.0f;
+        return damage - budgetToClear;
+    }
+    pool -= damage * effectiveness;
+    return 0.0f;
+}
+
 void applyBulletSlow(entt::entity player, Registry& registry)
 {
     if (!registry.valid(player))
@@ -366,7 +398,8 @@ float applyDamage(float damage,
                   entt::entity& killer,
                   Registry& registry,
                   std::vector<NetKillEvent>& killEvents,
-                  BodyRegion hitRegion)
+                  BodyRegion hitRegion,
+                  float shieldMultiplier)
 {
     // If player is dead, ignore damage
     if (registry.all_of<RespawnTimer>(player))
@@ -389,8 +422,8 @@ float applyDamage(float damage,
 
     float remainingDamage = damage;
 
-    remainingDamage = absorbDamage(playerHealth.overShield, remainingDamage);
-    remainingDamage = absorbDamage(playerHealth.armor, remainingDamage);
+    remainingDamage = absorbDamageScaled(playerHealth.overShield, remainingDamage, shieldMultiplier);
+    remainingDamage = absorbDamageScaled(playerHealth.armor, remainingDamage, shieldMultiplier);
 
     if (remainingDamage > 0.0f) {
         if (playerHealth.health <= remainingDamage) {

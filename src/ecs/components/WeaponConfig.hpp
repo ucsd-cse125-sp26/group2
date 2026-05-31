@@ -29,6 +29,27 @@ struct WeaponConfig
     bool isCharge = false;           ///< True for charge weapons (hold to charge, release to fire).
     float dps = 0.0f;                ///< Damage per second (beam weapons only; discrete weapons use `damage`).
     float ammoPerSecond = 0.0f;      ///< Ammo drain rate (beam weapons only).
+
+    // ── Tesla Cannon (auto-lock cone beam) tuning ──
+    /// @brief True for Winston-style auto-lock beams: each tick picks the enemy
+    /// closest to the crosshair inside `coneHalfAngleDeg` and within `maxRange`
+    /// (with line-of-sight) and applies ramping damage. When false the beam path
+    /// uses the legacy straight-ray hitscan behaviour.
+    bool autoLockBeam = false;
+    /// @brief Hard range cap (world units) for the auto-lock beam. 0 = unlimited.
+    float maxRange = 0.0f;
+    /// @brief Half-angle of the lock-on cone in degrees (auto-lock beams only).
+    float coneHalfAngleDeg = 0.0f;
+    /// @brief Ramp ceiling DPS reached after `dpsRampTime` of continuous lock.
+    /// 0 = no ramp (flat `dps`). The beam ramps linearly from `dps` to `dpsMax`.
+    float dpsMax = 0.0f;
+    /// @brief Seconds of continuous lock on the same target to reach `dpsMax`.
+    float dpsRampTime = 0.0f;
+    /// @brief Effectiveness multiplier against shield layers (overShield + armor).
+    /// 1.0 = full; 0.2 = "energy-vs-energy" resistance (shields drain at 20%).
+    /// Damage that reaches raw health is always dealt at full.
+    float shieldDamageMultiplier = 1.0f;
+
     float chargeDamage = 0.0f;       ///< Damage dealt on release (charge weapons only).
     float maxChargeTime = 0.0f;      ///< in seconds
     float reloadTime = 0.0f;         ///< Time to complete a reload, in seconds.
@@ -184,8 +205,14 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isBeam = true,
-            .dps = 80.0f,
+            .dps = 35.0f,        // ramp floor (Tesla Cannon: low until lock-on ramps up)
             .ammoPerSecond = 20.0f,
+            .autoLockBeam = true,
+            .maxRange = 200.0f,           // ~5 m on the small map (unit ≈ 1 inch)
+            .coneHalfAngleDeg = 30.0f,    // wide, forgiving — true no-aim
+            .dpsMax = 70.0f,              // ramp ceiling (2× base) after dpsRampTime
+            .dpsRampTime = 2.0f,          // seconds of continuous lock to reach dpsMax
+            .shieldDamageMultiplier = 0.2f, // energy-vs-energy: barely chips shields
             .reloadTime = 2.0f,
         }, // EnergyGun
         WeaponConfig{

@@ -306,7 +306,8 @@ private:
                                            ///  vs only after a physics tick (false).
     bool inputSyncedWithPhysics = true;    ///< Sample mouse once per physics tick (true)
                                            ///  vs every iterate() call (false).
-    bool limitFPSToMonitor = true;         ///< VSync on (true) / off (false).
+    bool limitFPSToMonitor = false;        ///< VSync on (true) / off (false). Default off = uncapped
+                                           ///  (mailbox present); toggle live via the debug menu.
 
     Uint64 softLimitPeriod = 0;            ///< Target frame period in perf-counter ticks (0 = disabled).
     Uint64 softLimitNextFrame = 0;         ///< Performance counter target for next frame deadline.

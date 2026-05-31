@@ -4326,7 +4326,11 @@ SDL_AppResult Game::iterate()
             glm::vec3 lightStart = beam.origin;
             glm::vec3 lightEnd = beam.hitPoint;
 
-            if (registry.all_of<LocalPlayer>(e)) {
+            // The auto-lock Tesla beam endpoint is server-authoritative (the
+            // locked target, or a forward point capped at maxRange), so the
+            // lights follow it directly. Other beams (none today) keep the
+            // zero-lag local raycast prediction.
+            if (registry.all_of<LocalPlayer>(e) && beam.type != WeaponType::EnergyGun) {
                 const float cosPitch = std::cos(renderPitch);
                 const glm::vec3 fwd{
                     std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
