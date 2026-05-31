@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "network/MatchStatus.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -11,6 +13,9 @@
 #include <string>
 
 class InputBindings;
+/// Opaque enum declaration — value 0 is KeyboardMouse (see config/InputBindings.hpp).
+/// Lets HudGameState store the active device without pulling in the full header.
+enum class BindingDevice : std::uint8_t;
 
 // ── Colors ──────────────────────────────────────────────────────────────────
 
@@ -157,6 +162,7 @@ struct HudWorldEnemy
     int health = 100, maxHealth = 100;
     int armor = 0, maxArmor = 100;
     bool isAlive = true;
+    bool occluded = false; ///< True when world geometry blocks the line of sight from the camera (hide bar/name).
 };
 
 /// @brief Equipment slot state — drives the bottom-center grapple/grenade/tactical row.
@@ -281,6 +287,7 @@ struct HudShotgunBlast
 struct HudGameState
 {
     const InputBindings* bindings = nullptr; ///< Live input bindings for HUD key prompts.
+    BindingDevice activeInputDevice{};       ///< Last-used input device; selects KBM vs controller glyphs (0 == KBM).
 
     int health = 100, maxHealth = 100;
     int armor = 0, maxArmor = 100;
@@ -293,8 +300,11 @@ struct HudGameState
     float roundTimeRemaining = 0.f;
     bool isAlive = true;
     bool isBuyPhase = false;
+    MatchPhase currentPhase = MatchPhase::IN_PROGRESS; ///< Current server match phase.
+    bool matchWon = false;                             ///< True if the local player won the finished match.
+    bool forceScoreboardOpen = false;                  ///< True when match flow should show scoreboard automatically.
     bool isReloading = false;
-    float reloadProgress = 0.0f; ///< 0-1
+    float reloadProgress = 0.0f;                       ///< 0-1
 
     // Events (valid for this frame only).
     std::span<const HudKillFeedEntry> killFeedEvents;

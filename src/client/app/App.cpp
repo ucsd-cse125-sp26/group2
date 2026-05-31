@@ -6,6 +6,7 @@
 #include "SDL3/SDL_init.h"
 #include "game/Game.hpp"
 #include "host/HostedServer.hpp"
+#include "menus/MenuTheme.hpp"
 #include "menus/home/Home.hpp"
 #include "menus/host/HostConfig.hpp"
 #include "menus/lobby/Lobby.hpp"
@@ -23,6 +24,8 @@
 namespace
 {
 constexpr int k_joinConnectionTimeoutMs = 5000;
+constexpr int k_hostedShutdownPollMs = 25;
+constexpr int k_hostedShutdownTimeoutMs = 1000;
 
 /// @brief Return a short log-friendly string for a ConnectError value.
 const char* connectErrorLogName(ConnectError error)
@@ -128,6 +131,8 @@ bool App::init()
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     }
     ImGui::StyleColorsDark();
+    menu_theme::applyStyle();
+    menu_theme::loadFonts();
     if (!ImGui_ImplSDL3_InitForSDLGPU(window)) {
         SDL_Log("ImGui_ImplSDL3_InitForSDLGPU failed");
         cleanup();
@@ -198,6 +203,7 @@ SDL_AppResult App::iterate()
             std::string serverIp = joinRequest->serverIp;
             uint16_t serverPort = joinRequest->serverPort;
             std::optional<net::UdpSessionTransport::RelayConfig> relayConfig;
+            std::optional<net::UdpSessionTransport::PunchAssist> punchAssist;
             if (joinRequest->globalServerId != 0 && networkConfig.discovery.enabled) {
                 GlobalDiscoveryClient discovery;
                 net::discovery::ServerInfo punchedServer;
@@ -218,6 +224,18 @@ SDL_AppResult App::iterate()
                             serverIp.c_str(),
                             serverPort,
                             joinRequest->globalServerId);
+                    // Keep punching from the real game socket during connect:
+                    // the discovery punch above ran on a throwaway socket, so
+                    // its NAT mapping won't match the session socket. Re-sending
+                    // the PunchRequest (same nonce) from the session socket makes
+                    // the directory re-notify the host with our true game port.
+                    punchAssist = net::UdpSessionTransport::PunchAssist{
+                        .directoryHost = networkConfig.discovery.directoryHost,
+                        .directoryPort = networkConfig.discovery.directoryUdpPort,
+                        .request = net::discovery::encodePunchRequest(
+                            {.serverId = joinRequest->globalServerId, .clientNonce = clientNonce}),
+                        .enabled = true,
+                    };
                     if (!networkConfig.transport.noRelay) {
                         relayConfig = net::UdpSessionTransport::RelayConfig{
                             .host = networkConfig.discovery.directoryHost,
@@ -239,7 +257,7 @@ SDL_AppResult App::iterate()
             }
             SDL_Log("Attempting to join server at %s:%d...", serverIp.c_str(), serverPort);
             const ConnectError connectError = client.init(
-                serverIp.c_str(), serverPort, networkConfig.transport, k_joinConnectionTimeoutMs, relayConfig);
+                serverIp.c_str(), serverPort, networkConfig.transport, k_joinConnectionTimeoutMs, relayConfig, punchAssist);
             if (connectError != ConnectError::None) {
                 SDL_Log("Failed to connect to server at %s:%d: %s",
                         serverIp.c_str(),
@@ -264,6 +282,10 @@ SDL_AppResult App::iterate()
             break;
 
         if (hostConfig->consumeLaunchRequest()) {
+            if (client.isConnected()) {
+                client.shutdown();
+            }
+
             HostConfigState config = hostConfig->draftConfig();
             hostConfigState = config;
 
@@ -295,16 +317,8 @@ SDL_AppResult App::iterate()
         }
 
         if (hostConfig->consumeShutdownRequest()) {
-            if (client.isConnected()) {
-                if (!client.sendServerShutdown()) {
-                    hostConfig->setLaunchError("Failed to request server shutdown");
-                } else {
-                    hostedServer.clearSession();
-                }
-            } else if (hostedServer.isRunning()) {
-                hostedServer.shutdown();
-                hostedServer.clearSession();
-            }
+            shutdownHostedServerGracefully();
+            client.shutdown();
         }
 
         if (hostConfig->consumeGoToLobbyRequest() && (hostedServer.isRunning() || client.isConnected())) {
@@ -313,6 +327,9 @@ SDL_AppResult App::iterate()
         }
 
         if (hostConfig->consumeBackToHomeRequest()) {
+            if (hostedServer.isRunning()) {
+                shutdownHostedServerGracefully();
+            }
             client.shutdown();
             transitionTo(Screen::Home);
         }
@@ -330,10 +347,10 @@ SDL_AppResult App::iterate()
 
         if (lobby->consumeReturnToMenu()) {
             const bool showServerShutdownNotice = lobby->consumeServerShutdownNotice();
-            client.shutdown();
             if (hostedServer.isRunning()) {
-                hostedServer.shutdown();
+                shutdownHostedServerGracefully();
             }
+            client.shutdown();
 
             transitionTo(Screen::Home);
             if (showServerShutdownNotice) {
@@ -355,6 +372,9 @@ SDL_AppResult App::iterate()
 
         if (game->consumeReturnToMainMenu()) {
             const bool showServerShutdownNotice = game->consumeServerShutdownNotice();
+            if (hostedServer.isRunning()) {
+                shutdownHostedServerGracefully();
+            }
             client.shutdown();
             transitionTo(Screen::Home);
             if (showServerShutdownNotice) {
@@ -448,9 +468,10 @@ void App::cleanup()
         user_settings::save(userSettingsPath, userSettings);
     }
     if (hostedServer.isRunning()) {
-        hostedServer.shutdown();
+        shutdownHostedServerGracefully();
     }
     client.shutdown();
+    menu_theme::releaseBackground(renderer.getDevice());
     renderer.quit();
     if (screen_) {
         screen_->shutdownAfterRenderer();
@@ -492,4 +513,28 @@ void App::showHomePopupMessage(const std::string& message)
     if (home) {
         home->setPopupMessage(message);
     }
+}
+
+bool App::shutdownHostedServerGracefully()
+{
+    if (!hostedServer.isRunning()) {
+        hostedServer.clearSession();
+        return true;
+    }
+
+    const bool requested = client.isConnected() && client.sendServerShutdown();
+    if (requested) {
+        for (int waitedMs = 0; waitedMs < k_hostedShutdownTimeoutMs; waitedMs += k_hostedShutdownPollMs) {
+            if (!hostedServer.isRunning()) {
+                hostedServer.clearSession();
+                return true;
+            }
+            client.poll();
+            SDL_Delay(k_hostedShutdownPollMs);
+        }
+    }
+
+    hostedServer.shutdown();
+    hostedServer.clearSession();
+    return false;
 }

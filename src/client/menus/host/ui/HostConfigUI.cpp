@@ -3,6 +3,7 @@
 
 #include "HostConfigUI.hpp"
 
+#include "menus/MenuTheme.hpp"
 #include "network/ServerName.hpp"
 
 #include <imgui.h>
@@ -15,10 +16,8 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
     HostConfigResult result{};
     HostConfigState& draft = inputs.draft;
 
-    ImGui::SetNextWindowPos(ImVec2(40.0f, 40.0f), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(480.0f, 360.0f), ImGuiCond_Once);
-    if (ImGui::Begin("Host Game")) {
-        ImGui::SeparatorText("Settings");
+    if (menu_theme::beginPanel("Host Game", 600.0f, 560.0f, true)) {
+        menu_theme::heading("Settings");
         if (ImGui::BeginTable("HostSettings", 2, ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, 150.0f);
             ImGui::TableSetupColumn("Value");
@@ -28,7 +27,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
             ImGui::TextUnformatted("Server Name");
             ImGui::TableSetColumnIndex(1);
             ImGui::BeginDisabled(inputs.serverRunning);
-            ImGui::SetNextItemWidth(240.0f);
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
             ImGui::InputText("##ServerName", &draft.serverName);
             draft.serverName = server_name::clampUtf8Bytes(draft.serverName);
             ImGui::EndDisabled();
@@ -37,14 +36,14 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
             ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted("Kill Threshold to Win");
             ImGui::TableSetColumnIndex(1);
-            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
             ImGui::SliderInt("##KillsToWin", &draft.killsToWin, 1, 100);
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted("Max Players");
             ImGui::TableSetColumnIndex(1);
-            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
             ImGui::SliderInt("##MaxPlayers", &draft.maxPlayers, 2, 128);
 
             ImGui::TableNextRow();
@@ -60,7 +59,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
             ImGui::EndTable();
         }
 
-        ImGui::SeparatorText("Advanced");
+        menu_theme::heading("Advanced");
         if (ImGui::BeginTable("HostAdvancedSettings", 2, ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, 150.0f);
             ImGui::TableSetupColumn("Value");
@@ -120,7 +119,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
             ImGui::EndTable();
         }
 
-        ImGui::SeparatorText("Server");
+        menu_theme::heading("Server");
         if (inputs.serverRunning) {
             if (inputs.boundPort != 0) {
                 ImGui::Text("Connected on port %u", static_cast<unsigned>(inputs.boundPort));
@@ -149,7 +148,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
         ImGui::Spacing();
         ImGui::BeginDisabled(inputs.serverRunning);
-        if (ImGui::Button("Launch Server")) {
+        if (menu_theme::accentButton("Launch Server")) {
             result.launchClicked = true;
         }
         ImGui::EndDisabled();
@@ -167,7 +166,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
             }
             ImGui::SameLine();
             ImGui::BeginDisabled(!inputs.canManageServer);
-            if (ImGui::Button("Shutdown")) {
+            if (menu_theme::dangerButton("Shutdown")) {
                 result.shutdownClicked = true;
             }
             ImGui::EndDisabled();
@@ -180,7 +179,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
         }
         ImGui::EndDisabled();
     }
-    ImGui::End();
+    menu_theme::endPanel();
 
     return result;
 }

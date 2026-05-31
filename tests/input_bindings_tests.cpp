@@ -57,9 +57,14 @@ bool testControllerDefaults()
                  "controller shoot should default to a trigger axis");
     ok &= expect(bindings.get(Action::Shoot, BindingDevice::Controller).gamepadAxis == GamepadAxisBinding::RightTrigger,
                  "controller shoot should default to right trigger");
-    ok &= expect(bindings.get(Action::SwitchToPrimary, BindingDevice::Controller, 1).gamepadButton ==
+    ok &= expect(bindings.get(Action::SwitchToPrimary, BindingDevice::Controller).gamepadButton ==
                      SDL_GAMEPAD_BUTTON_DPAD_UP,
-                 "controller primary weapon alternate should default to d-pad up");
+                 "controller primary weapon switch should default to d-pad up");
+    ok &= expect(bindings.get(Action::Scope, BindingDevice::Controller).gamepadAxis == GamepadAxisBinding::LeftTrigger,
+                 "controller aim should default to left trigger");
+    ok &= expect(bindings.get(Action::Ability1, BindingDevice::Controller).gamepadButton ==
+                     SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,
+                 "controller ability 1 should default to left shoulder");
     return ok;
 }
 

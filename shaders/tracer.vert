@@ -42,11 +42,16 @@ void main()
     const vec4  edgeColor  = vec4(data[base+12], data[base+13],
                                   data[base+14], data[base+15]);
 
-    // Build camera-facing side vector perpendicular to streak axis
+    // Build camera-facing side vector perpendicular to streak axis.
     const vec3 axis   = normalize(tip - tail);
     const vec3 midPt  = (tip + tail) * 0.5;
     const vec3 toEye  = normalize(u.camPos - midPt);
-    const vec3 side   = normalize(cross(axis, toEye)) * radius;
+    vec3 sideRaw      = cross(axis, toEye);
+    if (dot(sideRaw, sideRaw) < 0.0001)
+        sideRaw = cross(axis, u.camUp);
+    if (dot(sideRaw, sideRaw) < 0.0001)
+        sideRaw = cross(axis, u.camRight);
+    const vec3 side   = normalize(sideRaw) * radius;
 
     // 4 corners of the oriented quad:
     //  corner u=(0,+/-1) at tail, corner u=(1,+/-1) at tip

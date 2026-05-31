@@ -236,6 +236,14 @@ void tickTimers(PlayerStateRef state, float dt)
         if (state.sim.grappleCooldownTimer <= 0.0f)
             state.sim.grappleCooldownActive = false;
     }
+
+    // Bullet-hit slow: tick toward zero. Refreshed by applyBulletSlow() on
+    // hitscan damage; sustained fire keeps it pinned.
+    if (state.sim.bulletSlowTimer > 0.0f) {
+        state.sim.bulletSlowTimer -= dt;
+        if (state.sim.bulletSlowTimer < 0.0f)
+            state.sim.bulletSlowTimer = 0.0f;
+    }
 }
 
 } // namespace
@@ -275,6 +283,45 @@ float currentWishSpeed(const PlayerVisState& vis)
         return tms::k_sprintSpeed;
     return tms::k_walkSpeed;
 }
+
+namespace
+{
+
+/// @brief Wish speed at the OnFoot ground-accel call site.
+///
+/// Augments `currentWishSpeed` with two things that can't sit on the
+/// PlayerVisState-only signature:
+///   * Forward (W/S) is faster than strafe (A/D). The effective cap is the
+///     magnitude of the per-axis input vector `(strafeFrac * k_walkStrafeSpeed,
+///     fwdFrac * k_walkForwardSpeed)`, so diagonals interpolate smoothly
+///     between the two limits.
+///   * Bullet-hit slow multiplies the result by k_bulletHitSlowFactor while
+///     the timer is positive.
+///
+/// Only applied during normal upright walking — crouch, ADS, and slide keep
+/// their existing (uniform) wish speeds so their feel is unchanged.
+float wishSpeedForInputAndState(const PlayerVisState& vis, const PlayerSimState& sim, const InputSnapshot& input)
+{
+    float wishSpeed = currentWishSpeed(vis);
+    const bool k_walking = vis.moveMode == MoveMode::OnFoot && !vis.crouching && !vis.ads && !vis.sprinting;
+    if (k_walking) {
+        const float moveX = (input.left ? 1.0f : 0.0f) - (input.right ? 1.0f : 0.0f);
+        const float moveZ = (input.forward ? 1.0f : 0.0f) - (input.back ? 1.0f : 0.0f);
+        const float mag = std::sqrt(moveX * moveX + moveZ * moveZ);
+        if (mag > 0.001f) {
+            const float k_fwdFrac = std::abs(moveZ) / mag;
+            const float k_strafeFrac = std::abs(moveX) / mag;
+            const float k_fwdComp = k_fwdFrac * tms::k_walkForwardSpeed;
+            const float k_strafeComp = k_strafeFrac * tms::k_walkStrafeSpeed;
+            wishSpeed = std::sqrt(k_fwdComp * k_fwdComp + k_strafeComp * k_strafeComp);
+        }
+    }
+    if (sim.bulletSlowTimer > 0.0f)
+        wishSpeed *= tms::k_bulletHitSlowFactor;
+    return wishSpeed;
+}
+
+} // namespace
 
 // Jumping (ground, double, coyote, wall, slidehop)
 
@@ -550,17 +597,25 @@ void handleSliding(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& in
         vel.z *= k_scale;
     }
 
-    // Slight steering: apply lateral wish acceleration so WASD can gently
-    // rotate the slide trajectory. The lateral component is wishDir minus
-    // its projection onto current motion, so forward input is ignored and
-    // only the perpendicular part curves the slide.
+    // Steering: rotate the slide's heading toward the WASD/view wish
+    // direction so the player can carve where they're going. Speed is
+    // preserved (only the direction changes) and the turn is capped at a max
+    // rate per tick, so the slide can be redirected but never pivoted
+    // instantly. Holding W steers toward where you look; A/D let you carve.
     if (k_hs > 0.001f) {
         const glm::vec3 k_wishDir =
             physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
         if (glm::length(k_wishDir) > 0.001f) {
             const glm::vec3 k_horizDir = horizVel(vel) / k_hs;
-            const glm::vec3 k_lateral = k_wishDir - k_horizDir * glm::dot(k_wishDir, k_horizDir);
-            vel += k_lateral * tms::k_slideSteerAccel * dt;
+            const float k_angle = std::acos(std::clamp(glm::dot(k_horizDir, k_wishDir), -1.0f, 1.0f));
+            if (k_angle > 1e-4f) {
+                const float k_maxTurn = tms::k_slideSteerTurnRate * dt;
+                // Fraction of the way to wishDir we may rotate this tick.
+                const float k_t = std::min(1.0f, k_maxTurn / k_angle);
+                const glm::vec3 k_newDir = glm::normalize(k_horizDir + (k_wishDir - k_horizDir) * k_t);
+                vel.x = k_newDir.x * k_hs;
+                vel.z = k_newDir.z * k_hs;
+            }
         }
     }
 
@@ -1377,6 +1432,14 @@ void handleWallRunning(glm::vec3& pos,
     if (state.sim.wallrunBlockerActive && !blockerStillRelevant(state.sim))
         clearWallrunBlocker(state);
 
+    // Hard time cap: after k_wallrunKickoffDuration the wall lets go regardless
+    // of input. No impulse, no jump refresh — gravity takes over and the wall
+    // blacklist set by exitWallrun() prevents an immediate re-grab.
+    if (state.sim.wallRunTimer >= tms::k_wallrunKickoffDuration) {
+        exitWallrun(state, posY);
+        return;
+    }
+
     // Lucio-style detach: jump released → fire the full wall-jump impulse
     // away from the wall, then exit. Holding jump is what kept the player
     // attached; releasing it is the explicit "kick off" signal.
@@ -2104,7 +2167,7 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
             case MoveMode::OnFoot: {
                 const glm::vec3 k_wishDir =
                     physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
-                const float k_wishSpeed = currentWishSpeed(state.vis);
+                const float k_wishSpeed = wishSpeedForInputAndState(state.vis, state.sim, input);
 
                 if (state.vis.grounded) {
                     vel.value = physics::applyGroundFriction(vel.value, dt);
@@ -2115,7 +2178,10 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                     if (glm::length(k_wishDir) > 0.001f) {
                         // Air wish-speed depends on current horizontal speed:
                         // generous when stalled, classic Quake floor at speed.
-                        const float k_airWish = physics::airWishSpeedForHorizSpeed(horizSpeed(vel.value));
+                        const float k_baseAirWish = physics::airWishSpeedForHorizSpeed(horizSpeed(vel.value));
+                        const float k_airWish = (state.sim.bulletSlowTimer > 0.0f)
+                                                    ? k_baseAirWish * tms::k_bulletHitSlowFactor
+                                                    : k_baseAirWish;
                         vel.value = physics::accelerate(vel.value, k_wishDir, k_airWish, physics::k_airAccel, dt);
                     }
                 }

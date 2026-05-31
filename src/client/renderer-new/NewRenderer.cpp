@@ -62,7 +62,7 @@ bool NewRenderer::init(SDL_Window* window)
                                                     | SDL_GPU_SHADERFORMAT_DXIL
 #endif
         ;
-    device_ = SDL_CreateGPUDevice(k_wantedFormats, true, nullptr);
+    device_ = SDL_CreateGPUDevice(k_wantedFormats, false, nullptr);
     if (!device_) {
         SDL_Log("NewRenderer: SDL_CreateGPUDevice failed: %s", SDL_GetError());
         return false;
@@ -120,8 +120,14 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    depthSampler_ = Boilerplate::createLinearComparisonSampler(device_);
-    if (!depthSampler_) {
+    staticDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_,SDL_GPU_FILTER_LINEAR);
+    if (!staticDepthSampler_) {
+        SDL_Log("NewRenderer: failed to create depth sampler: %s", SDL_GetError());
+        return false;
+    }
+
+    dynamicDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_,SDL_GPU_FILTER_NEAREST);
+    if (!dynamicDepthSampler_) {
         SDL_Log("NewRenderer: failed to create depth sampler: %s", SDL_GetError());
         return false;
     }
@@ -144,7 +150,7 @@ bool NewRenderer::init(SDL_Window* window)
     skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
-    staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
+    staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
 
     cubeFaceTargets_[0] = glm::vec3(1, 0, 0);
     cubeFaceTargets_[1] = glm::vec3(-1, 0, 0);
@@ -423,6 +429,8 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
 
     if (staticGeometry)
         drawWorldModelInstances(geometryDepthPass, cmd, true);
+    //SDL_SetGPUDepthBias(geometryDepthPass,);
+
     if (entityGeometry)
         drawEntityModels(geometryDepthPass, cmd, true);
     if (skinnedGeometry)
@@ -469,8 +477,8 @@ void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
     SDL_GPUTextureSamplerBinding shadowBindings[2];
-    shadowBindings[0] = {staticShadowMaps_, depthSampler_};
-    shadowBindings[1] = {dynamicShadowMaps_, depthSampler_};
+    shadowBindings[0] = {staticShadowMaps_, staticDepthSampler_};
+    shadowBindings[1] = {dynamicShadowMaps_,dynamicDepthSampler_};
 
     SDL_BindGPUFragmentSamplers(renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings, 2);
 
@@ -865,6 +873,10 @@ void NewRenderer::quit()
             SDL_ReleaseGPUSampler(device_, fxaaSampler_);
         if (texture_)
             SDL_ReleaseGPUTexture(device_, texture_);
+        if (staticShadowMaps_)
+            SDL_ReleaseGPUTexture(device_, staticShadowMaps_);
+        if (dynamicShadowMaps_)
+            SDL_ReleaseGPUTexture(device_, dynamicShadowMaps_);
 
         ImGui_ImplSDLGPU3_Shutdown();
         SDL_ReleaseWindowFromGPUDevice(device_, window_);
@@ -1024,11 +1036,46 @@ void NewRenderer::setParticleSystem(ParticleSystem* ps)
 
 bool NewRenderer::setVSync(bool enabled)
 {
-    // TODO(graphics): apply via SDL_SetGPUSwapchainParameters with
-    //   SDL_GPU_PRESENTMODE_VSYNC (or MAILBOX) when enabled, and
-    //   SDL_GPU_PRESENTMODE_IMMEDIATE when disabled.  Check the format
-    //   you currently use for the swapchain so you preserve it.
     vsyncEnabled_ = enabled;
+
+    if (!device_ || !window_)
+        return false;
+
+    // SDL claims the window with SDL_GPU_PRESENTMODE_VSYNC (FIFO) by default and
+    // never changes it on its own.  On Wayland (and any true vblank-synced WSI)
+    // FIFO is a HARD block that paces the whole client to the monitor refresh —
+    // which is why an "uncapped" Linux build was stuck at refresh-rate fps while
+    // the same code ran free on Windows (windowed DWM doesn't hard-block FIFO).
+    // Until this point the call was a no-op, so GROUP2_CLIENT_UNCAPPED / bench
+    // mode / the debug toggle all flipped a flag that never reached the GPU.
+    //
+    // VSYNC is guaranteed supported.  For the uncapped path prefer MAILBOX: it
+    // keeps CPU/GPU pipelined and presents the latest frame at each vblank
+    // without blocking the render thread, so render fps is bounded only by the
+    // hardware.  MAILBOX is supported by the NVIDIA Wayland WSI; plain IMMEDIATE
+    // frequently is not, so query before requesting and fall back gracefully.
+    SDL_GPUPresentMode mode = SDL_GPU_PRESENTMODE_VSYNC;
+    if (!enabled) {
+        if (SDL_WindowSupportsGPUPresentMode(device_, window_, SDL_GPU_PRESENTMODE_MAILBOX))
+            mode = SDL_GPU_PRESENTMODE_MAILBOX;
+        else if (SDL_WindowSupportsGPUPresentMode(device_, window_, SDL_GPU_PRESENTMODE_IMMEDIATE))
+            mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+        else
+            SDL_Log("NewRenderer::setVSync: neither MAILBOX nor IMMEDIATE supported; "
+                    "staying on VSYNC (fps stays refresh-capped)");
+    }
+
+    // Composition stays SDR — the format the swapchain was claimed with; changing
+    // only the present mode preserves the swapchain texture format.
+    if (!SDL_SetGPUSwapchainParameters(device_, window_, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode)) {
+        SDL_Log("NewRenderer::setVSync: SDL_SetGPUSwapchainParameters failed: %s", SDL_GetError());
+        return false;
+    }
+
+    SDL_Log("NewRenderer::setVSync: present mode = %s",
+            mode == SDL_GPU_PRESENTMODE_VSYNC     ? "VSYNC"
+            : mode == SDL_GPU_PRESENTMODE_MAILBOX ? "MAILBOX"
+                                                  : "IMMEDIATE");
     return true;
 }
 

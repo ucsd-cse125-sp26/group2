@@ -73,7 +73,7 @@ private:
     InputBindings draftBindings = InputBindings::defaults(); ///< Editable binding draft.
     float draftMouseSensitivity =
         user_settings::kDefaultMouseSensitivity;           ///< Editable mouse-sensitivity draft.
-    float draftHorizontalFovDegrees = 90.0f;                 ///< Editable horizontal-FOV draft.
+    float draftHorizontalFovDegrees = 110.0f;                 ///< Editable horizontal-FOV draft.
     bool draftShowControllerBindings = false;                ///< Editable binding device selector.
     float draftGamepadYawSensitivity = 6.0f;                 ///< Editable gamepad yaw-sensitivity draft.
     float draftGamepadPitchSensitivity = 6.0f;               ///< Editable gamepad pitch-sensitivity draft.

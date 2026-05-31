@@ -768,6 +768,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/RibbonTrail.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/HitscanEffect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/HitscanEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TeslaBeamEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TeslaBeamEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.cpp"
@@ -804,6 +806,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLibrary.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLocomotion.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLocomotion.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinningBackend.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinVertex.hpp"
@@ -827,8 +831,6 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/Hud.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/AbilitySelectionWidget.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeRadialWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeSlotsWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/GrenadeSlotsWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ChatWidget.cpp"
@@ -867,6 +869,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/DamageAccumWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupPrompt.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PrematchBanner.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PrematchBanner.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.cpp"
@@ -1070,6 +1074,8 @@ add_executable(group2
         src/client/menus/home/Home.cpp
         src/client/menus/home/ui/HomeUI.hpp
         src/client/menus/home/ui/HomeUI.cpp
+        src/client/menus/MenuTheme.hpp
+        src/client/menus/MenuTheme.cpp
         src/ecs/components/PowerupSpawner.hpp
         src/ecs/components/PowerupState.hpp
         src/ecs/systems/PowerupSpawnerSystem.cpp
@@ -1381,6 +1387,8 @@ add_executable(server
         src/server/systems/HitboxHistorySystem.cpp
         src/client/animation/CharacterRig.hpp
         src/client/animation/CharacterRig.cpp
+        src/client/animation/AnimationLocomotion.hpp
+        src/client/animation/AnimationLocomotion.cpp
         src/client/animation/CharacterAnimator.hpp
         src/client/animation/CharacterAnimator.cpp
         src/client/animation/AnimationLibrary.hpp
@@ -1695,6 +1703,9 @@ add_executable(clientbot
     # path resolves.
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/PlayerStatusSystem.hpp"
+    # PlayerStatusSystem's death-drop now delegates to spawnDroppedWeapon.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/DroppedWeaponSystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ecs/systems/DroppedWeaponSystem.hpp"
         src/ecs/components/AbilityState.hpp
         src/ecs/abilities/Ability.hpp
         src/ecs/abilities/AbilityTuning.hpp
@@ -1875,6 +1886,38 @@ set_compiler_warnings(audio_math_tests)
 enable_sanitizers(audio_math_tests)
 add_test(NAME audio_math_tests COMMAND audio_math_tests)
 
+add_executable(animation_locomotion_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/animation_locomotion_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLocomotion.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationLocomotion.hpp"
+)
+target_include_directories(animation_locomotion_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(animation_locomotion_tests PRIVATE
+    glm::glm
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(animation_locomotion_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(animation_locomotion_tests)
+enable_sanitizers(animation_locomotion_tests)
+add_test(NAME animation_locomotion_tests COMMAND animation_locomotion_tests)
+
+add_executable(lag_comp_math_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/lag_comp_math_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/LagCompMath.hpp"
+)
+target_include_directories(lag_comp_math_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(lag_comp_math_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(lag_comp_math_tests)
+enable_sanitizers(lag_comp_math_tests)
+add_test(NAME lag_comp_math_tests COMMAND lag_comp_math_tests)
+
 add_executable(voice_jitter_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/voice_jitter_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/voice/VoiceJitterBuffer.cpp"
@@ -1910,6 +1953,25 @@ endif()
 set_compiler_warnings(audio_runtime_tests)
 enable_sanitizers(audio_runtime_tests)
 add_test(NAME audio_runtime_tests COMMAND audio_runtime_tests)
+
+add_executable(tracer_effect_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/tracer_effect_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TracerEffect.cpp"
+)
+target_include_directories(tracer_effect_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+)
+target_link_libraries(tracer_effect_tests PRIVATE
+    EnTT::EnTT
+    glm::glm
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(tracer_effect_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(tracer_effect_tests)
+enable_sanitizers(tracer_effect_tests)
+add_test(NAME tracer_effect_tests COMMAND tracer_effect_tests)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)

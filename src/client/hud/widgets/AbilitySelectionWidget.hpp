@@ -5,6 +5,7 @@
 
 #include "hud/HudWidget.hpp"
 
+#include <array>
 #include <string>
 
 struct AbilitySelectionWidget : HudWidget
@@ -25,4 +26,9 @@ struct AbilitySelectionWidget : HudWidget
 private:
     HudAbilitySelectionState state_;
     std::string abilityMenuLabel_ = "Left Alt";
+    // Per visual slot (0 = left card, 1 = right card): which option index it
+    // renders and the key glyph that selects it. On controller the cards swap
+    // so the physically-left trigger picks the left card. Recomputed in update().
+    std::array<int, 2> slotOption_{0, 1};
+    std::array<std::string, 2> slotTag_{"LMB", "RMB"};
 };

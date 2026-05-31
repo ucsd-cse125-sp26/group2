@@ -258,6 +258,12 @@ private:
     /// @brief Flush + close the CSV if open.  Safe to call from dtor.
     void closeGroundTruthLog() noexcept;
 
+    /// @brief Reset live players to spawn points for countdown
+    void resetPlayersForCountdown();
+
+    /// @brief Determine if server should allow input based on phase
+    [[nodiscard]] bool isGameplayInputAllowed(MatchPhase phase) const;
+
     // ── PR-27: pending client SHOT_INTENTs ───────────────────────────────
     //
     // The network thread enqueues `EventType::ShotIntent` events into

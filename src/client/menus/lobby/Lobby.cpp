@@ -4,6 +4,7 @@
 
 #include "SDL3/SDL_init.h"
 #include "SDL3/SDL_timer.h"
+#include "menus/MenuTheme.hpp"
 #include "ui/LobbyUI.hpp"
 #include "util/InputCapture.hpp"
 #include "util/LocalAddress.hpp"
@@ -36,6 +37,8 @@ bool Lobby::init(AppContext& ctx)
     client->onLobbyState([this](const std::vector<LobbyPlayer>& snapshot, ClientId localId) {
         players = snapshot;
         localClientId = localId;
+        if (const auto latestServerName = client->getLatestServerName(); latestServerName && !latestServerName->empty())
+            serverName = *latestServerName;
     });
 
     client->onLobbyUpdate([this](const LobbyUpdateEvent& update) {
@@ -113,6 +116,9 @@ bool Lobby::init(AppContext& ctx)
         players = latestLobbyState->first;
         localClientId = latestLobbyState->second;
     }
+    if (const auto latestServerName = client->getLatestServerName(); latestServerName && !latestServerName->empty()) {
+        serverName = *latestServerName;
+    }
 
     if (const auto latestMatchConfig = client->getLatestMatchConfig()) {
         matchConfig = latestMatchConfig;
@@ -141,6 +147,7 @@ SDL_AppResult Lobby::iterate()
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    menu_theme::drawBackground(renderer ? renderer->getDevice() : nullptr);
 
     updateStartCountdown();
 
@@ -209,6 +216,9 @@ std::optional<MatchStatePacket> Lobby::consumeStartMatchState()
 
 bool Lobby::canHostStartMatch() const
 {
+    if (players.empty())
+        return false;
+
     for (const auto& player : players) {
         if (player.isHost)
             continue;

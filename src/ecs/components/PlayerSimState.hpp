@@ -101,6 +101,11 @@ struct PlayerSimState
     float wallBlacklistHeight{-1e10f};
     bool wallBlacklistActive{false};
 
+    // ── Bullet-hit slow ────────────────────────────────────────────────────
+    float bulletSlowTimer{0.0f}; ///< Seconds remaining of the bullet-hit movement slow. While > 0 the
+                                 ///< on-foot wish speed is multiplied by k_bulletHitSlowFactor. Refreshed
+                                 ///< by applyBulletSlow() on every hitscan damage tick, ticked down each frame.
+
     // ── Collision recovery ─────────────────────────────────────────────────
     glm::vec3 lastSafePosition{0.0f}; ///< Last KCC-verified non-penetrating capsule center.
     bool lastSafePositionValid{false};

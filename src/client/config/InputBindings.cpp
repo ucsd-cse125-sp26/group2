@@ -319,24 +319,30 @@ InputBindings InputBindings::defaults()
     b.rebind(Action::BuyMenu, Binding::bindKeyboard(SDL_SCANCODE_B));
     b.rebind(Action::PushToTalk, Binding::bindKeyboard(SDL_SCANCODE_V));
 
+    // Controller — standard twin-stick console-FPS layout. Triggers fire/aim,
+    // face buttons handle jump/crouch/reload/interact, bumpers run abilities,
+    // and the D-pad covers weapon swap / grenade / ability menu.
+    b.rebind(Action::Shoot, Binding::bindGamepadAxis(GamepadAxisBinding::RightTrigger), BindingDevice::Controller);
+    b.rebind(Action::Scope, Binding::bindGamepadAxis(GamepadAxisBinding::LeftTrigger), BindingDevice::Controller);
     b.rebind(Action::Jump, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_SOUTH), BindingDevice::Controller);
     b.rebind(Action::Crouch, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_EAST), BindingDevice::Controller);
-    b.rebind(Action::Ability1, Binding::bindGamepadAxis(GamepadAxisBinding::LeftTrigger), BindingDevice::Controller);
-    b.rebind(Action::Shoot, Binding::bindGamepadAxis(GamepadAxisBinding::RightTrigger), BindingDevice::Controller);
     b.rebind(Action::Reload, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_WEST), BindingDevice::Controller);
     b.rebind(Action::Pickup, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_NORTH), BindingDevice::Controller);
-    b.rebind(Action::SwitchToPrimary,
-             Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER),
-             BindingDevice::Controller);
+    b.rebind(Action::Ability1, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER), BindingDevice::Controller);
     b.rebind(
-        Action::SwitchToPrimary, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_UP), BindingDevice::Controller, 1);
-    b.rebind(Action::SwitchToSecondary,
-             Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER),
-             BindingDevice::Controller);
+        Action::Ability2, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), BindingDevice::Controller);
+    b.rebind(
+        Action::SwitchToPrimary, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_UP), BindingDevice::Controller);
     b.rebind(Action::SwitchToSecondary,
              Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_DOWN),
-             BindingDevice::Controller,
-             1);
+             BindingDevice::Controller);
+    b.rebind(
+        Action::CycleGrenade, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_LEFT), BindingDevice::Controller);
+    b.rebind(
+        Action::AbilityMenu, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_RIGHT), BindingDevice::Controller);
+    b.rebind(Action::Scoreboard, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_BACK), BindingDevice::Controller);
+    b.rebind(Action::BuyMenu, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_STICK), BindingDevice::Controller);
+    b.rebind(Action::PushToTalk, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_LEFT_STICK), BindingDevice::Controller);
 
     return b;
 }

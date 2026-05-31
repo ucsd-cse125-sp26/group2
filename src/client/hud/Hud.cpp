@@ -14,7 +14,6 @@
 #include "widgets/DamageNumberWidget.hpp"
 #include "widgets/EnemyWorldHealthBar.hpp"
 #include "widgets/EquipmentSlots.hpp"
-#include "widgets/GrenadeRadialWidget.hpp"
 #include "widgets/GrenadeSlotsWidget.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
@@ -22,6 +21,7 @@
 #include "widgets/Minimap.hpp"
 #include "widgets/PickupNotification.hpp"
 #include "widgets/PickupPrompt.hpp"
+#include "widgets/PrematchBanner.hpp"
 #include "widgets/RailgunScopeWidget.hpp"
 #include "widgets/Scoreboard.hpp"
 #include "widgets/ShotgunPelletWidget.hpp"
@@ -192,7 +192,6 @@ void Hud::createWidgets()
     // Directional damage arcs around the reticle.
     widgets_.push_back(std::make_unique<DamageIndicator>());
     widgets_.push_back(std::make_unique<AbilitySelectionWidget>());
-    widgets_.push_back(std::make_unique<GrenadeRadialWidget>());
 
     // Top right: killfeed.
     widgets_.push_back(std::make_unique<KillFeed>());
@@ -212,4 +211,7 @@ void Hud::createWidgets()
     // TeamStatusBar is intentionally omitted in the Voidfall design.
     widgets_.push_back(std::make_unique<Scoreboard>());
     widgets_.push_back(std::make_unique<PickupPrompt>());
+
+    // Pre-match overlay (warmup waiting message + countdown integer).
+    widgets_.push_back(std::make_unique<PrematchBanner>());
 }

@@ -73,6 +73,25 @@ public:
         bool enabled = false;
     };
 
+    /// @brief Direct UDP hole-punch assist for global joins.
+    ///
+    /// While the client connects, it periodically re-sends a directory
+    /// PunchRequest from THIS session's game socket. That makes the
+    /// directory record the game socket's NAT mapping (not the throwaway
+    /// helper socket used to discover the server) and re-notify the host,
+    /// so the host punches back to the port we actually game on. Without
+    /// this, port-restricted / symmetric NATs have no pinhole for our
+    /// ConnectionRequest and the join times out. The request bytes are an
+    /// opaque pre-encoded directory-control envelope so the transport stays
+    /// agnostic of the discovery wire format.
+    struct PunchAssist
+    {
+        std::string directoryHost;         ///< Directory host to re-punch through.
+        Uint16 directoryPort = 0;          ///< Directory UDP port.
+        std::vector<std::uint8_t> request; ///< Pre-encoded PunchRequest envelope.
+        bool enabled = false;
+    };
+
     UdpSessionTransport();
     UdpSessionTransport(const UdpSessionTransport&) = delete;
     UdpSessionTransport& operator=(const UdpSessionTransport&) = delete;
@@ -83,6 +102,7 @@ public:
     void close();
 
     void setRelayConfig(const RelayConfig& cfg);
+    void setPunchAssist(PunchAssist assist);
     void preferRelay(bool enabled) { preferRelay_ = enabled; }
 
     bool pollEvent(Event& out);
@@ -187,6 +207,8 @@ private:
     UdpEndpointAddr serverAddr_;
     UdpEndpointAddr relayAddr_;
     RelayConfig relayConfig_;
+    PunchAssist punchAssist_;
+    UdpEndpointAddr punchDirectoryAddr_;
     bool preferRelay_ = false;
     std::uint32_t clientNonce_ = 0;
     std::uint64_t clientConnectionId_ = 0;

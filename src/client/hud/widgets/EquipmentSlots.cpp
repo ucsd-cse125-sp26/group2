@@ -22,8 +22,10 @@ void EquipmentSlots::update(float /*dt*/, const HudGameState& state, HudTweenPoo
 {
     state_ = state.equipment;
     if (state.bindings) {
-        primaryAbilityLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Ability1));
-        secondaryAbilityLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Ability2));
+        primaryAbilityLabel_ =
+            InputBindings::bindingLabel(state.bindings->get(Action::Ability1, state.activeInputDevice));
+        secondaryAbilityLabel_ =
+            InputBindings::bindingLabel(state.bindings->get(Action::Ability2, state.activeInputDevice));
     }
     visible = state.isAlive;
 }

@@ -105,7 +105,8 @@ public:
                       Uint16 port,
                       const TransportConfig& transport = {},
                       int timeoutMs = -1,
-                      const std::optional<net::UdpSessionTransport::RelayConfig>& relay = std::nullopt);
+                      const std::optional<net::UdpSessionTransport::RelayConfig>& relay = std::nullopt,
+                      const std::optional<net::UdpSessionTransport::PunchAssist>& punch = std::nullopt);
 
     /// @brief Close the socket and release the resolved address.
     void shutdown();
@@ -221,6 +222,9 @@ public:
 
     /// @brief Return the latest lobby roster received from the server, if any.
     std::optional<std::pair<std::vector<LobbyPlayer>, ClientId>> getLatestLobbyState() const;
+
+    /// @brief Return the latest server display name received from the server, if any.
+    std::optional<std::string> getLatestServerName() const { return latestServerName_; }
 
     /// @brief Latest server-acked client predict tick.
     ///
@@ -396,6 +400,8 @@ public:
         return simulatedLossPercent_.load(std::memory_order_relaxed);
     }
 
+    bool sendGameplayReady();
+
 private:
     MessageStream msgStream{nullptr};              ///< Framed message stream for server communication.
     NET_Address* serverAddr = nullptr;             ///< Resolved server address.
@@ -414,7 +420,8 @@ private:
         latestMatchState_;                         ///< Most-recent MATCH_STATE packet; populated by dispatchMessage.
     std::optional<MatchConfig> latestMatchConfig_; ///< Most-recent MATCH_CONFIG packet; populated by dispatchMessage.
     std::optional<std::vector<LobbyPlayer>> latestLobbyPlayers_; ///< Most-recent lobby roster received from the server.
-    std::optional<ClientId> latestLobbyLocalId_; ///< This client's ID as reported in the LOBBY_STATE packet.
+    std::optional<ClientId> latestLobbyLocalId_;  ///< This client's ID as reported in the LOBBY_STATE packet.
+    std::optional<std::string> latestServerName_; ///< Server display name reported by the latest LOBBY_STATE packet.
 
     // ── PR-10 + PR-14 (server-perf): snapshot delta encoding state ────
     //

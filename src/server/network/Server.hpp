@@ -126,6 +126,10 @@ public:
         ClientId id;
         uint16_t rttMs;
         uint8_t interpDelaySnapshots;
+        /// PR-31: client's measured render delay in ms (EMA-derived). Zero
+        /// when interp is off or the client predates the field, which
+        /// selects the snapshot-count fallback in computeRewindTicks.
+        uint16_t interpDelayMs;
     };
     void snapshotClientNetStates(std::vector<ClientNetState>& out);
 
@@ -315,6 +319,21 @@ private:
         /// engine ships this value over the wire as well — see TF2
         /// `cl_interp` / Quake `cl_interp_ratio`.
         uint8_t lastReportedInterpDelaySnapshots = 0;
+
+        /// @brief PR-31: client's most-recent self-reported render delay in
+        /// *milliseconds*, computed client-side as `interpDelaySnapshots ×
+        /// EMA(observed snapshot-apply interval)`.  Unlike the snapshot
+        /// count above — which the server multiplies by its own *nominal*
+        /// cadence — this carries the client's *measured* render time, so it
+        /// stays accurate when network jitter or the post-join warm-up
+        /// window pushes the effective snapshot rate away from nominal.
+        ///
+        /// `updateLagCompTargets` prefers this term whenever it is non-zero
+        /// (`server::lagcomp::computeRewindTicks`), falling back to the
+        /// snapshot-count path when it is 0 (interp disabled, or a client
+        /// that predates this field).  Stays at 0 until the first INPUT
+        /// packet arrives.
+        uint16_t lastReportedInterpDelayMs = 0;
 
         Uint64 chatWindowStartMs = 0;
         std::uint8_t chatMessagesInWindow = 0;

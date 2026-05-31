@@ -5,6 +5,7 @@
 
 #include "PlayerStatusSystem.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
+#include "ecs/components/BeamLockState.hpp"
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
@@ -42,6 +43,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -470,8 +472,17 @@ inline void handleGrenadeInput(Registry& registry,
                                GrenadeState& grenades,
                                bool gravityFlipped)
 {
-    if (input.grenadeMenuHeld && input.grenadeSelectIndex < kGrenadeTypeCount) {
-        grenades.selected = grenadeTypeAt(input.grenadeSelectIndex);
+    // Cycle the selected grenade type. next/prev are edge-pulsed once per input
+    // and consumed here so the selection advances exactly one step.
+    if (input.grenadeCycleNext || input.grenadeCyclePrev) {
+        const int count = static_cast<int>(kGrenadeTypeCount);
+        int index = static_cast<int>(grenadeTypeIndex(grenades.selected));
+        index += input.grenadeCycleNext ? 1 : 0;
+        index -= input.grenadeCyclePrev ? 1 : 0;
+        index = ((index % count) + count) % count;
+        grenades.selected = grenadeTypeAt(static_cast<std::size_t>(index));
+        input.grenadeCycleNext = false;
+        input.grenadeCyclePrev = false;
     }
 
     if (!input.throwGrenade) {
@@ -527,6 +538,70 @@ handleScope(Registry& registry, entt::entity shooter, const InputSnapshot& input
     }
 }
 
+/// @brief Result of an auto-lock cone scan for a Tesla-style beam.
+struct BeamLockResult
+{
+    entt::entity target{entt::null}; ///< Best locked enemy, or null if none in cone.
+    glm::vec3 point{0.0f};           ///< Aim point on the target (centre of mass) for VFX + damage.
+    BodyRegion region{BodyRegion::UpperTorso}; ///< Region credited for the hit (centre mass = torso).
+};
+
+/// @brief Pick the enemy closest to the crosshair inside the lock-on cone.
+///
+/// Scans every other player's hitbox capsules. A candidate qualifies when its
+/// centre of mass is within `maxRange`, inside the cone of half-angle
+/// `coneHalfAngleDeg` around `viewDir`, and has clear line-of-sight from `eye`
+/// (no world geometry between the shooter and the target). Among qualifying
+/// candidates the one with the smallest angular deviation from the crosshair
+/// wins. Must be called while any lag-compensation rewind guard is in scope so
+/// the capsules reflect the attacker's screen-time positions.
+inline BeamLockResult
+findBeamLockTarget(Registry& registry, entt::entity shooter, glm::vec3 eye, glm::vec3 viewDir, const WeaponConfig& config)
+{
+    BeamLockResult result;
+    const float maxRange = (config.maxRange > 0.0f) ? config.maxRange : physics::k_hitscanRange;
+    constexpr float kDegToRad = 3.14159265358979f / 180.0f;
+    const float minCos = std::cos(config.coneHalfAngleDeg * kDegToRad);
+    float bestCos = minCos; // candidate must beat the cone edge to qualify
+
+    registry.view<Position, CollisionShape, HitboxInstance>().each(
+        [&](entt::entity e, const Position&, const CollisionShape&, const HitboxInstance& hb) {
+            if (e == shooter || hb.capsules.empty())
+                return;
+
+            // Centre of mass = midpoint of the capsule-derived AABB.
+            glm::vec3 lo{std::numeric_limits<float>::max()};
+            glm::vec3 hi{std::numeric_limits<float>::lowest()};
+            for (const WorldCapsule& cap : hb.capsules) {
+                lo = glm::min(lo, glm::min(cap.pointA, cap.pointB) - glm::vec3{cap.radius});
+                hi = glm::max(hi, glm::max(cap.pointA, cap.pointB) + glm::vec3{cap.radius});
+            }
+            const glm::vec3 centre = (lo + hi) * 0.5f;
+
+            const glm::vec3 to = centre - eye;
+            const float dist = glm::length(to);
+            if (dist < 1e-3f || dist > maxRange)
+                return;
+
+            const glm::vec3 dir = to / dist;
+            const float c = glm::dot(dir, viewDir);
+            if (c <= bestCos)
+                return; // outside cone, or not closer to crosshair than the current best
+
+            // Line-of-sight: reject if world geometry sits between eye and target.
+            const physics::HitscanHit worldHit = physics::raycastWorld(eye, dir, physics::activeWorld());
+            if (worldHit.hit && worldHit.distance < dist - 1.0f)
+                return;
+
+            bestCos = c;
+            result.target = e;
+            result.point = centre;
+            result.region = BodyRegion::UpperTorso;
+        });
+
+    return result;
+}
+
 /// @brief Process fire input: hitscan raycasts, beam weapons, charge shots, and projectiles.
 ///
 /// Handles three weapon archetypes:
@@ -576,6 +651,10 @@ inline void handleFire(Registry& registry,
         if (auto* beam = registry.try_get<BeamState>(shooter)) {
             beam->active = false; // turn off beam visuals during reload / throw
         }
+        if (auto* lockState = registry.try_get<BeamLockState>(shooter)) {
+            lockState->target = entt::null; // reload breaks the lock / resets ramp
+            lockState->duration = 0.0f;
+        }
         return;
     }
 
@@ -585,6 +664,12 @@ inline void handleFire(Registry& registry,
 
         if (!input.shooting || gun.currentMagAmmo <= 0) {
             beam.active = false;
+            // Releasing the trigger breaks the lock: the ramp restarts from base
+            // next time fire begins (strict, no carry-over).
+            if (auto* lockState = registry.try_get<BeamLockState>(shooter)) {
+                lockState->target = entt::null;
+                lockState->duration = 0.0f;
+            }
             return;
         }
 
@@ -596,10 +681,63 @@ inline void handleFire(Registry& registry,
             gun.fireCooldown -= static_cast<float>(drain);
         }
 
-        // Raycast to find beam endpoint.
+        // Beam origin (eye) + aim direction.
         const float eyeDir = gravityFlipped ? -1.0f : 1.0f;
         const glm::vec3 eye = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.75f * eyeDir, 0.0f};
         const glm::vec3 direction = viewForward(input.yaw, input.pitch);
+
+        // ── Auto-lock cone beam (Tesla Cannon) ──
+        // Pick the enemy closest to the crosshair inside the lock-on cone and
+        // within range, then apply ramping damage that resets when the lock
+        // breaks. Shields resist (energy-vs-energy), forcing a finisher role.
+        if (config.autoLockBeam) {
+            const float maxRange = (config.maxRange > 0.0f) ? config.maxRange : physics::k_hitscanRange;
+            // Rewind so the cone scan sees the attacker's screen-time positions.
+            const auto rewindGuard =
+                systems::rewindHitboxes(registry, shooter, &eye, &direction, maxRange, 0.0f);
+            const BeamLockResult lock = findBeamLockTarget(registry, shooter, eye, direction, config);
+
+            auto& lockState = registry.get_or_emplace<BeamLockState>(shooter);
+            beam.active = true;
+            beam.type = gun.type;
+            beam.origin = eye;
+
+            if (lock.target != entt::null && registry.valid(lock.target)) {
+                // Maintain or (re)acquire: any target change resets the ramp.
+                if (lock.target == lockState.target) {
+                    lockState.duration += dt;
+                } else {
+                    lockState.target = lock.target;
+                    lockState.duration = 0.0f;
+                }
+
+                // Ramp DPS from base (`dps`) to `dpsMax` over `dpsRampTime`.
+                float dps = config.dps;
+                if (config.dpsMax > config.dps && config.dpsRampTime > 0.0f) {
+                    const float r = std::clamp(lockState.duration / config.dpsRampTime, 0.0f, 1.0f);
+                    dps = config.dps + (config.dpsMax - config.dps) * r;
+                }
+                const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(lock.region)];
+                applyDamage(dps * dt * multiplier,
+                            lock.target,
+                            shooter,
+                            registry,
+                            killEvents,
+                            lock.region,
+                            config.shieldDamageMultiplier);
+                applyBulletSlow(lock.target, registry);
+
+                beam.hitPoint = lock.point;
+            } else {
+                // No valid lock: ramp resets; beam sprays forward to the cap.
+                lockState.target = entt::null;
+                lockState.duration = 0.0f;
+                beam.hitPoint = eye + direction * maxRange;
+            }
+            return;
+        }
+
+        // ── Legacy straight-ray beam path ──
         // Phase 6 lag-compensated hitscan. The guard reads
         // `LagCompTarget` off `shooter` (set each tick by the server's
         // lag-comp scheduler from this client's reported RTT), swaps
@@ -629,6 +767,7 @@ inline void handleFire(Registry& registry,
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
             applyDamage(config.dps * dt * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+            applyBulletSlow(hit.entity, registry);
         }
 
         // Update BeamState (synced to clients via registry snapshot).
@@ -706,6 +845,7 @@ inline void handleFire(Registry& registry,
             auto outGoingDamage =
                 (config.damage + (config.chargeDamage * (gun.chargeTime / config.maxChargeTime))) * multiplier;
             chargeDealtDamage = applyDamage(outGoingDamage, hit.entity, shooter, registry, killEvents, hit.region);
+            applyBulletSlow(hit.entity, registry);
             if (hit.region == BodyRegion::Head && combatLogEnabled()) {
                 SDL_Log("[weapon] HEADSHOT! charge weapon hit %d in head for %.0f damage",
                         static_cast<int>(hit.entity),
@@ -785,6 +925,7 @@ inline void handleFire(Registry& registry,
                 const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
                 dealtDamage =
                     applyDamage(config.damage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+                applyBulletSlow(hit.entity, registry);
                 if (hit.region == BodyRegion::Head && combatLogEnabled()) {
                     SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",
                             static_cast<int>(shooter),
@@ -846,7 +987,7 @@ inline void handleFire(Registry& registry,
             // HUD widget reads per-pellet hit/headshot from the replicated
             // NetParticleEvents.
             static constexpr int k_pelletCount = 11;
-            static constexpr float k_spreadRad = 0.0436f; // ~2.5° (outer ring) — tightened 50%
+            static constexpr float k_spreadRad = 0.218f; // ~12.5° (outer ring) — 5× the original 0.0436 baseline
             // Pre-computed offsets in tangent plane. Order MUST match
             // ShotgunPelletWidget's k_pelletPositions so widget colours line
             // up with the actual ray that was fired.

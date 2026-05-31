@@ -4,22 +4,23 @@
 
 #include "MatchSystem.hpp"
 
+#include "ecs/components/ClientId.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/registry/Registry.hpp"
 
 namespace systems
 {
-bool handleWinCondition(Registry& registry, int killsToWin)
+std::optional<ClientId> handleWinCondition(Registry& registry, int killsToWin)
 {
-    auto view = registry.view<PlayerMatchStats>();
-    bool winConditionMet = false;
+    auto view = registry.view<PlayerMatchStats, ClientId>();
+    std::optional<ClientId> winnerId;
     for (auto entity : view) {
         if (view.get<PlayerMatchStats>(entity).kills >= killsToWin) {
-            winConditionMet = true;
+            winnerId = view.get<ClientId>(entity);
             registry.patch<PlayerMatchStats>(entity, [&](PlayerMatchStats& stats) { stats.hasWon = true; });
         }
     }
-    return winConditionMet;
+    return winnerId;
 }
 
 void resetStats(Registry& registry)
