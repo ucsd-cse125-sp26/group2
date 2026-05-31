@@ -214,7 +214,7 @@ std::optional<MatchStatePacket> Lobby::consumeStartMatchState()
 
 bool Lobby::canHostStartMatch() const
 {
-    if (players.size() < 2)
+    if (players.empty())
         return false;
 
     for (const auto& player : players) {

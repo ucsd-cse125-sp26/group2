@@ -208,7 +208,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .dps = 14.0f,        // ramp floor, -60% (was 35) — Tesla Cannon, low until lock-on ramps up
             .ammoPerSecond = 20.0f,
             .autoLockBeam = true,
-            .maxRange = 200.0f,           // ~5 m on the small map (unit ≈ 1 inch)
+            .maxRange = 140.0f,           // -30% range (was 200)
             .coneHalfAngleDeg = 30.0f,    // wide, forgiving — true no-aim
             .dpsMax = 19.6f,              // ramp ceiling = floor +40% (was 2× base) after dpsRampTime
             .dpsRampTime = 2.0f,          // seconds of continuous lock to reach dpsMax

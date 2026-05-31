@@ -109,10 +109,8 @@ bool LobbyManager::hostStartMatch(ClientId sender)
         return false;
     }
 
-    if (players.size() < 2) {
-        SDL_Log("LobbyManager: rejecting START_MATCH from host %u because the lobby has only %zu player(s)",
-                sender.value,
-                players.size());
+    if (players.empty()) {
+        SDL_Log("LobbyManager: rejecting START_MATCH from host %u because the lobby is empty", sender.value);
         return false;
     }
 
