@@ -291,107 +291,41 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
 /// @brief Returns hand grip/mount points for a weapon type.
 inline const WeaponHandMountParams& getWeaponHandMountParams(WeaponType type)
 {
+    // Rifle is the only weapon with hand-tuned IK so far. Every other weapon
+    // reuses the rifle setup as its default until per-weapon tuning lands —
+    // looks closer to "two hands on a gun" than the placeholder offsets it
+    // replaces, and gives the tuner a known-good baseline to nudge from.
+    static constexpr WeaponHandMountParams k_rifleHandMounts{
+        .rightHand = {.elbowOffset = {-8.4f, -17.99f, -20.35f},
+                      .palm = {.offset = {-1.05f, -11.39f, -7.2f}, .rotationDegrees = {-6.0f, 92.0f, 94.0f}},
+                      .fingers = {{
+                          {.offset = {-0.3f, 3.05f, 1.9f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {-2.6f, 0.3f, -2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {-2.7f, -0.5f, -0.4f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {-2.6f, -1.0f, 0.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                          {.offset = {-2.5f, -1.3f, 1.4f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                      }}},
+        .leftHand = {.elbowOffset = {13.7f, -13.14f, -13.3f},
+                     .palm = {.offset = {3.6f, -12.99f, 2.0f}, .rotationDegrees = {-3.0f, -102.0f, -72.0f}},
+                     .fingers = {{
+                         {.offset = {2.3f, 0.7f, 1.3f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {2.6f, -0.2f, -1.9f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {2.7f, -0.8f, -0.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {2.6f, -1.1f, 0.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {2.5f, -1.2f, 1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                     }}},
+        .viewmodelHandScale = 45.0f};
     static const std::array<WeaponHandMountParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle: trigger hand near the rear grip, support hand wrapped around the mag well.
-        {.rightHand = {.elbowOffset = {-8.4f, -17.99f, -20.35f},
-                       .palm = {.offset = {-1.05f, -11.39f, -7.2f}, .rotationDegrees = {-6.0f, 92.0f, 94.0f}},
-                       .fingers = {{
-                           {.offset = {-0.3f, 3.05f, 1.9f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-2.6f, 0.3f, -2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-2.7f, -0.5f, -0.4f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-2.6f, -1.0f, 0.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-2.5f, -1.3f, 1.4f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                       }}},
-         .leftHand = {.elbowOffset = {13.7f, -13.14f, -13.3f},
-                      .palm = {.offset = {3.6f, -12.99f, 2.0f}, .rotationDegrees = {-3.0f, -102.0f, -72.0f}},
-                      .fingers = {{
-                          {.offset = {2.3f, 0.7f, 1.3f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {2.6f, -0.2f, -1.9f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {2.7f, -0.8f, -0.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {2.6f, -1.1f, 0.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {2.5f, -1.2f, 1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      }}},
-         .viewmodelHandScale = 45.0f},
-        // Rocket launcher: wider support stance.
-        {.rightHand = {.elbowOffset = {14.0f, -11.0f, -25.0f},
-                       .palm = {.offset = {3.0f, -5.5f, -12.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                       .fingers = {{
-                           {.offset = {-2.0f, 1.5f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-1.5f, 2.3f, 3.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-0.4f, 2.0f, 3.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {0.6f, 1.7f, 2.4f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {1.6f, 1.4f, 1.9f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                       }}},
-         .leftHand = {.elbowOffset = {-22.0f, -10.0f, 6.0f},
-                      .palm = {.offset = {-10.0f, -5.0f, 18.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      .fingers = {{
-                          {.offset = {2.5f, 1.2f, -3.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {-0.8f, 2.2f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {0.0f, 2.0f, 3.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {0.8f, 1.7f, 3.1f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {1.6f, 1.2f, 2.4f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      }}},
-         .viewmodelHandScale = 45.0f},
-        // Railgun: long front support grip.
-        {.rightHand = {.elbowOffset = {12.0f, -9.0f, -20.0f},
-                       .palm = {.offset = {2.5f, -4.5f, -8.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                       .fingers = {{
-                           {.offset = {-2.0f, 1.3f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-1.5f, 2.0f, 3.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-0.5f, 1.8f, 3.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {0.5f, 1.5f, 2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {1.5f, 1.2f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                       }}},
-         .leftHand = {.elbowOffset = {-20.0f, -10.0f, 5.0f},
-                      .palm = {.offset = {-8.0f, -4.5f, 16.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      .fingers = {{
-                          {.offset = {2.2f, 1.3f, -2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {-0.6f, 2.1f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {0.0f, 1.9f, 3.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {0.7f, 1.5f, 3.2f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {1.4f, 1.1f, 2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      }}},
-         .viewmodelHandScale = 42.0f},
-        // Energy gun / pistol: compact two-hand grip.
-        {.rightHand = {.elbowOffset = {10.0f, -8.0f, -14.0f},
-                       .palm = {.offset = {2.0f, -4.0f, -4.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                       .fingers = {{
-                           {.offset = {-1.7f, 1.3f, 1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-1.2f, 2.0f, 2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-0.2f, 1.7f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {0.8f, 1.4f, 1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {1.7f, 1.1f, 1.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                       }}},
-         .leftHand = {.elbowOffset = {-15.0f, -9.0f, 0.0f},
-                      .palm = {.offset = {-5.5f, -4.5f, 5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      .fingers = {{
-                          {.offset = {2.0f, 1.3f, -2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {-0.7f, 2.2f, 1.8f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {0.0f, 2.0f, 2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {0.7f, 1.7f, 2.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {1.3f, 1.3f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      }}},
-         .viewmodelHandScale = 42.0f},
-        // Shotgun: copy EnergyGun grip until tuned (same mesh).
-        {.rightHand = {.elbowOffset = {10.0f, -8.0f, -14.0f},
-                       .palm = {.offset = {2.0f, -4.0f, -4.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                       .fingers = {{
-                           {.offset = {-1.7f, 1.3f, 1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-1.2f, 2.0f, 2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {-0.2f, 1.7f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {0.8f, 1.4f, 1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                           {.offset = {1.7f, 1.1f, 1.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                       }}},
-         .leftHand = {.elbowOffset = {-15.0f, -9.0f, 0.0f},
-                      .palm = {.offset = {-5.5f, -4.5f, 5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      .fingers = {{
-                          {.offset = {2.0f, 1.3f, -2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {-0.7f, 2.2f, 1.8f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {0.0f, 2.0f, 2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {0.7f, 1.7f, 2.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {1.3f, 1.3f, 2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      }}},
-         .viewmodelHandScale = 42.0f},
+        k_rifleHandMounts,
+        // Rocket launcher — rifle defaults until tuned.
+        k_rifleHandMounts,
+        // RailGun / charge rifle — rifle defaults until tuned.
+        k_rifleHandMounts,
+        // Energy gun / pistol — rifle defaults until tuned.
+        k_rifleHandMounts,
+        // Shotgun — rifle defaults until tuned.
+        k_rifleHandMounts,
     }};
 
     return k_params[static_cast<std::size_t>(type)];
@@ -400,117 +334,41 @@ inline const WeaponHandMountParams& getWeaponHandMountParams(WeaponType type)
 /// @brief Returns first-person-only arm controls for a weapon type.
 inline const FirstPersonHandMountParams& getFirstPersonHandMountParams(WeaponType type)
 {
+    // Rifle defaults are the only hand-tuned first-person arm set. Every
+    // other weapon reuses them until per-weapon tuning lands.
+    static constexpr FirstPersonHandMountParams k_rifleFirstPerson{
+        .rightArm = {.shoulderOffset = {20.0f, -22.0f, -38.0f},
+                     .elbowOffset = {14.0f, -12.0f, -22.0f},
+                     .palm = {.offset = {2.5f, -4.0f, -7.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                     .fingers = {{
+                         {.offset = {0.5f, -2.8f, -5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {1.0f, -2.0f, -3.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {2.0f, -2.3f, -4.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {3.0f, -2.6f, -4.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                         {.offset = {4.0f, -2.9f, -5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                     }}},
+        .leftArm = {.shoulderOffset = {-28.0f, -23.0f, -24.0f},
+                    .elbowOffset = {-20.0f, -13.0f, -4.0f},
+                    .palm = {.offset = {-8.0f, -4.5f, 13.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                    .fingers = {{
+                        {.offset = {-6.0f, -3.2f, 10.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                        {.offset = {-8.5f, -2.2f, 15.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                        {.offset = {-8.0f, -2.4f, 16.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                        {.offset = {-7.2f, -2.8f, 16.2f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                        {.offset = {-6.5f, -3.2f, 15.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
+                    }}},
+        .scale = 45.0f};
     static const std::array<FirstPersonHandMountParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle
-        {.rightArm = {.shoulderOffset = {20.0f, -22.0f, -38.0f},
-                      .elbowOffset = {14.0f, -12.0f, -22.0f},
-                      .palm = {.offset = {2.5f, -4.0f, -7.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      .fingers = {{
-                          {.offset = {0.5f, -2.8f, -5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {1.0f, -2.0f, -3.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {2.0f, -2.3f, -4.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {3.0f, -2.6f, -4.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {4.0f, -2.9f, -5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      }}},
-         .leftArm = {.shoulderOffset = {-28.0f, -23.0f, -24.0f},
-                     .elbowOffset = {-20.0f, -13.0f, -4.0f},
-                     .palm = {.offset = {-8.0f, -4.5f, 13.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                     .fingers = {{
-                         {.offset = {-6.0f, -3.2f, 10.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-8.5f, -2.2f, 15.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-8.0f, -2.4f, 16.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-7.2f, -2.8f, 16.2f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-6.5f, -3.2f, 15.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                     }}},
-         .scale = 45.0f},
-        // Rocket
-        {.rightArm = {.shoulderOffset = {22.0f, -24.0f, -44.0f},
-                      .elbowOffset = {15.0f, -14.0f, -28.0f},
-                      .palm = {.offset = {3.0f, -5.5f, -12.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      .fingers = {{
-                          {.offset = {1.0f, -4.0f, -10.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {1.5f, -3.2f, -8.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {2.6f, -3.5f, -9.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {3.6f, -3.8f, -9.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {4.6f, -4.1f, -10.1f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      }}},
-         .leftArm = {.shoulderOffset = {-30.0f, -24.0f, -20.0f},
-                     .elbowOffset = {-23.0f, -14.0f, 4.0f},
-                     .palm = {.offset = {-10.0f, -5.0f, 18.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                     .fingers = {{
-                         {.offset = {-7.5f, -3.8f, 15.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-10.8f, -2.8f, 20.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-10.0f, -3.0f, 21.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-9.2f, -3.3f, 21.1f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-8.4f, -3.8f, 20.4f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                     }}},
-         .scale = 45.0f},
-        // RailGun / charge rifle
-        {.rightArm = {.shoulderOffset = {20.0f, -22.0f, -40.0f},
-                      .elbowOffset = {14.0f, -12.0f, -24.0f},
-                      .palm = {.offset = {2.5f, -4.5f, -8.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      .fingers = {{
-                          {.offset = {0.5f, -3.2f, -6.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {1.0f, -2.5f, -4.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {2.0f, -2.7f, -5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {3.0f, -3.0f, -5.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {4.0f, -3.3f, -6.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      }}},
-         .leftArm = {.shoulderOffset = {-30.0f, -23.0f, -20.0f},
-                     .elbowOffset = {-22.0f, -13.0f, 2.0f},
-                     .palm = {.offset = {-8.0f, -4.5f, 16.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                     .fingers = {{
-                         {.offset = {-5.8f, -3.2f, 13.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-8.6f, -2.4f, 18.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-8.0f, -2.6f, 19.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-7.3f, -3.0f, 19.2f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-6.6f, -3.4f, 18.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                     }}},
-         .scale = 42.0f},
-        // EnergyGun
-        {.rightArm = {.shoulderOffset = {18.0f, -22.0f, -34.0f},
-                      .elbowOffset = {12.0f, -12.0f, -18.0f},
-                      .palm = {.offset = {2.0f, -4.0f, -4.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      .fingers = {{
-                          {.offset = {0.3f, -2.7f, -2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {0.8f, -2.0f, -1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {1.8f, -2.3f, -2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {2.8f, -2.6f, -2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {3.7f, -2.9f, -3.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      }}},
-         .leftArm = {.shoulderOffset = {-25.0f, -22.0f, -18.0f},
-                     .elbowOffset = {-17.0f, -12.0f, -2.0f},
-                     .palm = {.offset = {-5.5f, -4.5f, 5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                     .fingers = {{
-                         {.offset = {-3.5f, -3.2f, 3.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-6.2f, -2.3f, 6.8f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-5.5f, -2.5f, 7.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-4.8f, -2.8f, 7.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-4.2f, -3.2f, 7.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                     }}},
-         .scale = 42.0f},
-        // Shotgun — copies EnergyGun arm controls (same mesh).
-        {.rightArm = {.shoulderOffset = {18.0f, -22.0f, -34.0f},
-                      .elbowOffset = {12.0f, -12.0f, -18.0f},
-                      .palm = {.offset = {2.0f, -4.0f, -4.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      .fingers = {{
-                          {.offset = {0.3f, -2.7f, -2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {0.8f, -2.0f, -1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {1.8f, -2.3f, -2.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {2.8f, -2.6f, -2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {3.7f, -2.9f, -3.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      }}},
-         .leftArm = {.shoulderOffset = {-25.0f, -22.0f, -18.0f},
-                     .elbowOffset = {-17.0f, -12.0f, -2.0f},
-                     .palm = {.offset = {-5.5f, -4.5f, 5.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                     .fingers = {{
-                         {.offset = {-3.5f, -3.2f, 3.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-6.2f, -2.3f, 6.8f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-5.5f, -2.5f, 7.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-4.8f, -2.8f, 7.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {-4.2f, -3.2f, 7.0f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                     }}},
-         .scale = 42.0f},
+        k_rifleFirstPerson,
+        // Rocket — rifle defaults until tuned.
+        k_rifleFirstPerson,
+        // RailGun / charge rifle — rifle defaults until tuned.
+        k_rifleFirstPerson,
+        // EnergyGun — rifle defaults until tuned.
+        k_rifleFirstPerson,
+        // Shotgun — rifle defaults until tuned.
+        k_rifleFirstPerson,
     }};
 
     return k_params[static_cast<std::size_t>(type)];

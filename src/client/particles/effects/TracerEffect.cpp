@@ -41,7 +41,7 @@ void TracerEffect::spawnFree(glm::vec3 tip, glm::vec3 tail, float lifetime)
 
     slot->tip = tip;
     slot->tail = tail;
-    slot->radius = 8.0f;
+    slot->radius = 16.0f;
     slot->brightness = 1.f;
     slot->coreColor = {1.f, 0.7f, 0.25f, 1.f};
     slot->edgeColor = {1.f, 0.45f, 0.05f, 0.4f};

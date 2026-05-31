@@ -17,6 +17,12 @@ namespace tms
 
 constexpr float k_walkSpeed =
     550.0f; ///< Max wish speed when walking (u/s). Sprint removed; this is the only base speed.
+            ///< Kept for non-walking callers (currentWishSpeed, DebugUI). On-foot walking
+            ///< uses the asymmetric forward/strafe pair below.
+constexpr float k_walkForwardSpeed = 620.0f; ///< Forward (W/S) wish speed on foot (u/s) — slightly faster than the
+                                             ///< legacy uniform value so a pure forward run feels punchier.
+constexpr float k_walkStrafeSpeed = 350.0f;  ///< Side strafe (A/D) wish speed on foot (u/s). Sits below
+                                             ///< k_slideMinStartSpeed so pure-strafe momentum can never trigger a slide.
 constexpr float k_sprintSpeed = 550.0f; ///< Deprecated: sprint removed. Kept equal to k_walkSpeed for safety.
 constexpr float k_crouchSpeed = 350.0f; ///< Max wish speed when crouching (u/s).
 constexpr float k_adsSpeed = 280.0f;    ///< Max wish speed while ADS-ing a precision (charge) weapon (u/s).
@@ -84,7 +90,9 @@ constexpr float k_wallrunSameWallReattachSpeed = 100.0f;   ///< Min inward speed
 constexpr float k_wallrunMaxSpeed = 800.0f;                ///< Max speed while wallrunning (u/s).
 constexpr float k_wallrunAccel = 500.0f;                   ///< Forward acceleration along wall (u/s^2).
 constexpr float k_wallrunPushForce = 800.0f;               ///< Force pushing player toward wall (u/s^2).
-constexpr float k_wallrunKickoffDuration = 1.75f;          ///< Max time on same wall before kickoff (s).
+constexpr float k_wallrunKickoffDuration = 5.0f;           ///< Max time on same wall before forced detach (s).
+                                                           ///< At this point the wall lets go: no impulse, no jump
+                                                           ///< refresh — the player drops off and gravity takes over.
 constexpr float k_wallrunSpeedLossDelay = 0.2f;            ///< Delay before clamping speed on wall (s).
 constexpr float k_wallrunIntentThreshold = 0.1f;           ///< Min dot(wishDir, -wallNormal) to ENTER a wallrun.
                                                            ///< 0.1 ≈ 84° off-axis tolerance.
@@ -112,6 +120,12 @@ constexpr float k_wallrunMaxFaceRedirect = 1.57079632679f; ///< Max face-normal 
 // Speed cap
 
 constexpr float k_speedCap = 7000.0f; ///< Hard horizontal speed limit (u/s).
+
+// Bullet-hit slow
+
+constexpr float k_bulletHitSlowFactor = 0.5f;   ///< Multiplier on wish speed while bullet-slowed (0.5 = halved).
+constexpr float k_bulletHitSlowDuration = 0.5f; ///< Seconds the slow lingers after the last bullet hit. Each new
+                                                ///< hit refreshes the timer, so sustained fire keeps the target slowed.
 
 // Player dimensions
 //
