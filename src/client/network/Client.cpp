@@ -256,6 +256,10 @@ void Client::shutdown()
     }
 
     std::lock_guard<std::mutex> lock(stateMutex_);
+    if (usingUdpSession_ && connectionId_ != 0) {
+        session_.disconnect(connectionId_);
+    }
+
     session_.close();
     usingUdpSession_ = false;
     udpSessionLastBytesSent_ = 0;
