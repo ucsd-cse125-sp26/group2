@@ -60,6 +60,7 @@
 #include "ecs/systems/MatchSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "ecs/systems/PickupGeometry.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
@@ -213,7 +214,7 @@ void ServerGame::run()
         registry.emplace<WeaponSpawner>(
             spawner,
             WeaponSpawner{.type = weaponType, .spawnCooldown = systems::weaponCooldownTime, .hasWeapon = true});
-        CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
+        CollisionShape shape{.halfExtents = systems::k_weaponPickupHalfExtents};
         glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
 
         registry.emplace<Position>(spawner, centeredPos);

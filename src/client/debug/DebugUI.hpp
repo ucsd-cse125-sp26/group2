@@ -170,6 +170,19 @@ public:
     bool showWeaponSpawnerWindow = false;  ///< Show the Weapon Spawner Debug ImGui window.
     bool drawWeaponSpawnerOverlay = false; ///< Draw weapon spawner wireframes (independent of window visibility).
 
+    /// @brief Draw the Dropped Weapon Debug window and (optionally) wireframe overlay
+    /// for all dropped weapon entities, showing their pickup collision boxes.
+    ///
+    /// @param registry     ECS registry (reads DroppedWeapon, Position, CollisionShape).
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void
+    buildDroppedWeaponUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight);
+
+    bool showDroppedWeaponWindow = false;  ///< Show the Dropped Weapon Debug ImGui window.
+    bool drawDroppedWeaponOverlay = false; ///< Draw dropped weapon wireframes (independent of window visibility).
+
     /// @brief Draw the Spawn Point Debug window and (optionally) overlay markers
     /// for all player respawn point entities, showing position and cooldown state.
     ///

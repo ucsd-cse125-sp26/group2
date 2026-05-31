@@ -7,6 +7,7 @@
 #include "client/systems/GamepadAimAssistSystem.hpp"
 #include "ecs/components/AbilityState.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -196,6 +197,7 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
     ImGui::Checkbox("Collision Debug", &showCollisionWindow);
     ImGui::Checkbox("Contact Debug", &showContactDebugWindow);
     ImGui::Checkbox("Weapon Spawners", &showWeaponSpawnerWindow);
+    ImGui::Checkbox("Dropped Weapons", &showDroppedWeaponWindow);
     ImGui::Checkbox("Spawn Points", &showSpawnPointWindow);
     ImGui::Checkbox("Shot Debug (sv_showimpacts)", &showShotDebugWindow);
 
@@ -2252,6 +2254,86 @@ void DebugUI::buildWeaponSpawnerUI(const Registry& registry,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// buildDroppedWeaponUI
+// -----------------------------------------------------------------------------
+void DebugUI::buildDroppedWeaponUI(const Registry& registry,
+                                   const glm::mat4& viewProj,
+                                   float screenWidth,
+                                   float screenHeight)
+{
+    auto dropView = registry.view<DroppedWeapon, Position, CollisionShape>();
+
+    if (showDroppedWeaponWindow) {
+        if (ImGui::Begin("Dropped Weapon Debug", &showDroppedWeaponWindow)) {
+            ImGui::Checkbox("Draw Dropped Weapon Boxes", &drawDroppedWeaponOverlay);
+            ImGui::Separator();
+
+            int totalDrops = 0;
+            int pickupLocked = 0;
+            for (auto e : dropView) {
+                ++totalDrops;
+                if (dropView.get<DroppedWeapon>(e).pickupDelay > 0.0f)
+                    ++pickupLocked;
+            }
+
+            ImGui::Text("Dropped weapons: %d  |  Pickup locked: %d", totalDrops, pickupLocked);
+            ImGui::Separator();
+
+            int idx = 0;
+            for (auto e : dropView) {
+                const auto& drop = dropView.get<DroppedWeapon>(e);
+                const auto& pos = dropView.get<Position>(e);
+                const auto& shape = dropView.get<CollisionShape>(e);
+
+                char label[64];
+                std::snprintf(label, sizeof(label), "Drop #%d (%s)", idx, weaponTypeName(drop.type));
+                if (ImGui::TreeNode(label)) {
+                    ImGui::Text("Position: (%.0f, %.0f, %.0f)",
+                                static_cast<double>(pos.value.x),
+                                static_cast<double>(pos.value.y),
+                                static_cast<double>(pos.value.z));
+                    ImGui::Text("Box half-extents: (%.0f, %.0f, %.0f)",
+                                static_cast<double>(shape.halfExtents.x),
+                                static_cast<double>(shape.halfExtents.y),
+                                static_cast<double>(shape.halfExtents.z));
+                    ImGui::Text("Ammo: %d reserve, %d magazine", drop.totalAmmo, drop.currentMagAmmo);
+                    ImGui::Text("Despawn: %.1fs", static_cast<double>(drop.despawnTimer));
+                    if (drop.pickupDelay > 0.0f)
+                        ImGui::Text("Pickup delay: %.2fs", static_cast<double>(drop.pickupDelay));
+                    ImGui::TreePop();
+                }
+                ++idx;
+            }
+        }
+        ImGui::End();
+    }
+
+    if (!drawDroppedWeaponOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    for (auto e : dropView) {
+        const auto& drop = dropView.get<DroppedWeapon>(e);
+        const auto& pos = dropView.get<Position>(e);
+        const auto& shape = dropView.get<CollisionShape>(e);
+
+        const ImU32 boxColor =
+            (drop.pickupDelay > 0.0f) ? IM_COL32(255, 180, 50, 210) : IM_COL32(80, 220, 255, 230);
+        const physics::WorldAABB box{.min = pos.value - shape.halfExtents, .max = pos.value + shape.halfExtents};
+        drawAABBWireframe(dl, box, viewProj, screenWidth, screenHeight, boxColor);
+
+        ImVec2 sp;
+        if (worldToScreen(pos.value, viewProj, screenWidth, screenHeight, sp)) {
+            constexpr float k_crossLen = 7.0f;
+            const ImU32 markerColor = IM_COL32(255, 255, 255, 220);
+            dl->AddLine({sp.x - k_crossLen, sp.y}, {sp.x + k_crossLen, sp.y}, markerColor, 1.5f);
+            dl->AddLine({sp.x, sp.y - k_crossLen}, {sp.x, sp.y + k_crossLen}, markerColor, 1.5f);
+            dl->AddText({sp.x + k_crossLen + 4.0f, sp.y - 6.0f}, boxColor, weaponTypeName(drop.type));
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
 // buildSpawnPointUI
 // ─────────────────────────────────────────────────────────────────────────────
 void DebugUI::buildSpawnPointUI(const Registry& registry,

@@ -31,11 +31,8 @@ void spawnDroppedWeapon(Registry& registry,
 {
     const entt::entity e = registry.create();
     registry.emplace<Position>(e, pos);
-    // Compact weapon-sized AABB so the model rests near the floor under
-    // gravity; the pickup overlap test still gets a generous catch radius
-    // once the player's own AABB is added in.
     CollisionShape dropShape{};
-    dropShape.halfExtents = glm::vec3{12.0f, 6.0f, 12.0f};
+    dropShape.halfExtents = k_weaponPickupHalfExtents;
     registry.emplace<CollisionShape>(e, dropShape);
     // Velocity + RigidBody so DynamicsSystem ticks it with gravity and resolves
     // it against the world. linearDamping bleeds momentum so it doesn't skid.

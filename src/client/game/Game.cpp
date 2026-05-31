@@ -5133,6 +5133,7 @@ SDL_AppResult Game::iterate()
             debugUI.buildCollisionUI(physics::activeWorld(), hbVP, winWf, winHf);
             debugUI.buildContactDebugUI(hbVP, winWf, winHf);
             debugUI.buildWeaponSpawnerUI(registry, hbVP, winWf, winHf);
+            debugUI.buildDroppedWeaponUI(registry, hbVP, winWf, winHf);
             debugUI.buildSpawnPointUI(registry, hbVP, winWf, winHf);
             // PR-20: CSGO sv_showimpacts-style shot debug.  Window
             // toggles + ring-buffer slider + per-shot summary table;
