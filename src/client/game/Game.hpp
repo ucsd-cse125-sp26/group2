@@ -360,6 +360,7 @@ private:
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
     bool showHudDebug_ = false;                          ///< Show the HUD Tweaker panel.
+    bool showMenuThemeUI_ = false;                       ///< Show the Menu Theme Tweaker panel.
     bool flashlightEnabled_ = false;                     ///< Point light at camera position.
     float flashlightIntensity_ = 8.0f;                   ///< Flashlight brightness.
     float flashlightRange_ = 800.0f;                     ///< Flashlight attenuation range.
