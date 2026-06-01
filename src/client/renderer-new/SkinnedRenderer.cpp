@@ -477,7 +477,13 @@ bool SkinnedRenderer::createSkinnedDepthPipeline(const SDL_GPUShaderFormat& shad
     depthPipelineDesc.colorTarget = nullptr;
     depthPipelineDesc.depthTest = true;
     depthPipelineDesc.depthWrite = true;
-    depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_NONE;
+
+    depthPipelineDesc.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    depthPipelineDesc.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    depthPipelineDesc.rasterizer_state.enable_depth_bias = true;
+    depthPipelineDesc.rasterizer_state.depth_bias_constant_factor = 500.0f;
+    depthPipelineDesc.rasterizer_state.depth_bias_slope_factor = 1.0f;
+    depthPipelineDesc.rasterizer_state.depth_bias_clamp = 0.005f;
 
     depthPipeline_ = Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
 

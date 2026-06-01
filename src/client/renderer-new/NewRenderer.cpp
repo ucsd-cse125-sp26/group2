@@ -98,7 +98,12 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    if (!createDepthPipeline()) {
+    if (!createDepthRes0Pipeline()) {
+        SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
+        return false;
+    }
+
+    if (!createDepthRes1Pipeline()) {
         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
         return false;
     }
@@ -247,7 +252,8 @@ bool NewRenderer::createGeometryPipeline()
     return geometryPipeline_ != nullptr;
 }
 
-bool NewRenderer::createDepthPipeline()
+
+SDL_GPUGraphicsPipeline* NewRenderer::createDepthPipeline(const SDL_GPURasterizerState &rasterizer_state) const
 {
     Boilerplate::ShaderInfo vertexShader{};
     vertexShader.path = "shaders-new/geometry_depth.vert";
@@ -282,13 +288,38 @@ bool NewRenderer::createDepthPipeline()
     depthPipelineDesc.colorTarget = nullptr;
     depthPipelineDesc.depthTest = true;
     depthPipelineDesc.depthWrite = true;
-    // depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_BACK;
-    // depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_FRONT;
-    depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_NONE;
 
-    depthPipeline_ = Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
+    depthPipelineDesc.rasterizer_state = rasterizer_state;
 
-    return depthPipeline_ != nullptr;
+
+    return Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
+}
+bool NewRenderer::createDepthRes0Pipeline()
+{
+    SDL_GPURasterizerState rasterizer_state;
+    rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    rasterizer_state.enable_depth_bias = true;
+    rasterizer_state.depth_bias_constant_factor = 500.0f;
+    rasterizer_state.depth_bias_slope_factor = 1.0f;
+    rasterizer_state.depth_bias_clamp = 0.005f;
+
+    depthRes0Pipeline_ = createDepthPipeline(rasterizer_state);
+    return depthRes0Pipeline_ != nullptr;
+}
+
+bool NewRenderer::createDepthRes1Pipeline()
+{
+    SDL_GPURasterizerState rasterizer_state;
+    rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    rasterizer_state.enable_depth_bias = true;
+    rasterizer_state.depth_bias_constant_factor = 500.0f;
+    rasterizer_state.depth_bias_slope_factor = 10.0f;
+    rasterizer_state.depth_bias_clamp = 0.1f;
+
+    depthRes1Pipeline_ = createDepthPipeline(rasterizer_state);
+    return depthRes1Pipeline_ != nullptr;
 }
 
 void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
@@ -409,7 +440,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         firstFrame_ = false;
     }
 
-    drawToShadowMap(cmd, dynamicShadowMaps_, false, true, true);
+    drawToShadowMap(cmd, dynamicShadowMaps_,1, true, true, true);
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
@@ -451,6 +482,7 @@ void NewRenderer::setMainCamera(
 }
 
 void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
+                                        Uint8 res,
                                         Uint8 layer,
                                         SDL_GPUCommandBuffer* cmd,
                                         const glm::mat4& shadowViewProjection,
@@ -458,13 +490,19 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
                                         bool entityGeometry,
                                         bool skinnedGeometry)
 {
-    if (!staticGeometry && !entityGeometry && !skinnedGeometry) {
+    if (!staticGeometry && !entityGeometry && !skinnedGeometry)
         return;
+    SDL_GPUGraphicsPipeline* depthPipeline = nullptr;
+    switch (res) {
+        case 0: depthPipeline = depthRes0Pipeline_; break;
+        case 1: depthPipeline = depthRes1Pipeline_; break;
+        default: return;
     }
+
     SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture, layer, true);
 
     SDL_GPURenderPass* geometryDepthPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
-    SDL_BindGPUGraphicsPipeline(geometryDepthPass, depthPipeline_);
+    SDL_BindGPUGraphicsPipeline(geometryDepthPass, depthPipeline);
 
     SDL_PushGPUVertexUniformData(cmd, 0, &shadowViewProjection, sizeof(glm::mat4));
 
@@ -472,8 +510,6 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
 
     if (staticGeometry)
         drawWorldModelInstances(geometryDepthPass, cmd, true,frustumPlanes);
-    //SDL_SetGPUDepthBias(geometryDepthPass,);
-
     if (entityGeometry)
         drawEntityModels(geometryDepthPass, cmd, true,frustumPlanes);
     if (skinnedGeometry)
@@ -484,6 +520,7 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
 
 void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
                                   SDL_GPUTexture* shadowMapTexture,
+                                  Uint8 res,
                                   bool staticGeometry,
                                   bool entityGeometry,
                                   bool skinnedGeometry)
@@ -503,19 +540,21 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
             const glm::mat4 shadowViewProjection = shadowProjection * shadowView;
 
             drawGeometryDepthPass(shadowMapTexture,
+                                  res,
                                   iLight * NUM_CUBE_FACES + face,
                                   cmd,
                                   shadowViewProjection,
                                   staticGeometry,
                                   entityGeometry,
-                                  skinnedGeometry);
+                                  skinnedGeometry
+                                  );
         }
     }
 }
 
 void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
 {
-    drawToShadowMap(cmd, staticShadowMaps_, true, false, false);
+    drawToShadowMap(cmd, staticShadowMaps_,0, true, false, false);
 }
 
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)

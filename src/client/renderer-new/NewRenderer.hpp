@@ -353,7 +353,9 @@ private:
     // ─── Existing internal helpers ───────────────────────────────────────────
 
     bool createGeometryPipeline();
-    bool createDepthPipeline();
+    SDL_GPUGraphicsPipeline* createDepthPipeline(const SDL_GPURasterizerState& rasterizer_state) const;
+    bool createDepthRes0Pipeline();
+    bool createDepthRes1Pipeline();
     bool createHudPipeline();
     bool createFxaaPipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
@@ -362,6 +364,7 @@ private:
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height, float fov);
 
     void drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
+                               Uint8 res,
                                Uint8 layer,
                                SDL_GPUCommandBuffer* cmd,
                                const glm::mat4& shadowViewProjection,
@@ -370,6 +373,7 @@ private:
                                bool skinnedGeometry);
     void drawToShadowMap(SDL_GPUCommandBuffer* cmd,
                          SDL_GPUTexture* shadowMapTexture,
+                         Uint8 res,
                          bool staticGeometry,
                          bool entityGeometry,
                          bool skinnedGeometry);
@@ -417,7 +421,8 @@ private:
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* fxaaPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
-    SDL_GPUGraphicsPipeline* depthPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* depthRes0Pipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* depthRes1Pipeline_ = nullptr;
 
     SDL_GPUTextureFormat colorTarget_ = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUTexture* sceneColor_ = nullptr;
