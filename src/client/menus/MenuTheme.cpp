@@ -9,14 +9,21 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <string>
 
 namespace
 {
 const menu_theme::ThemeSettings k_defaultSettings{};
 menu_theme::ThemeSettings g_settings = k_defaultSettings;
+constexpr float k_baseFontPixelSize = 20.0f;
+constexpr std::array<float, 9> k_menuFontSizes{16.0f, 18.0f, 20.0f, 22.0f, 24.0f, 28.0f, 32.0f, 38.0f, 48.0f};
+std::array<ImFont*, k_menuFontSizes.size()> g_menuFonts{};
+ImFont* g_defaultFont = nullptr;
 
 struct BgResources
 {
@@ -30,9 +37,15 @@ BgResources bgState;
 /// Try the conventional background-image names; first decodable one wins.
 bool tryLoadBackground(SDL_GPUDevice* device)
 {
-    // loadTexture() already roots relative paths at SDL_GetBasePath().
-    const char* candidates[] = {"bg.webp", "assets/bg.webp", "bg.png", "assets/bg.png", "bg.jpg", "assets/bg.jpg"};
+    // loadTexture() uses stb_image, so stick to formats this renderer path decodes.
+    const char* candidates[] = {"assets/bg.png", "bg.png", "assets/bg.jpg", "bg.jpg"};
     for (const char* path : candidates) {
+        std::filesystem::path fullPath = SDL_GetBasePath() ? SDL_GetBasePath() : "";
+        fullPath /= path;
+        std::error_code ec;
+        if (!std::filesystem::exists(fullPath, ec))
+            continue;
+
         if (SDL_GPUTexture* t = Boilerplate::loadTexture(device, path)) {
             bgState.tex = t;
             break;
@@ -137,12 +150,43 @@ void loadFonts()
         std::error_code ec;
         if (!std::filesystem::exists(path, ec))
             continue; // Pre-check avoids ImGui's missing-file assertion in debug builds.
-        if (ImFont* f = io.Fonts->AddFontFromFileTTF(path.c_str(), 20.0f)) {
-            io.FontDefault = f;
+        bool loadedAny = false;
+        for (std::size_t i = 0; i < k_menuFontSizes.size(); ++i) {
+            if (ImFont* f = io.Fonts->AddFontFromFileTTF(path.c_str(), k_menuFontSizes[i])) {
+                g_menuFonts[i] = f;
+                loadedAny = true;
+                if (k_menuFontSizes[i] == k_baseFontPixelSize)
+                    g_defaultFont = f;
+            }
+        }
+        if (loadedAny) {
+            if (!g_defaultFont) {
+                const auto fallbackIt =
+                    std::find_if(g_menuFonts.begin(), g_menuFonts.end(), [](ImFont* f) { return f != nullptr; });
+                g_defaultFont = (fallbackIt != g_menuFonts.end()) ? *fallbackIt : nullptr;
+            }
+            io.FontDefault = g_defaultFont;
             return;
         }
     }
     // No font file present: keep ImGui's built-in font (graceful, no error).
+}
+
+ImFont* fontForPixelSize(float pixels)
+{
+    ImFont* best = nullptr;
+    float bestDelta = std::numeric_limits<float>::max();
+    for (std::size_t i = 0; i < k_menuFontSizes.size(); ++i) {
+        ImFont* font = g_menuFonts[i];
+        if (!font)
+            continue;
+        const float delta = std::abs(k_menuFontSizes[i] - pixels);
+        if (delta < bestDelta) {
+            best = font;
+            bestDelta = delta;
+        }
+    }
+    return best ? best : ImGui::GetFont();
 }
 
 float scaleFor(const ImVec2& display)
@@ -164,18 +208,21 @@ bool beginPanel(const char* idAndTitle, float baseWidth, float baseHeight, bool 
     const float viewportMargin = std::clamp(t.panelViewportMargin, 0.1f, 1.0f);
     size.x = std::min(size.x, io.DisplaySize.x * viewportMargin);
     size.y = std::min(size.y, io.DisplaySize.y * viewportMargin);
+    size.x = std::round(size.x);
+    size.y = std::round(size.y);
 
     ImGui::SetNextWindowPos(
-        ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImVec2(std::round((io.DisplaySize.x - size.x) * 0.5f), std::round((io.DisplaySize.y - size.y) * 0.5f)),
+        ImGuiCond_Always);
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                                    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings | extraFlags;
+    ImGui::PushFont(fontForPixelSize(k_baseFontPixelSize * s));
     const bool open = ImGui::Begin(idAndTitle, nullptr, flags);
     if (open) {
-        ImGui::SetWindowFontScale(s);
         if (showTitle) {
-            ImGui::SetWindowFontScale(s * t.panelTitleScale);
+            ImGui::PushFont(fontForPixelSize(k_baseFontPixelSize * s * t.panelTitleScale));
             const ImVec2 ts = ImGui::CalcTextSize(idAndTitle);
             const float winW = ImGui::GetWindowSize().x - ImGui::GetStyle().WindowPadding.x * 2.0f;
             if (winW > ts.x)
@@ -183,7 +230,7 @@ bool beginPanel(const char* idAndTitle, float baseWidth, float baseHeight, bool 
             ImGui::PushStyleColor(ImGuiCol_Text, t.accent);
             ImGui::TextUnformatted(idAndTitle);
             ImGui::PopStyleColor();
-            ImGui::SetWindowFontScale(s);
+            ImGui::PopFont();
 
             const ImVec2 p = ImGui::GetCursorScreenPos();
             const float fullW = ImGui::GetContentRegionAvail().x;
@@ -201,6 +248,7 @@ bool beginPanel(const char* idAndTitle, float baseWidth, float baseHeight, bool 
 void endPanel()
 {
     ImGui::End();
+    ImGui::PopFont();
 }
 
 void heading(const char* text)

@@ -96,6 +96,9 @@ void applyStyle();
 /// @brief Load the SpaceGrotesk UI font and set it as the default.  Safe (no-op) if the file is missing.
 void loadFonts();
 
+/// @brief Return the nearest pre-baked menu font for the requested pixel size.
+ImFont* fontForPixelSize(float pixels);
+
 /// @brief Responsive UI scale derived from the current display size (1.0 at 1280x720).
 float scaleFor(const ImVec2& display);
 
@@ -121,7 +124,7 @@ bool accentButton(const char* label, const ImVec2& size = ImVec2(0, 0));
 /// @brief Red destructive-action button.
 bool dangerButton(const char* label, const ImVec2& size = ImVec2(0, 0));
 
-/// @brief Draw the gradient + optional bg.webp background behind the current frame.
+/// @brief Draw the gradient + optional bg.png/bg.jpg background behind the current frame.
 /// @param device GPU device used to upload the background image (may be null; gradient still draws).
 /// @note Loads the image lazily on first call and silently falls back to the gradient when none is found.
 void drawBackground(SDL_GPUDevice* device);

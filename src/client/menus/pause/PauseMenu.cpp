@@ -5,6 +5,7 @@
 #include <SDL3/SDL_keyboard.h>
 
 #include <algorithm>
+#include <cmath>
 #include <imgui.h>
 
 namespace
@@ -238,8 +239,6 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
     ImDrawList* background = ImGui::GetBackgroundDrawList();
     background->AddRectFilled({0.0f, 0.0f}, display, IM_COL32(0, 0, 0, 150));
 
-    ImGui::SetNextWindowPos({display.x * 0.5f, display.y * 0.5f}, ImGuiCond_Always, {0.5f, 0.5f});
-
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
     float settingsUiScale = 1.0f;
     if (settingsOpen) {
@@ -249,15 +248,20 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
         settingsSize.x = std::min(settingsSize.x, k_settingsWindowBaseWidth);
         settingsSize.x = std::min(settingsSize.x, display.x * k_viewportWindowMargin);
         settingsSize.y = std::min(settingsSize.y, display.y * k_viewportWindowMargin);
+        settingsSize.x = std::round(settingsSize.x);
+        settingsSize.y = std::round(settingsSize.y);
         settingsUiScale = std::clamp(settingsSize.x / k_settingsWindowBaseWidth, 0.5f, 1.0f);
+        ImGui::SetNextWindowPos(
+            {std::round((display.x - settingsSize.x) * 0.5f), std::round((display.y - settingsSize.y) * 0.5f)},
+            ImGuiCond_Always);
         ImGui::SetNextWindowSize(settingsSize, ImGuiCond_Always);
     } else {
+        ImGui::SetNextWindowPos({display.x * 0.5f, display.y * 0.5f}, ImGuiCond_Always, {0.5f, 0.5f});
         // Auto-fit the compact pause page so it always fits its buttons and never scrolls.
         flags |= ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
     }
+    ImGui::PushFont(menu_theme::fontForPixelSize(20.0f * (settingsOpen ? settingsUiScale : 1.0f)));
     if (ImGui::Begin("Paused", nullptr, flags)) {
-        ImGui::SetWindowFontScale(settingsOpen ? settingsUiScale : 1.0f);
-
         const float buttonWidth = settingsOpen ? ImGui::GetContentRegionAvail().x : 360.0f;
         if (!settingsOpen) {
             if (menu_theme::accentButton("Resume", {buttonWidth, 36.0f})) {
@@ -296,19 +300,15 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             menu_theme::heading("Settings");
 
             const float previousSensitivity = draftMouseSensitivity;
-            float displayedMouseSensitivity =
-                draftMouseSensitivity * user_settings::kMouseSensitivityDisplayScale;
+            float displayedMouseSensitivity = draftMouseSensitivity * user_settings::kMouseSensitivityDisplayScale;
             ImGui::SliderFloat("Mouse Sensitivity",
                                &displayedMouseSensitivity,
-                               user_settings::kMinMouseSensitivity *
-                                   user_settings::kMouseSensitivityDisplayScale,
-                               user_settings::kMaxMouseSensitivity *
-                                   user_settings::kMouseSensitivityDisplayScale,
+                               user_settings::kMinMouseSensitivity * user_settings::kMouseSensitivityDisplayScale,
+                               user_settings::kMaxMouseSensitivity * user_settings::kMouseSensitivityDisplayScale,
                                "%.3f");
             draftMouseSensitivity = displayedMouseSensitivity / user_settings::kMouseSensitivityDisplayScale;
-            draftMouseSensitivity = std::clamp(draftMouseSensitivity,
-                                               user_settings::kMinMouseSensitivity,
-                                               user_settings::kMaxMouseSensitivity);
+            draftMouseSensitivity = std::clamp(
+                draftMouseSensitivity, user_settings::kMinMouseSensitivity, user_settings::kMaxMouseSensitivity);
             if (draftMouseSensitivity != previousSensitivity)
                 dirty = true;
 
@@ -488,6 +488,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
         }
     }
     ImGui::End();
+    ImGui::PopFont();
 
     const ConfirmResult confirmResult = confirm_.drawAndPoll();
     if (confirmResult == ConfirmResult::Confirmed) {
