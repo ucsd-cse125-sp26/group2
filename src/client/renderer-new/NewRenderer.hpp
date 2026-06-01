@@ -180,6 +180,7 @@ public:
     /// DATA SOURCE: built in Game.cpp from ECS each frame (glow-emitting
     /// projectiles, muzzle flashes, etc).
     void setPointLights(std::vector<PointLight> pointLights);
+    void setSampleStaticPointLights();
     void setStaticPointLights(std::vector<PointLight>&& pointLights);
 
     /// @brief Set the first-person weapon viewmodel for this frame.

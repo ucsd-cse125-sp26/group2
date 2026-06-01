@@ -3,7 +3,7 @@
 #define SHADOW_BIAS 5.0
 //#define MAX_SPOT_LIGHTS 0
 #define MAX_POINT_LIGHTS 6
-#define MAX_MOVING_POINT_LIGHTS 64
+#define MAX_MOVING_POINT_LIGHTS 128
 
 struct PointLight {
     vec3 pos;
@@ -31,6 +31,7 @@ layout(set = 2, binding = 2) uniform sampler2D metallicRoughnessTex;
 
 layout(set = 2, binding = 3) uniform samplerCubeArrayShadow staticPointLightShadowMaps;
 layout(set = 2, binding = 4) uniform samplerCubeArrayShadow dynamicPointLightShadowMaps;
+layout(set = 2, binding = 5) uniform samplerCubeArrayShadow movingPointLightShadowMaps;
 
 
 layout(set = 3, binding = 0) uniform Material {
@@ -62,7 +63,7 @@ layout(location = 0) out vec4 color;
 // Just a single directional light for now...
 //const vec3 light_direction = normalize(-vec3(1.0f,1.0f,1.0f));
 //const vec4 light_color = vec4(1.0f,1.0f,1.0f,1.0f);
-const vec3 ambient_color = 0.5f * vec3(0.08f, 0.08f,0.12f); // dark-blue
+const vec3 ambient_color = 0.125f * vec3(0.08f, 0.08f,0.12f); // dark-blue
 //const vec3 ambient_color = normalize(vec3(0.08f, 0.08f,0.12f)); // dark-blue
 //const vec3 ambient_color = vec3(0.0f, 0.0f,0.0f); // dark-black
 
@@ -78,7 +79,7 @@ void main()
     }
 
     vec4 albedo = materialFlags.useTexture != 0 ? texture(tex, frag_vt) : material.diffuse;
-//    albedo.rgb = pow(albedo.rgb,vec3(2.2f));
+    albedo.rgb = pow(albedo.rgb,vec3(2.2f));
     vec2 mr = materialFlags.useMetallicRoughnessTexture != 0
         ? texture(metallicRoughnessTex, frag_vt).gb
         : vec2(1.0, 0.0);
@@ -103,18 +104,33 @@ void main()
         float dominantAxis = max(absDir.x, max(absDir.y, absDir.z));
         float depth = depthA - depthB / dominantAxis;
 
-
         float staticShadow_i = texture(staticPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
         float dynamicShadow_i = texture(dynamicPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
 
         float shadow_i = dynamicShadow_i * staticShadow_i;
 
         float attenutaion = 1.0f / (r * r);
-        //float attenutaion = 1.0f / (r);
 
         float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
         irradiance += shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion * cosT_i;
-        //irradiance += shadow_i * pLight_i.color * (.001f * pLight_i.intensity) * attenutaion * cosT_i;
+
+    }
+    for (int i = 0; i < lightInfo.numMovingPointLights; i++ ){
+        PointLight pLight_i = lightInfo.movingPointLights[i];
+
+        vec3 lightToWorldPos = frag_worldPos - pLight_i.pos;
+        float r = length(lightToWorldPos);
+
+        vec3 absDir = abs(lightToWorldPos);
+        float dominantAxis = max(absDir.x, max(absDir.y, absDir.z));
+        float depth = depthA - depthB / dominantAxis;
+
+        float shadow_i = texture(movingPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
+
+        float attenutaion = 1.0f / (r * r);
+
+        float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
+        irradiance += shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion * cosT_i;
 
     }
 

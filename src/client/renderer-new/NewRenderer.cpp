@@ -11,6 +11,7 @@
 #include "Asset.hpp"
 #include "AssetLoader.hpp"
 #include "Boilerplate.hpp"
+#include "glm/gtc/random.hpp"
 #include "particles/ParticleSystem.hpp"
 
 #include <algorithm>
@@ -274,7 +275,7 @@ bool NewRenderer::createGeometryPipeline()
     Boilerplate::ShaderInfo fragmentShader{};
     fragmentShader.path = "shaders-new/geometry_shadowed.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    fragmentShader.samplerCount = MATERIAL_MAX_TEXTURE_COUNT + 2;
+    fragmentShader.samplerCount = MATERIAL_MAX_TEXTURE_COUNT + 3;
     fragmentShader.uniformBufferCount = 3;
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
@@ -438,7 +439,9 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         firstFrame_ = false;
     }
 
-    drawToShadowMap(cmd, dynamicShadowMaps_,1, true, true, true,STATIC);
+    setSampleStaticPointLights();
+    drawToShadowMap(cmd, dynamicShadowMaps_,1, false, true, true,STATIC);
+    drawToShadowMap(cmd, movingLightShadowMaps_,1, true, true, true,MOVING);
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
@@ -574,11 +577,12 @@ void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
 
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUTextureSamplerBinding shadowBindings[2];
+    SDL_GPUTextureSamplerBinding shadowBindings[3];
     shadowBindings[0] = {staticShadowMaps_, staticDepthSampler_};
     shadowBindings[1] = {dynamicShadowMaps_, dynamicDepthSampler_};
+    shadowBindings[2] = {movingLightShadowMaps_, dynamicDepthSampler_};
 
-    SDL_BindGPUFragmentSamplers(renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings, 2);
+    SDL_BindGPUFragmentSamplers(renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings, 3);
 
     SDL_PushGPUFragmentUniformData(cmd, 2, &sceneLightInfo_, sizeof(LightUBO));
 }
@@ -1113,6 +1117,25 @@ void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
         std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_MOVING_POINT_LIGHTS));
 
     memcpy(sceneLightInfo_.movingPointLights, pointLights.data(), sceneLightInfo_.numMovingPointLights * sizeof(PointLight));
+}
+
+void NewRenderer::setSampleStaticPointLights()
+{
+
+    float globalIntensity = 50000;
+    std::vector<PointLight> sampleLights;
+
+    for (int i = 0; i < MAX_MOVING_POINT_LIGHTS; i++) {}
+    PointLight pl0{};
+    pl0.position = glm::linearRand(glm::vec3(0.0f),glm::vec3(2000.0f));
+    pl0.intensity = globalIntensity;
+    pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl0.range = 500.0f;
+
+
+    sampleLights.push_back(pl0);
+
+    setPointLights(std::move(sampleLights));
 }
 
 void NewRenderer::setStaticPointLights(std::vector<PointLight> &&pointLights)
