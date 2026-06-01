@@ -85,9 +85,9 @@ bool SfxSystem::init()
     categoryVolumes_.fill(1.0f);
     cooldowns_.fill(0.0f);
 
-    loadClip(SfxId::RifleFire, "pubg-ak.wav", SfxCategory::Weapons, 0.8f, 0.10f);
+    loadClip(SfxId::RifleFire, "apex/r301_fire.wav", SfxCategory::Weapons, 0.9f, 0.09f);
     loadClip(SfxId::RocketFire, "Voicy_Minecraft TNT Explosion.mp3", SfxCategory::Weapons, 0.7f, 0.80f);
-    loadClip(SfxId::RailGunFire, "Voicy_Charge Rifle SFX.mp3", SfxCategory::Weapons, 0.8f, 0.50f);
+    loadClip(SfxId::RailGunFire, "apex/kraber_fire.wav", SfxCategory::Weapons, 1.0f, 0.35f); // Kraber (replaces charge rifle)
     loadClip(SfxId::EnergyGunFire, "Voicy_Charge Rifle SFX.mp3", SfxCategory::Weapons, 0.5f, 0.08f);
     loadClip(SfxId::ChargeRifleLoad, "charge-rifle-load.wav", SfxCategory::Weapons, 0.9f, 0.0f);
     loadClip(SfxId::ChargeRifleShoot, "charge-rifle-shoot.wav", SfxCategory::Weapons, 1.0f, 0.20f);

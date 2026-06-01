@@ -3575,6 +3575,18 @@ SDL_AppResult Game::iterate()
                 c.ai.crouching = ps.crouching;
                 c.ai.moveMode = static_cast<int>(ps.moveMode);
                 c.ai.wallRunSide = static_cast<int>(ps.wallRunSide);
+                // Reload (drives the upper-body reload clip). Local player runs
+                // update(); remote players replay the server's slots via
+                // renderFromServer, so these fields only matter for the local body.
+                if (const auto* ws = registry.try_get<WeaponState>(e)) {
+                    const GunInstance& gun = getEquippedGun(*ws);
+                    const WeaponConfig& cfg = getWeaponConfig(gun.type);
+                    c.ai.reloading = gun.isReloading;
+                    c.ai.reloadProgress = (gun.isReloading && cfg.reloadTime > 0.0f)
+                                              ? std::clamp(1.0f - gun.reloadTime / cfg.reloadTime, 0.0f, 1.0f)
+                                              : 0.0f;
+                    c.ai.reloadHeavy = (gun.type == WeaponType::RailGun);
+                }
                 // Phase F per-weapon-class procedural multipliers. Pulled from
                 // the equipped weapon's tuning row when one exists; otherwise
                 // we fall through with the default values (full spine bend,

@@ -34,6 +34,9 @@ struct AnimationInputs
     bool crouching = false; ///< Crouch currently held (phase 1: note-only).
     int moveMode = 0;       ///< MoveMode value: 0=OnFoot, 1=Sliding, 2=WallRunning.
     int wallRunSide = 0;    ///< WallSide value: 0=None, 1=Left, 2=Right.
+    bool reloading = false;      ///< True while the equipped weapon is mid-reload (drives the upper-body reload clip).
+    float reloadProgress = 0.0f; ///< Reload completion in [0,1]; used as the reload clip's playhead.
+    bool reloadHeavy = false;    ///< True when the reloading weapon uses the Kraber reload (vs the rifle reload).
 };
 
 /// Number of sampler slots available for the per-frame blend.
@@ -218,6 +221,13 @@ public:
 
     /// @brief Number of joints in the underlying rig.
     [[nodiscard]] int numJoints() const noexcept;
+
+    /// @brief Debug: sample one clip in isolation on @p rig and log its planar
+    /// torso lean — up=(head-hip) (up.x = side lean, up.z = fwd/back lean) and
+    /// the chest's horizontal offset from the hip. Use on the CLIENT (the server
+    /// retargets these clips to a flat pose). Diagnoses baked locomotion lean.
+    static void debugMeasureClipLean(const CharacterRig& rig, const AnimationLibrary& lib, ClipId id,
+                                     const char* label);
 
     /// @brief Current high-level animator mode, mapped to the values used by
     /// `HoldStance` in ViewmodelConfig.hpp. Used by Game.cpp to pick the right

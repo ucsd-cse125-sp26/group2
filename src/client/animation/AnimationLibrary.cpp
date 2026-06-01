@@ -50,6 +50,8 @@ const char* clipName(ClipId id)
         return "Run";
     case ClipId::RunBackward:
         return "Run Backward";
+    case ClipId::WalkBackward:
+        return "Walk Backward";
     case ClipId::SlowRun:
         return "Slow Run";
     case ClipId::Slide:
@@ -100,6 +102,10 @@ const char* clipName(ClipId id)
         return "Pivot Left";
     case ClipId::PivotRight:
         return "Pivot Right";
+    case ClipId::Reload:
+        return "Reload";
+    case ClipId::ReloadKraber:
+        return "Reload Kraber";
     case ClipId::_Count:
         return "(none)";
     }
@@ -123,6 +129,8 @@ const char* clipFile(ClipId id)
         return "anims_apex/apex_run_f.glb";
     case ClipId::RunBackward:
         return "anims_apex/apex_run_b.glb";
+    case ClipId::WalkBackward:
+        return "anims_apex/apex_walk_b.glb";
     case ClipId::SlowRun:
         return "anims_apex/apex_run_f.glb";
     case ClipId::Slide:
@@ -173,6 +181,10 @@ const char* clipFile(ClipId id)
         return "anims_apex/apex_idle_stand.glb";
     case ClipId::PivotRight:
         return "anims_apex/apex_idle_stand.glb";
+    case ClipId::Reload:
+        return "anims_apex/apex_reload_rifle.glb";
+    case ClipId::ReloadKraber:
+        return "anims_apex/apex_reload_kraber.glb";
     case ClipId::_Count:
         return "";
     }

@@ -454,7 +454,7 @@ inline WeaponModelInfo getWeaponModelInfo(WeaponType type)
     static constexpr std::array<WeaponModelInfo, kRenderableWeaponTypeCount> k_infos{{
         {.filename = "assault_rifle.glb", .flipUVs = true},
         {.filename = "rocket_launcher.glb", .flipUVs = true},
-        {.filename = "rail_gun.glb", .flipUVs = true},
+        {.filename = "kraber.glb", .flipUVs = false}, // Kraber (replaces charge rifle)
         {.filename = "energy_gun.glb", .flipUVs = true},
         {.filename = "energy_gun.glb", .flipUVs = true}, // Shotgun — reuses energy gun model
     }};

@@ -69,10 +69,10 @@ inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAsse
      .flipUVs = true,
      .renderScale = {200.0f, 200.0f, 200.0f}},
     {.name = "weapon_railgun",
-     .filename = "rail_gun.glb",
+     .filename = "kraber.glb", // Apex Kraber (replaces the charge rifle); same ~1.0 native scale as the R-301.
      .role = AssetRole::Entity,
-     .flipUVs = true,
-     .renderScale = {20.0f, 20.0f, 20.0f},
+     .flipUVs = false,
+     .renderScale = {1.0f, 1.0f, 1.0f},
      .renderRotationDegrees = {0.0f, 0.0f, 0.0f}},
     {.name = "weapon_energy",
      .filename = "energy_gun.glb",

@@ -156,16 +156,17 @@ LocomotionSelection selectLocomotion(const LocalVelocity& local, bool crouching)
             out.secondaryWeight = 0.0f;
         } else if (horizontalSpeed < k_walkSpeedRef) {
             out.primary = ClipId::Idle;
-            out.secondary = reverseLike ? ClipId::RunBackward : ClipId::Walk;
+            out.secondary = reverseLike ? ClipId::WalkBackward : ClipId::Walk;
             out.secondaryWeight =
                 std::clamp((horizontalSpeed - k_idleCutoff) / (k_walkSpeedRef - k_idleCutoff), 0.0f, 1.0f);
         } else if (horizontalSpeed < k_runSpeedRef) {
-            out.primary = reverseLike ? ClipId::RunBackward : ClipId::Walk;
+            // Symmetric forward/backward speed blend: walk-tier clip crossfades up
+            // into the run-tier clip (Walk→Run forward, WalkBackward→RunBackward
+            // reverse) so backpedalling has its own walk + run animations.
+            out.primary = reverseLike ? ClipId::WalkBackward : ClipId::Walk;
             out.secondary = reverseLike ? ClipId::RunBackward : ClipId::Run;
             out.secondaryWeight =
-                reverseLike
-                    ? 0.0f
-                    : std::clamp((horizontalSpeed - k_walkSpeedRef) / (k_runSpeedRef - k_walkSpeedRef), 0.0f, 1.0f);
+                std::clamp((horizontalSpeed - k_walkSpeedRef) / (k_runSpeedRef - k_walkSpeedRef), 0.0f, 1.0f);
         } else {
             out.primary = reverseLike ? ClipId::RunBackward : ClipId::Run;
             out.secondary = out.primary;

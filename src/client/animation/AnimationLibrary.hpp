@@ -23,6 +23,7 @@ enum class ClipId : uint8_t
     Walk,
     Run,
     RunBackward,
+    WalkBackward, ///< Backpedal walk (slow reverse).
     SlowRun,
     Slide,
     WallRun,
@@ -48,6 +49,8 @@ enum class ClipId : uint8_t
     StopRight,
     PivotLeft,
     PivotRight,
+    Reload,       ///< Third-person rifle (R-301) reload, upper-body.
+    ReloadKraber, ///< Third-person Kraber reload, upper-body.
     _Count, ///< Sentinel; also used as "no clip / no override".
 };
 

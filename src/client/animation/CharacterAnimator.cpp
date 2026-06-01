@@ -393,6 +393,11 @@ struct CharacterAnimator::Impl
     // forward/strafe crossfade while the torso stays pure forward-loco.
     std::vector<ozz::math::SimdFloat4> locoJointWeights;
     std::vector<ozz::math::SimdFloat4> strafeJointWeights;
+    // Per-joint weights for the upper-body reload overlay on the override slot.
+    // 1 on the spine/arms/head subtree, 0 elsewhere; the loco weight is faded
+    // to (1 - reloadWeight) on those same joints so the legs keep their gait.
+    std::vector<ozz::math::SimdFloat4> reloadJointWeights;
+    float reloadWeight = 0.0f; ///< Smoothed [0,1] weight of the reload overlay.
 
     // Lateral-vs-total speed ratio in [0,1] used to weight the strafe mask on
     // the legs. Set by update() (smoothed) for the local player + server, and
@@ -549,6 +554,7 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
                 const int numSoa = rig.skeleton() ? rig.skeleton()->num_soa_joints() : 0;
                 impl_->locoJointWeights.resize(static_cast<size_t>(numSoa));
                 impl_->strafeJointWeights.resize(static_cast<size_t>(numSoa));
+                impl_->reloadJointWeights.resize(static_cast<size_t>(numSoa));
                 SDL_Log("CharacterAnimator: strafe lower-body mask bound (%d/2 leg roots)", legRoots);
             } else {
                 impl_->lowerBodyMask.clear(); // No legs found — disables masking gracefully.
@@ -631,6 +637,69 @@ const std::array<ClipSampler, kNumSamplerSlots>& CharacterAnimator::samplers() c
 void CharacterAnimator::setDebugPlaybackSpeed(float mul) noexcept
 {
     impl_->debugPlaybackSpeedMul = std::max(0.0f, mul);
+}
+
+void CharacterAnimator::debugMeasureClipLean(const CharacterRig& rig, const AnimationLibrary& lib, ClipId id,
+                                             const char* label)
+{
+    const ozz::animation::Skeleton* skel = rig.skeleton();
+    const ozz::animation::Animation* clip = lib.get(id);
+    if (skel == nullptr || clip == nullptr) {
+        SDL_Log("[lean] %-14s NOT LOADED", label);
+        return;
+    }
+    const auto& jm = rig.jointMap();
+    auto idxOf = [&](std::initializer_list<const char*> names) -> int {
+        for (const char* n : names) {
+            const auto it = jm.find(n);
+            if (it != jm.end())
+                return it->second;
+        }
+        return -1;
+    };
+    const int mHip = idxOf({"def_c_hip", "mixamorig:Hips"});
+    const int mChest = idxOf({"def_c_spineC", "def_c_chest", "mixamorig:Spine2"});
+    if (mHip < 0 || mChest < 0) {
+        SDL_Log("[lean] %-14s missing joints (hip=%d chest=%d)", label, mHip, mChest);
+        return;
+    }
+    ozz::animation::SamplingJob::Context ctx;
+    ctx.Resize(skel->num_joints());
+    std::vector<ozz::math::SoaTransform> locals(static_cast<size_t>(skel->num_soa_joints()));
+    std::vector<ozz::math::Float4x4> models(static_cast<size_t>(skel->num_joints()));
+    glm::vec3 torsoAcc{0.0f};
+    const float ratios[] = {0.0f, 0.25f, 0.5f, 0.75f};
+    for (float r : ratios) {
+        ctx.Invalidate();
+        ozz::animation::SamplingJob sj;
+        sj.animation = clip;
+        sj.context = &ctx;
+        sj.ratio = r;
+        sj.output = ozz::make_span(locals);
+        if (!sj.Run())
+            continue;
+        ozz::animation::LocalToModelJob l2m;
+        l2m.skeleton = skel;
+        l2m.input = ozz::make_span(locals);
+        l2m.output = ozz::make_span(models);
+        if (!l2m.Run())
+            continue;
+        auto P = [&](int i) { return matrixTranslation(anim_utils::ozzToGlm(models[static_cast<size_t>(i)])); };
+        // Torso direction = hip -> chest. Upright => ~(0,1,0); forward hunch =>
+        // +Z component; sideways lean => non-zero X.
+        glm::vec3 torso = P(mChest) - P(mHip);
+        if (glm::length(torso) > 1e-5f)
+            torsoAcc += glm::normalize(torso);
+    }
+    const glm::vec3 torso = glm::length(torsoAcc) > 1e-4f ? glm::normalize(torsoAcc) : glm::vec3{0, 1, 0};
+    // Mirror the runtime crouch roll-leveling math to confirm sign/magnitude:
+    // roll about +Z by 0.85*atan2(x,y) should drive the side component toward 0.
+    const float sideLean = std::atan2(torso.x, std::max(0.1f, torso.y));
+    const float correction = 0.85f * sideLean;
+    const float afterX = torso.x * std::cos(correction) - torso.y * std::sin(correction);
+    SDL_Log("[lean] %-14s torsoDir(%.3f,%.3f,%.3f)  side x %.3f -> %.3f after level  [x=side, z=fwd]", label,
+            static_cast<double>(torso.x), static_cast<double>(torso.y), static_cast<double>(torso.z),
+            static_cast<double>(torso.x), static_cast<double>(afterX));
 }
 
 void CharacterAnimator::applyRecoilImpulse(float strengthRad)
@@ -1043,7 +1112,9 @@ ClipId resolveLocomotionClip(const AnimationLibrary& lib, ClipId requested)
     case ClipId::Run:
         return firstLoaded(lib, {ClipId::SlowRun, ClipId::Walk, ClipId::Idle});
     case ClipId::RunBackward:
-        return firstLoaded(lib, {ClipId::Walk, ClipId::Idle});
+        return firstLoaded(lib, {ClipId::WalkBackward, ClipId::Walk, ClipId::Idle});
+    case ClipId::WalkBackward:
+        return firstLoaded(lib, {ClipId::RunBackward, ClipId::Walk, ClipId::Idle});
     case ClipId::CrouchIdle:
         return firstLoaded(lib, {ClipId::Idle});
     default:
@@ -1340,6 +1411,27 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
         sOvr.weight = 0.0f;
     }
 
+    // --- 5b. Upper-body reload overlay. ---
+    // Reload reuses the override slot but, unlike Slide/WallRun, keeps the
+    // locomotion group at full weight (groupLoco) and is masked to the spine +
+    // arms in runSamplingAndSkinning, so the legs keep walking/running while the
+    // arms reload. Weight is smoothed for a soft blend in/out. Only while on
+    // foot (a slide/wallrun keeps its full-body override clip instead).
+    {
+        const float reloadTarget = inputs.reloading ? 1.0f : 0.0f;
+        const float rkf = (dt > 0.0f) ? (1.0f - std::exp(-dt / 0.10f)) : 1.0f;
+        impl_->reloadWeight += (reloadTarget - impl_->reloadWeight) * rkf;
+        const bool onFoot = (impl_->currentMode == Mode::Locomotion || impl_->currentMode == Mode::Crouch);
+        const ClipId reloadClip = inputs.reloadHeavy ? ClipId::ReloadKraber : ClipId::Reload;
+        if (impl_->reloadWeight > 1e-3f && onFoot && impl_->library->has(reloadClip)) {
+            sOvr.id = reloadClip;
+            sOvr.timeRatio = std::clamp(inputs.reloadProgress, 0.0f, 1.0f);
+            sOvr.weight = impl_->reloadWeight;
+            sOvr.playbackSpeed = 1.0f;
+            sOvr.active = true;
+        }
+    }
+
     // --- 6. Wallrun mirror state. ---
     impl_->wallRunMirror =
         (impl_->currentMode == Mode::WallRun && inputs.wallRunSide == WallSideLeft) ||
@@ -1459,22 +1551,40 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
         // weight strafeBlend, loco weight (1 - strafeBlend) → original crossfade.
         const bool maskStrafe =
             impl_->samplers[k_slotStrafe].active && !impl_->lowerBodyMask.empty() && !impl_->locoJointWeights.empty();
-        if (maskStrafe) {
-            const float sb = std::clamp(impl_->strafeBlend, 0.0f, 1.0f);
+        // Reload overlay: the override slot carries a reload clip — detected by
+        // clip ID so it works on both the local update() path and the remote
+        // renderFromServer() replay. Masked to the spine/arms/head subtree
+        // (spineBend.descendants[0]) so the legs keep the loco gait.
+        const auto& ovrSlot = impl_->samplers[k_slotOverride];
+        const bool ovrIsReload =
+            ovrSlot.active && (ovrSlot.id == ClipId::Reload || ovrSlot.id == ClipId::ReloadKraber);
+        const std::vector<bool>& upperMask = impl_->spineBend.descendants[0];
+        const bool maskReload =
+            ovrIsReload && !upperMask.empty() && !impl_->reloadJointWeights.empty() && !impl_->locoJointWeights.empty();
+        if (maskStrafe || maskReload) {
+            const float sb = maskStrafe ? std::clamp(impl_->strafeBlend, 0.0f, 1.0f) : 0.0f;
+            const float rw = maskReload ? std::clamp(ovrSlot.weight, 0.0f, 1.0f) : 0.0f;
             const size_t numSoa = impl_->locoJointWeights.size();
-            const size_t numJoints = impl_->lowerBodyMask.size();
+            const size_t numLegJ = impl_->lowerBodyMask.size();
+            const size_t numUpJ = upperMask.size();
             for (size_t g = 0; g < numSoa; ++g) {
                 float lLoco[4];
                 float lStrafe[4];
+                float lReload[4];
                 for (int lane = 0; lane < 4; ++lane) {
                     const size_t j = g * 4 + static_cast<size_t>(lane);
-                    const bool lower = (j < numJoints) && impl_->lowerBodyMask[j];
-                    lLoco[lane] = lower ? (1.0f - sb) : 1.0f;
+                    const bool lower = maskStrafe && (j < numLegJ) && impl_->lowerBodyMask[j];
+                    const bool upper = maskReload && (j < numUpJ) && upperMask[j];
+                    // Legs crossfade loco<->strafe; upper body crossfades loco<->reload.
+                    lLoco[lane] = lower ? (1.0f - sb) : (upper ? (1.0f - rw) : 1.0f);
                     lStrafe[lane] = lower ? sb : 0.0f;
+                    lReload[lane] = upper ? 1.0f : 0.0f;
                 }
                 impl_->locoJointWeights[g] = ozz::math::simd_float4::Load(lLoco[0], lLoco[1], lLoco[2], lLoco[3]);
                 impl_->strafeJointWeights[g] =
                     ozz::math::simd_float4::Load(lStrafe[0], lStrafe[1], lStrafe[2], lStrafe[3]);
+                impl_->reloadJointWeights[g] =
+                    ozz::math::simd_float4::Load(lReload[0], lReload[1], lReload[2], lReload[3]);
             }
         }
 
@@ -1487,11 +1597,13 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
             auto& layer = layers[static_cast<size_t>(layerCount)];
             layer.weight = samp.weight;
             layer.transform = ozz::make_span(impl_->perSamplerLocals[i]);
-            if (maskStrafe) {
+            if (maskStrafe || maskReload) {
                 if (i == k_slotLocoA || i == k_slotLocoB)
                     layer.joint_weights = ozz::make_span(impl_->locoJointWeights);
-                else if (i == k_slotStrafe)
+                else if (maskStrafe && i == k_slotStrafe)
                     layer.joint_weights = ozz::make_span(impl_->strafeJointWeights);
+                else if (maskReload && i == k_slotOverride)
+                    layer.joint_weights = ozz::make_span(impl_->reloadJointWeights);
             }
             ++layerCount;
         }
@@ -1622,12 +1734,64 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
         }
     }
 
+    // Crouch torso roll-leveling. The crouch-walk clip bakes a strong SIDEWAYS
+    // torso tilt (measured ~27 deg vs ~13 deg standing). Because the weapon is
+    // chest-anchored, that tilt rolls the whole upper body + gun to one side, and
+    // since the torso must keep aiming at the look direction the tilt is fixed in
+    // the aim frame — it reads as "always leaning the same way" no matter which
+    // direction you crouch-walk. Counter-roll the spine about the model FORWARD
+    // axis (the aim axis) to level it: this removes only the side tilt, leaving
+    // the forward crouch-hunch (Z) and the aim yaw/pitch untouched, and the
+    // chest-anchored gun levels along with the chest.
+    if (inputs.crouching && impl_->spineBend.valid() && impl_->hipsJointIdx >= 0
+        && impl_->spineBend.bones[0] >= 0 && !impl_->spineBend.descendants[0].empty()) {
+        constexpr float k_crouchTorsoLevel = 0.85f; // fraction of the side-lean removed
+        int chestIdx = -1;                          // chest-ish reference (matches the weapon anchor at spineC)
+        for (int i = static_cast<int>(kSpineChainLength) - 1; i >= 0; --i) {
+            if (impl_->spineBend.bones[i] >= 0) {
+                chestIdx = impl_->spineBend.bones[i];
+                break;
+            }
+        }
+        if (chestIdx >= 0) {
+            const glm::vec3 hip = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(impl_->hipsJointIdx)]);
+            const glm::vec3 chest = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(chestIdx)]);
+            const glm::vec3 d = chest - hip;
+            // The roll about model +Z (forward/aim) that brings the chest's
+            // sideways (model-X) offset toward zero is atan2(d.x, d.y); scale to
+            // leave a small natural lean.  Height (Y) and forward hunch (Z) are
+            // preserved (roll about Z), so the crouch silhouette + aim stay.
+            const float sideLean = std::atan2(d.x, std::max(0.1f, d.y));
+            const float correction = k_crouchTorsoLevel * sideLean;
+            if (std::abs(correction) > 0.001f) {
+                // Rigidly roll the whole upper body (spineA's subtree, which
+                // includes the chest the weapon is anchored to) about the hip, so
+                // the chest levels by exactly `correction` and the gun rolls with
+                // it.  Legs are untouched (not in this subtree).
+                const glm::quat rot = glm::angleAxis(correction, glm::vec3(0.0f, 0.0f, 1.0f));
+                applyDeltaToMask(impl_->jointModelMats, impl_->spineBend.descendants[0], rotateAround(hip, rot));
+            }
+        }
+    }
+
     // Directional lower-body yaw. Do not derive the source axis from the live
     // toe pose: in Apex clips foot contact points left-forward on many frames,
     // which made every movement direction inherit a permanent left bias.
     if (!impl_->lowerBodyYawMask.empty() && impl_->hipsJointIdx >= 0) {
-        const anim_locomotion::LocalVelocity lv =
+        anim_locomotion::LocalVelocity lv =
             anim_locomotion::localVelocityFromWorld(inputs.velocityWorld, inputs.yawRad);
+        // Forward vs backward motion is carried by SEPARATE clips (apex_*_f vs
+        // apex_*_b, selected via reverseLike in selectLocomotion).  The lower-body
+        // yaw must therefore express ONLY the lateral angle and keep the legs in
+        // the FRONT hemisphere — never rotate them into the rear.  Spinning the
+        // legs 180 deg for a backpedal turns the backward clip into a
+        // face-backward walk (issue: "backwards plays forward anim with rotated
+        // hip"), and any backward drift while strafing over-rotates the legs past
+        // 90 deg toward the rear (issue: "left is too angled").  Reflecting the
+        // backward component to the front caps the yaw at +/-90 deg and lets the
+        // backward clip provide the actual backpedal; a back-left/right strafe
+        // then reads as the backward clip angled toward that side.
+        lv.forward = std::abs(lv.forward);
         const float targetYaw = anim_locomotion::directionalYawFromLocalVelocity(lv,
                                                                                  impl_->legYawAuthoredForward,
                                                                                  glm::vec3{0.0f, 0.0f, 1.0f},
@@ -1641,6 +1805,9 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
         if (std::abs(impl_->legYawSmoothed) > 0.001f) {
             const glm::vec3 pivot = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(impl_->hipsJointIdx)]);
             const glm::quat rot = glm::angleAxis(impl_->legYawSmoothed, glm::vec3{0.0f, 1.0f, 0.0f});
+            // Rotate ONLY the lower body (hips + legs) toward the velocity; the
+            // torso/arms/head stay as the clip authored them so the upper body
+            // keeps facing the aim/look direction (weapon stays on-aim).
             applyDeltaToMask(impl_->jointModelMats, impl_->lowerBodyYawMask, rotateAround(pivot, rot));
         }
     }

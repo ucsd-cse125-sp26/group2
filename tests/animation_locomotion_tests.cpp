@@ -56,6 +56,24 @@ void testCrouchForwardAndBackwardUseDifferentClips()
     assert(forward.secondary != backward.secondary);
 }
 
+void testStandingBackwardUsesBackwardClips()
+{
+    // Walk-tier backpedal blends Idle -> WalkBackward (a real reverse walk, not a
+    // forward clip spun around).
+    const auto walkBack = anim_locomotion::selectLocomotion(
+        anim_locomotion::LocalVelocity{.forward = -(anim_locomotion::k_walkSpeedRef * 0.5f), .right = 0.0f}, false);
+    assert(walkBack.secondary == ClipId::WalkBackward);
+
+    // Run-tier backpedal blends WalkBackward -> RunBackward, symmetric with the
+    // forward Walk -> Run blend; never a forward-facing clip.
+    const auto runBack = anim_locomotion::selectLocomotion(
+        anim_locomotion::LocalVelocity{
+            .forward = -0.5f * (anim_locomotion::k_walkSpeedRef + anim_locomotion::k_runSpeedRef), .right = 0.0f},
+        false);
+    assert(runBack.primary == ClipId::WalkBackward);
+    assert(runBack.secondary == ClipId::RunBackward);
+}
+
 void testTransitionTrackerDetectsStartStopAndPivot()
 {
     anim_locomotion::TransitionTracker tracker;
@@ -110,6 +128,7 @@ int main()
     testPureStrafeAtGameplayStrafeSpeedUsesWalkStrafe();
     testForwardGameplaySpeedUsesRun();
     testCrouchForwardAndBackwardUseDifferentClips();
+    testStandingBackwardUsesBackwardClips();
     testTransitionTrackerDetectsStartStopAndPivot();
     testDirectionalYawMapsApexAuthoredLeftAxisToGameplayDirections();
     return 0;

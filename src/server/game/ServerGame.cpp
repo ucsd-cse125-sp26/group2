@@ -1331,6 +1331,17 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
             ai.moveMode = static_cast<int>(ps->moveMode);
             ai.wallRunSide = static_cast<int>(ps->wallRunSide);
         }
+        // Reload drives the upper-body reload clip; authoritative here so it
+        // replicates to every viewer through the entity's AnimSnapshot.
+        if (const auto* ws = registry.try_get<WeaponState>(entity)) {
+            const GunInstance& gun = getEquippedGun(*ws);
+            const WeaponConfig& cfg = getWeaponConfig(gun.type);
+            ai.reloading = gun.isReloading;
+            ai.reloadProgress = (gun.isReloading && cfg.reloadTime > 0.0f)
+                                    ? std::clamp(1.0f - gun.reloadTime / cfg.reloadTime, 0.0f, 1.0f)
+                                    : 0.0f;
+            ai.reloadHeavy = (gun.type == WeaponType::RailGun); // Kraber occupies the charge-rifle slot
+        }
 
         animator->update(ai, dt);
 
