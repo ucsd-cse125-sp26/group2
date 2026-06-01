@@ -150,9 +150,9 @@ public:
     /// state machine is authoritative client-side.
     ///
     /// `inputs` is still consulted for per-frame post-processing that
-    /// has no analog in the snapshot (head-pitch transform, wallrun
-    /// mirror).  Pass the SAME interp-delayed inputs you would have
-    /// passed to `update()`.
+    /// has no analog in the snapshot (head-pitch transform, directional
+    /// lower-body yaw, wallrun mirror). Pass the SAME interp-delayed
+    /// inputs you would have passed to `update()`.
     void renderFromServer(const AnimSnapshot& serverState, const AnimationInputs& inputs);
 
     /// @brief Apply CPU skinning to every rig mesh, producing animated vertices.
@@ -260,8 +260,9 @@ private:
     /// populated by either the state machine or a server snapshot)
     /// and runs the ozz sampling + blending + LocalToModel +
     /// skin-matrix-compose pipeline (steps 7-10 of the original
-    /// `update()`).  Consumes `inputs` only for head-pitch and
-    /// wallrun-mirror post-processing.
+    /// `update()`). Consumes `inputs` only for procedural
+    /// post-processing such as head pitch, lower-body yaw, and wallrun
+    /// mirroring.
     void runSamplingAndSkinning(const AnimationInputs& inputs);
 
     /// @brief Shared implementation behind `applyHandIkTargets`,

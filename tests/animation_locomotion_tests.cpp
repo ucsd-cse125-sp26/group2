@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
 
 namespace
 {
@@ -10,6 +11,12 @@ namespace
 bool near(float a, float b, float eps = 0.001f)
 {
     return std::abs(a - b) <= eps;
+}
+
+void expect(bool condition)
+{
+    if (!condition)
+        std::abort();
 }
 
 void testSpeedRefsTrackMovementConstants()
@@ -76,6 +83,25 @@ void testTransitionTrackerDetectsStartStopAndPivot()
     assert(stop.preferredClip == ClipId::StopLeft);
 }
 
+void testDirectionalYawMapsApexAuthoredLeftAxisToGameplayDirections()
+{
+    const glm::vec3 apexAuthoredForward{-1.0f, 0.0f, 0.0f};
+    const glm::vec3 gameForward{0.0f, 0.0f, 1.0f};
+    const glm::vec3 gameRight{1.0f, 0.0f, 0.0f};
+    const glm::vec3 up{0.0f, 1.0f, 0.0f};
+    constexpr float pi = 3.14159265358979323846f;
+
+    const auto yaw = [&](anim_locomotion::LocalVelocity local) {
+        return anim_locomotion::directionalYawFromLocalVelocity(local, apexAuthoredForward, gameForward, gameRight, up);
+    };
+
+    expect(near(yaw({.forward = 300.0f, .right = 0.0f}), pi * 0.5f));
+    expect(near(yaw({.forward = -300.0f, .right = 0.0f}), -pi * 0.5f));
+    expect(near(std::abs(yaw({.forward = 0.0f, .right = 300.0f})), pi));
+    expect(near(yaw({.forward = 0.0f, .right = -300.0f}), 0.0f));
+    expect(near(yaw({.forward = 0.0f, .right = 0.0f}), 0.0f));
+}
+
 } // namespace
 
 int main()
@@ -85,5 +111,6 @@ int main()
     testForwardGameplaySpeedUsesRun();
     testCrouchForwardAndBackwardUseDifferentClips();
     testTransitionTrackerDetectsStartStopAndPivot();
+    testDirectionalYawMapsApexAuthoredLeftAxisToGameplayDirections();
     return 0;
 }

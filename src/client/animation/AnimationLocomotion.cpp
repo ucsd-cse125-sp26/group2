@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <glm/geometric.hpp>
 
 namespace anim_locomotion
 {
@@ -32,6 +33,22 @@ constexpr float k_pivotPeakWeight = 0.42f;
     v.forward /= len;
     v.right /= len;
     return v;
+}
+
+[[nodiscard]] glm::vec3 normalizedPlanarOr(glm::vec3 v, glm::vec3 up, const glm::vec3& fallback) noexcept
+{
+    const float upLen = glm::length(up);
+    up = upLen > 0.0001f ? up / upLen : glm::vec3{0.0f, 1.0f, 0.0f};
+    v -= up * glm::dot(v, up);
+    const float len = glm::length(v);
+    if (len > 0.0001f)
+        return v / len;
+    return fallback;
+}
+
+[[nodiscard]] float signedPlanarAngle(const glm::vec3& from, const glm::vec3& to, const glm::vec3& up) noexcept
+{
+    return std::atan2(glm::dot(glm::cross(from, to), up), glm::dot(from, to));
 }
 
 [[nodiscard]] ClipId dominantStartClip(const LocalVelocity& local) noexcept
@@ -77,6 +94,31 @@ LocalVelocity localVelocityFromWorld(const glm::vec3& velocityWorld, float yawRa
         .forward = velocityWorld.x * forward.x + velocityWorld.z * forward.z,
         .right = velocityWorld.x * right.x + velocityWorld.z * right.z,
     };
+}
+
+float directionalYawFromLocalVelocity(const LocalVelocity& local,
+                                      const glm::vec3& authoredForward,
+                                      const glm::vec3& gameForward,
+                                      const glm::vec3& gameRight,
+                                      const glm::vec3& up,
+                                      float idleCutoff) noexcept
+{
+    if (speed(local) <= idleCutoff)
+        return 0.0f;
+
+    const float upLen = glm::length(up);
+    const glm::vec3 upAxis = upLen > 0.0001f ? up / upLen : glm::vec3{0.0f, 1.0f, 0.0f};
+    const glm::vec3 source = normalizedPlanarOr(authoredForward, upAxis, glm::vec3{0.0f, 0.0f, 1.0f});
+    const glm::vec3 fwd = normalizedPlanarOr(gameForward, upAxis, source);
+    glm::vec3 fallbackRight = glm::cross(upAxis, fwd);
+    if (glm::length(fallbackRight) <= 0.0001f)
+        fallbackRight = glm::cross(upAxis, glm::vec3{0.0f, 0.0f, 1.0f});
+    fallbackRight = normalizedPlanarOr(fallbackRight, upAxis, glm::vec3{1.0f, 0.0f, 0.0f});
+    const glm::vec3 right = normalizedPlanarOr(gameRight, upAxis, fallbackRight);
+
+    glm::vec3 desired = fwd * local.forward + right * local.right;
+    desired = normalizedPlanarOr(desired, upAxis, source);
+    return signedPlanarAngle(source, desired, upAxis);
 }
 
 float smoothingAlpha(float dtSec, float tauSec) noexcept

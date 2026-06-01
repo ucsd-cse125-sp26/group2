@@ -176,6 +176,16 @@ glm::mat4 rotateAround(const glm::vec3& pivot, const glm::quat& rotation)
     return glm::translate(glm::mat4(1.0f), pivot) * glm::mat4_cast(rotation) * glm::translate(glm::mat4(1.0f), -pivot);
 }
 
+float wrapRadians(float angle)
+{
+    const float twoPi = glm::two_pi<float>();
+    while (angle > glm::pi<float>())
+        angle -= twoPi;
+    while (angle < -glm::pi<float>())
+        angle += twoPi;
+    return angle;
+}
+
 std::vector<bool> buildDescendantMask(const ozz::animation::Skeleton* skeleton, int root)
 {
     std::vector<bool> mask;
@@ -392,8 +402,15 @@ struct CharacterAnimator::Impl
     // Phase F polish state.
     int hipsJointIdx = -1;             ///< "mixamorig:Hips" index, drives the hip-lean coupling.
     std::vector<bool> hipsDescendants; ///< Descendant mask for the hip-lean delta.
-    float recoilPitch = 0.0f;          ///< Current additive pitch from recoil (decays each frame).
-    float breathingPhase = 0.0f;       ///< Accumulated time for the breathing oscillator (s, wraps every 2*pi).
+    // Procedural directional lower-body yaw: Apex locomotion clips are authored
+    // with their forward/root-motion axis along model -X, while gameplay treats
+    // model +Z as player forward. Rotate hips+legs from the authored clip axis
+    // toward local velocity so remote strafes/backpedals do not all read left.
+    std::vector<bool> lowerBodyYawMask;
+    float legYawSmoothed = 0.0f;
+    glm::vec3 legYawAuthoredForward{0.0f, 0.0f, 1.0f};
+    float recoilPitch = 0.0f;    ///< Current additive pitch from recoil (decays each frame).
+    float breathingPhase = 0.0f; ///< Accumulated time for the breathing oscillator (s, wraps every 2*pi).
 
     // Weapon grip IK chains.
     ArmIkChain leftArm;
@@ -477,13 +494,48 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
             impl_->hipsDescendants = buildDescendantMask(rig.skeleton(), impl_->hipsJointIdx);
         }
 
+        // Directional lower-body yaw mask: pelvis plus both thigh subtrees.
+        // The pelvis is included because Apex's authored forward-run pose has
+        // the hip itself facing the clip axis; rotating only the thigh children
+        // fixes the feet but leaves the hips visibly stuck left.
+        {
+            impl_->lowerBodyYawMask.assign(static_cast<size_t>(numJoints), false);
+            int yawRoots = 0;
+            if (impl_->hipsJointIdx >= 0)
+                impl_->lowerBodyYawMask[static_cast<size_t>(impl_->hipsJointIdx)] = true;
+            for (const char* thigh : {"def_l_thigh", "def_r_thigh", "mixamorig:LeftUpLeg", "mixamorig:RightUpLeg"}) {
+                const auto it = jm.find(thigh);
+                if (it == jm.end())
+                    continue;
+                const std::vector<bool> sub = buildDescendantMask(rig.skeleton(), it->second);
+                const size_t m = std::min(sub.size(), impl_->lowerBodyYawMask.size());
+                for (size_t j = 0; j < m; ++j)
+                    impl_->lowerBodyYawMask[j] = impl_->lowerBodyYawMask[j] || sub[j];
+                ++yawRoots;
+            }
+            if (yawRoots == 0)
+                impl_->lowerBodyYawMask.clear();
+            else {
+                if (jm.find("jx_c_delta") != jm.end())
+                    impl_->legYawAuthoredForward = glm::vec3{-1.0f, 0.0f, 0.0f};
+                SDL_Log("CharacterAnimator: directional lower-body yaw mask bound (%d leg roots, "
+                        "authoredForward=%.1f,%.1f,%.1f)",
+                        yawRoots,
+                        static_cast<double>(impl_->legYawAuthoredForward.x),
+                        static_cast<double>(impl_->legYawAuthoredForward.y),
+                        static_cast<double>(impl_->legYawAuthoredForward.z));
+            }
+        }
+
         // Lower-body strafe mask: the union of the two leg subtrees. Restricts
         // the strafe clip to the legs so the torso/arms keep their forward
         // locomotion orientation and the weapon stays on-aim.
         {
             impl_->lowerBodyMask.assign(static_cast<size_t>(numJoints), false);
             int legRoots = 0;
-            for (const char* legRootName : {"mixamorig:LeftUpLeg", "mixamorig:RightUpLeg"}) {
+            for (const char* legRootName :
+                 {"mixamorig:LeftUpLeg", "mixamorig:RightUpLeg", "def_l_thigh", "def_r_thigh"})
+            {
                 const auto it = jm.find(legRootName);
                 if (it == jm.end())
                     continue;
@@ -1567,6 +1619,29 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
                 const glm::quat rot = glm::angleAxis(angle, axis);
                 applyDeltaToMask(impl_->jointModelMats, impl_->spineBend.descendants[i], rotateAround(pivot, rot));
             }
+        }
+    }
+
+    // Directional lower-body yaw. Do not derive the source axis from the live
+    // toe pose: in Apex clips foot contact points left-forward on many frames,
+    // which made every movement direction inherit a permanent left bias.
+    if (!impl_->lowerBodyYawMask.empty() && impl_->hipsJointIdx >= 0) {
+        const anim_locomotion::LocalVelocity lv =
+            anim_locomotion::localVelocityFromWorld(inputs.velocityWorld, inputs.yawRad);
+        const float targetYaw = anim_locomotion::directionalYawFromLocalVelocity(lv,
+                                                                                 impl_->legYawAuthoredForward,
+                                                                                 glm::vec3{0.0f, 0.0f, 1.0f},
+                                                                                 glm::vec3{1.0f, 0.0f, 0.0f},
+                                                                                 glm::vec3{0.0f, 1.0f, 0.0f});
+
+        const float dt = std::max(0.0f, inputs.dtSec);
+        const float kf = (dt > 0.0f) ? (1.0f - std::exp(-dt / 0.08f)) : 1.0f; // ~80 ms smoothing
+        impl_->legYawSmoothed =
+            wrapRadians(impl_->legYawSmoothed + wrapRadians(targetYaw - impl_->legYawSmoothed) * kf);
+        if (std::abs(impl_->legYawSmoothed) > 0.001f) {
+            const glm::vec3 pivot = matrixTranslation(impl_->jointModelMats[static_cast<size_t>(impl_->hipsJointIdx)]);
+            const glm::quat rot = glm::angleAxis(impl_->legYawSmoothed, glm::vec3{0.0f, 1.0f, 0.0f});
+            applyDeltaToMask(impl_->jointModelMats, impl_->lowerBodyYawMask, rotateAround(pivot, rot));
         }
     }
 

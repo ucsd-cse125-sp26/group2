@@ -57,6 +57,12 @@ struct TransitionTracker
 
 [[nodiscard]] float speed(const LocalVelocity& local) noexcept;
 [[nodiscard]] LocalVelocity localVelocityFromWorld(const glm::vec3& velocityWorld, float yawRad) noexcept;
+[[nodiscard]] float directionalYawFromLocalVelocity(const LocalVelocity& local,
+                                                    const glm::vec3& authoredForward,
+                                                    const glm::vec3& gameForward,
+                                                    const glm::vec3& gameRight,
+                                                    const glm::vec3& up,
+                                                    float idleCutoff = k_idleCutoff) noexcept;
 [[nodiscard]] float smoothingAlpha(float dtSec, float tauSec) noexcept;
 [[nodiscard]] LocomotionSelection selectLocomotion(const LocalVelocity& local, bool crouching) noexcept;
 [[nodiscard]] TransitionIntent
