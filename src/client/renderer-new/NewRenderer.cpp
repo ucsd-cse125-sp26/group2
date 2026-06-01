@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include <vector>
 
+using enum PointLightType;
 namespace
 {
 /// Convert SDL high-resolution counter ticks to milliseconds.
@@ -155,8 +156,8 @@ bool NewRenderer::init(SDL_Window* window)
     skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
-    staticShadowMaps_ =
-        Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
+    staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
+    movingLightShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_MOVING_POINT_LIGHTS);
 
     cubeFaceTargets_[0] = glm::vec3(1, 0, 0);
     cubeFaceTargets_[1] = glm::vec3(-1, 0, 0);
@@ -173,6 +174,52 @@ bool NewRenderer::init(SDL_Window* window)
     cubeFaceUps_[5] = glm::vec3(0, -1, 0);
 
     firstFrame_ = true;
+
+    float globalIntensity = 50000;
+    std::vector<PointLight> sampleLights;
+    PointLight pl0{};
+    pl0.position = glm::vec3(300, 100.0f, 500);
+    pl0.intensity = globalIntensity;
+    pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl0.range = 500.0f;
+    sampleLights.push_back(pl0);
+
+    PointLight pl1{};
+    pl1.position = glm::vec3(1920.0f, 450.0f, 1209.0f);
+    pl1.intensity = globalIntensity;
+    pl1.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl1.range = 500.0f;
+    sampleLights.push_back(pl1);
+
+    PointLight pl2{};
+    pl2.position = glm::vec3(1315.0f, 450.0f, -651.0f);
+    pl2.intensity = globalIntensity;
+    pl2.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl2.range = 500.0f;
+    sampleLights.push_back(pl2);
+
+    PointLight pl3{};
+    pl3.position = glm::vec3(31.0f, 450.0f, -1302.0f);
+    pl3.intensity = globalIntensity;
+    pl3.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl3.range = 500.0f;
+    sampleLights.push_back(pl3);
+
+    PointLight pl4{};
+    pl4.position = glm::vec3(-1560.0f, -239.0f, 2079.0f);
+    pl4.intensity = globalIntensity;
+    pl4.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl4.range = 500.0f;
+    sampleLights.push_back(pl4);
+
+    PointLight pl5{};
+    pl5.position = glm::vec3(-292.0f, -239.0f, 854.0f);
+    pl5.intensity = globalIntensity;
+    pl5.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl5.range = 500.0f;
+    sampleLights.push_back(pl5);
+
+    setStaticPointLights(std::move(sampleLights));
 
     return true;
 }
@@ -385,62 +432,13 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         }
     }
 
-    float globalIntensity = 50000;
-    std::vector<PointLight> sampleLights;
-    PointLight pl0{};
-    pl0.position = glm::vec3(300, 100.0f, 500); ////////////////////////
-    pl0.intensity = globalIntensity;
-    pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl0.range = 500.0f;
-    sampleLights.push_back(pl0);
-
-
-    PointLight pl1{};
-    pl1.position = glm::vec3(1920.0f, 450.0f, 1209.0f);//////////////////////
-    pl1.intensity = globalIntensity;
-    pl1.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl1.range = 500.0f;
-    sampleLights.push_back(pl1);
-
-    PointLight pl2{};
-    pl2.position = glm::vec3(1315.0f, 450.0f, -651.0f); ////////////////////////
-    pl2.intensity = globalIntensity;
-    pl2.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl2.range = 500.0f;
-    sampleLights.push_back(pl2);
-
-    PointLight pl3{};
-    pl3.position = glm::vec3(31.0f, 450.0f, -1302.0f);//////////////////////
-    pl3.intensity = globalIntensity;
-    pl3.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl3.range = 500.0f;
-    sampleLights.push_back(pl3);
-
-
-    PointLight pl4{};
-    pl4.position = glm::vec3(-1560.0f, -239.0f, 2079.0f);
-    pl4.intensity = globalIntensity;
-    pl4.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl4.range = 500.0f;
-    sampleLights.push_back(pl4);
-
-
-    PointLight pl5{};
-    pl5.position = glm::vec3(-292.0f, -239.0f, 854.0f); ////////////////////////
-    pl5.intensity = globalIntensity;
-    pl5.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl5.range = 500.0f;
-    sampleLights.push_back(pl5);
-
-    setPointLights(sampleLights);
-
     if (firstFrame_ && !Asset::modelInstances_.empty()) {
         onFirstFrame(cmd);
         std::cout << "FIRST FRAME" << std::endl;
         firstFrame_ = false;
     }
 
-    drawToShadowMap(cmd, dynamicShadowMaps_,1, true, true, true);
+    drawToShadowMap(cmd, dynamicShadowMaps_,1, true, true, true,STATIC);
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
@@ -523,14 +521,31 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
                                   Uint8 res,
                                   bool staticGeometry,
                                   bool entityGeometry,
-                                  bool skinnedGeometry)
+                                  bool skinnedGeometry,
+                                  PointLightType lightType)
 {
+
+    Uint32 lightCount = 0;
+    Uint32 maxLightCount = 0;
+    PointLight *pointLightArray = nullptr;
+    switch (lightType) {
+        case STATIC:
+            lightCount = sceneLightInfo_.numPointLights;
+            maxLightCount = MAX_POINT_LIGHTS;
+            pointLightArray = sceneLightInfo_.pointLights; break;
+        case MOVING:
+            lightCount = sceneLightInfo_.numMovingPointLights;
+            maxLightCount = MAX_MOVING_POINT_LIGHTS;
+            pointLightArray = sceneLightInfo_.movingPointLights; break;
+        default: return;
+    }
+
     glm::mat4 shadowProjection = glm::perspective(
         glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
     shadowProjection[1][1] *= -1;
-    // for (Uint8 iLight = 0; iLight < 1; iLight++) {
-    for (Uint8 iLight = 0; iLight < sceneLightInfo_.numPointLights; iLight++) {
-        PointLight& light = sceneLightInfo_.pointLights[iLight];
+
+    for (Uint8 iLight = 0; iLight < std::min(lightCount,maxLightCount); iLight++) {
+        PointLight& light = pointLightArray[iLight];
 
         for (int face = 0; face < NUM_CUBE_FACES; face++) {
             glm::vec3& iCubeFaceTarget = cubeFaceTargets_[face];
@@ -554,7 +569,7 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
 
 void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
 {
-    drawToShadowMap(cmd, staticShadowMaps_,0, true, false, false);
+    drawToShadowMap(cmd, staticShadowMaps_,0, true, false, false,STATIC);
 }
 
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
@@ -972,6 +987,8 @@ void NewRenderer::quit()
             SDL_ReleaseGPUTexture(device_, staticShadowMaps_);
         if (dynamicShadowMaps_)
             SDL_ReleaseGPUTexture(device_, dynamicShadowMaps_);
+        if (movingLightShadowMaps_)
+            SDL_ReleaseGPUTexture(device_, movingLightShadowMaps_);
 
         ImGui_ImplSDLGPU3_Shutdown();
         SDL_ReleaseWindowFromGPUDevice(device_, window_);
@@ -1092,8 +1109,15 @@ void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
     // passes by pushing a light-array UBO to the fragment shader.  Cap at the
     // shader's array size and silently drop the rest.
     // pointLights_ = std::move(pointLights);
-    sceneLightInfo_.numPointLights =
-        std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_POINT_LIGHTS));
+    sceneLightInfo_.numMovingPointLights =
+        std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_MOVING_POINT_LIGHTS));
+
+    memcpy(sceneLightInfo_.movingPointLights, pointLights.data(), sceneLightInfo_.numMovingPointLights * sizeof(PointLight));
+}
+
+void NewRenderer::setStaticPointLights(std::vector<PointLight> &&pointLights)
+{
+    sceneLightInfo_.numPointLights = std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_POINT_LIGHTS));
 
     memcpy(sceneLightInfo_.pointLights, pointLights.data(), sceneLightInfo_.numPointLights * sizeof(PointLight));
 }

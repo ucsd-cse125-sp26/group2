@@ -44,13 +44,24 @@ struct Vertex
     glm::vec4 tangent;
 };
 
+enum class PointLightType : std::uint8_t
+{
+    STATIC,
+    MOVING,
+    TEMPORARY,
+    NON_SHADOW,
+};
+
 struct LightUBO
 {
     uint32_t numPointLights = 0;
+    uint32_t numMovingPointLights = 0;
     uint32_t numSpotLights = 0;
     float pointLightFarPlane = 7500.0f;
     float pointLightNearPlane = 100.0f;
+    uint32_t _pad0[3];
     PointLight pointLights[MAX_POINT_LIGHTS];
+    PointLight movingPointLights[MAX_MOVING_POINT_LIGHTS];
 };
 /// @brief Graphics-team's work-in-progress SDL3 GPU renderer.
 ///
@@ -169,6 +180,7 @@ public:
     /// DATA SOURCE: built in Game.cpp from ECS each frame (glow-emitting
     /// projectiles, muzzle flashes, etc).
     void setPointLights(std::vector<PointLight> pointLights);
+    void setStaticPointLights(std::vector<PointLight>&& pointLights);
 
     /// @brief Set the first-person weapon viewmodel for this frame.
     /// @param vm  Model handle + viewmodel-space transform + visibility.
@@ -376,7 +388,8 @@ private:
                          Uint8 res,
                          bool staticGeometry,
                          bool entityGeometry,
-                         bool skinnedGeometry);
+                         bool skinnedGeometry,
+                         PointLightType lightType);
 
     void onFirstFrame(SDL_GPUCommandBuffer* cmd);
 
@@ -448,6 +461,9 @@ private:
     SDL_GPUTexture* staticShadowMaps_ = nullptr;
     SDL_GPUSampler* staticDepthSampler_ = nullptr;
     SDL_GPUSampler* dynamicDepthSampler_ = nullptr;
+
+
+    SDL_GPUTexture* movingLightShadowMaps_ = nullptr;
 
     glm::vec3 cubeFaceTargets_[NUM_CUBE_FACES];
     glm::vec3 cubeFaceUps_[NUM_CUBE_FACES];
