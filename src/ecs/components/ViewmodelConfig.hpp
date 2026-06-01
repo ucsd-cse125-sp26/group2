@@ -300,7 +300,10 @@ inline const WeaponHandMountParams& getWeaponHandMountParams(WeaponType type)
     // replaces, and gives the tuner a known-good baseline to nudge from.
     static constexpr WeaponHandMountParams k_rifleHandMounts{
         .rightHand = {.elbowOffset = {-8.4f, -17.99f, -20.35f},
-                      .palm = {.offset = {-1.05f, -11.39f, -7.2f}, .rotationDegrees = {-6.0f, 92.0f, 94.0f}},
+                      // Computed in ENGINE (glTF Y-up) space for Wraith's def_r_wrist + the R-301's
+                      // local frame (barrel=+Z, up=+Y): aligns the barrel along her two-handed
+                      // rifle-grip hands-line, grip at the right wrist.
+                      .palm = {.offset = {-3.0f, -8.1f, 15.25f}, .rotationDegrees = {80.3f, -34.5f, -98.2f}},
                       .fingers = {{
                           {.offset = {-0.3f, 3.05f, 1.9f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
                           {.offset = {-2.6f, 0.3f, -2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},

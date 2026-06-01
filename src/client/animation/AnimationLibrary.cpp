@@ -354,15 +354,21 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
                 strippedAny |= stripTrack(j, "name match: hip/pelvis/delta");
         }
 
-        // Belt-and-braces: ALWAYS also freeze the joint that travels the most
-        // horizontally — that is the bone actually carrying baked locomotion
-        // displacement, found regardless of naming. A "topmost track" heuristic
-        // can't be used: every joint gets a single rest-pose translation key
-        // (above), so the first populated track is a static structural node.
-        {
+        // Fallback ONLY if no named mover matched (non-Apex/Mixamo rig): freeze
+        // the joint that travels the most horizontally. Guarded by !strippedAny
+        // because once the real root mover (jx_c_delta / Hips) is frozen, the
+        // "most-moving" remaining joint is a LEGITIMATELY animating bone (a foot
+        // mid-step, or the weapon-attach `ja_c_propGun` that tracks the grip) —
+        // freezing those would break the animation / detach the held weapon.
+        // Attachment bones are skipped outright for the same reason.
+        if (!strippedAny) {
             int moverJoint = -1;
             float bestSpan = 0.0f;
             for (int j = 0; j < numJoints; ++j) {
+                const std::string jn(jointNames[static_cast<size_t>(j)]);
+                if (jn.find("propGun") != std::string::npos || jn.find("propHand") != std::string::npos
+                    || jn.find("weapon") != std::string::npos)
+                    continue;
                 const auto& tr = raw.tracks[static_cast<size_t>(j)].translations;
                 if (tr.size() < 2)
                     continue;
@@ -381,9 +387,8 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
                 }
             }
             if (moverJoint >= 0 && bestSpan > 0.5f)
-                strippedAny |= stripTrack(moverJoint, "largest-horizontal-travel mover");
+                stripTrack(moverJoint, "largest-horizontal-travel mover");
         }
-        (void)strippedAny;
     }
 
     if (!raw.Validate()) {

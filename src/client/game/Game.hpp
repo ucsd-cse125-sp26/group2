@@ -621,6 +621,11 @@ private:
                                  ///< third-person weapon mesh to the right-hand bone after IK.
     int spine2JointIdx_ = -1;    ///< Cached "mixamorig:Spine2" joint index. Anchors the chest-relative right-hand IK
                                  ///< target so the gun is held in front of the chest instead of hanging at the side.
+    int charPropGunIdx_ = -1;    ///< Cached "ja_c_propGun" joint index — the shared Apex weapon-attach bone, posed at
+                                 ///< the grip by the rifle-hold clips. Third-person weapon mounts here (gun-agnostic).
+    glm::mat4 weaponPropGunBind_{1.0f}; ///< The held weapon's own "ja_c_propGun" bind matrix (engine frame), captured
+                                        ///< from the viewmodel rig. weaponWorld = charWorld·charPosed[propGun]·bind⁻¹.
+    bool weaponPropGunBindValid_ = false; ///< True once weaponPropGunBind_ has been captured from the loaded weapon.
     std::array<WeaponGripPose, kRenderableWeaponTypeCount>
         weaponGripPoses_{};      ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from
                                  ///< assets/weapons/<name>.grip.toml at startup. Joint data is per-joint (pitch, yaw)

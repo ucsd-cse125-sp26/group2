@@ -310,6 +310,18 @@ glm::vec3 WeaponViewmodelAnim::boneModelPos(const std::string& name) const
     return glm::vec3(impl_->jointModelMats[static_cast<size_t>(idx)][3]);
 }
 
+bool WeaponViewmodelAnim::boneModelMatrix(const std::string& name, glm::mat4& out) const
+{
+    auto it = impl_->rig.jointMap().find(name);
+    if (it == impl_->rig.jointMap().end())
+        return false;
+    const int idx = it->second;
+    if (idx < 0 || idx >= static_cast<int>(impl_->jointModelMats.size()))
+        return false;
+    out = impl_->jointModelMats[static_cast<size_t>(idx)];
+    return true;
+}
+
 void WeaponViewmodelAnim::update(float dtSec)
 {
     if (!impl_->rig.isLoaded())

@@ -73,6 +73,11 @@ public:
     /// for the chamber/ejection origin).  Zero if absent.
     [[nodiscard]] glm::vec3 boneModelPos(const std::string& name) const;
 
+    /// @brief Full model-space matrix of a named bone for the current pose.
+    /// Returns false (and leaves `out` unchanged) if the bone is absent. Used to
+    /// read the weapon's `ja_c_propGun` bind transform for third-person mounting.
+    [[nodiscard]] bool boneModelMatrix(const std::string& name, glm::mat4& out) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

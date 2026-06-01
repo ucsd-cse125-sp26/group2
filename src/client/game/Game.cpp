@@ -1389,6 +1389,20 @@ bool Game::init(AppContext& ctx)
                 SDL_Log("[client] R-301 viewmodel: %d joints, installed=%d",
                         weaponVm_.numJoints(),
                         static_cast<int>(weaponVmLoaded_));
+                // Capture the R-301's `ja_c_propGun` bind matrix (in the engine's
+                // own coordinate frame) so third-person mounting is computed from
+                // real geometry, not hand-tuned Euler angles. weaponWorld =
+                // charWorld * charPosed[ja_c_propGun] * inverse(thisBind). The
+                // shared prop bone exists on every Apex weapon, so this is
+                // gun-agnostic. Read at rest pose = bind.
+                weaponVm_.playRestPose();
+                weaponVm_.update(0.0f);
+                if (weaponVm_.boneModelMatrix("ja_c_propGun", weaponPropGunBind_)) {
+                    weaponPropGunBindValid_ = true;
+                    SDL_Log("[client] R-301 ja_c_propGun bind captured for third-person mount");
+                } else {
+                    SDL_Log("[client] WARNING: R-301 ja_c_propGun absent — 3p mount falls back to wrist palm");
+                }
             } else {
                 SDL_Log("[client] WARNING: R-301 viewmodel (apex_r301.glb) failed to load");
             }
@@ -1518,6 +1532,17 @@ bool Game::init(AppContext& ctx)
                 }
                 if (spine2JointIdx_ < 0)
                     SDL_Log("[client] WARNING: chest bone not found — chest-anchored right-hand IK disabled");
+            }
+            {
+                // Shared weapon-attach bone. Posed at the grip by the rifle-hold
+                // clips; the third-person weapon mounts here (gun-agnostic).
+                charPropGunIdx_ = -1;
+                if (auto it = charRig_.jointMap().find("ja_c_propGun"); it != charRig_.jointMap().end()) {
+                    charPropGunIdx_ = it->second;
+                    SDL_Log("[client] weapon-attach bone 'ja_c_propGun' index = %d", charPropGunIdx_);
+                } else {
+                    SDL_Log("[client] WARNING: 'ja_c_propGun' not in rig — 3p weapon mount falls back to wrist palm");
+                }
             }
 
             // Load per-weapon hand grip poses (Phase C of the AAA IK overhaul).
@@ -3763,39 +3788,51 @@ SDL_AppResult Game::iterate()
                     if (c.handIk.right.enabled || c.handIk.right.orientationEnabled)
                         c.ac->animator->applyArmIk(/*isLeft=*/false, c.handIk.right);
 
-                    // ── 3. Derive the weapon world from the freshly-IK'd
-                    // right-hand bone. Same algebra as before: solve
-                    // weapon × R(palm) = hand, so weapon = hand × inv(R(palm)),
-                    // origin = hand_pos − weapon_rot × palm.offset.
-                    if (c.hasWeapon && rightHandJointIdx_ >= 0) {
+                    // ── 3. Derive the weapon world.
+                    //
+                    // PREFERRED (gun-agnostic, matrix-based): align the weapon's
+                    // own `ja_c_propGun` bind to the character's posed
+                    // `ja_c_propGun` — the shared attach reference Apex uses on
+                    // every weapon + legend. No Euler, no per-weapon tuning:
+                    //   weaponWorld = charWorld · charPosed[propGun] · bind(propGun)⁻¹
+                    // FALLBACK (Mixamo-era): wrist bone + authored palm offset.
+                    if (c.hasWeapon) {
                         const auto& joints = c.ac->animator->jointModelMatrices();
-                        if (rightHandJointIdx_ < static_cast<int>(joints.size())) {
+                        glm::vec3 weaponOrigin(0.0f);
+                        glm::mat3 weaponRot(1.0f);
+                        bool haveWeapon = false;
+
+                        if (charPropGunIdx_ >= 0 && weaponPropGunBindValid_
+                            && charPropGunIdx_ < static_cast<int>(joints.size())) {
+                            const glm::mat4 propGunWorld =
+                                c.worldTransform * joints[static_cast<size_t>(charPropGunIdx_)];
+                            c.weaponWorld = propGunWorld * glm::inverse(weaponPropGunBind_);
+                            weaponOrigin = glm::vec3(c.weaponWorld[3]);
+                            weaponRot = glm::mat3(glm::normalize(glm::vec3(c.weaponWorld[0])),
+                                                  glm::normalize(glm::vec3(c.weaponWorld[1])),
+                                                  glm::normalize(glm::vec3(c.weaponWorld[2])));
+                            haveWeapon = true;
+                        } else if (rightHandJointIdx_ >= 0 && rightHandJointIdx_ < static_cast<int>(joints.size())) {
                             const glm::mat4 handWorld =
                                 c.worldTransform * joints[static_cast<size_t>(rightHandJointIdx_)];
                             const glm::vec3 handPos(handWorld[3]);
                             const glm::mat3 handRot(glm::normalize(glm::vec3(handWorld[0])),
                                                     glm::normalize(glm::vec3(handWorld[1])),
                                                     glm::normalize(glm::vec3(handWorld[2])));
-
                             const glm::mat3 invPalmRot =
                                 glm::inverse(glm::mat3(handMountRotation(c.rightPalmAuthored)));
-                            const glm::mat3 weaponRot = handRot * invPalmRot;
-                            const glm::vec3 weaponOrigin = handPos - weaponRot * c.rightPalmAuthored.offset;
-
+                            weaponRot = handRot * invPalmRot;
+                            weaponOrigin = handPos - weaponRot * c.rightPalmAuthored.offset;
                             glm::mat4 weaponWorldMat =
                                 glm::translate(glm::mat4(1.0f), weaponOrigin) * glm::mat4(weaponRot);
                             weaponWorldMat = glm::scale(weaponWorldMat, glm::vec3(c.weaponScale));
                             c.weaponWorld = weaponWorldMat;
+                            haveWeapon = true;
+                        }
 
-                            // ── 4. Derive the left-hand IK target from the
-                            // ACTUAL weapon world. The authored leftPalm is
-                            // weapon-local (offset = m units in the weapon
-                            // frame, rotationDegrees = orientation of the
-                            // palm). Project it through the unscaled rotation
-                            // part of weaponWorldMat (using weaponRot directly
-                            // avoids the scale baked into the matrix) so the
-                            // target ends up at the weapon's authored grip in
-                            // world space, then transform back to model space.
+                        if (haveWeapon) {
+                            // ── 4. Derive the left-hand IK target from the ACTUAL
+                            // weapon world (authored leftPalm is weapon-local).
                             const glm::vec3 leftPalmWorld = weaponOrigin + weaponRot * c.leftPalmAuthored.offset;
                             const glm::mat3 leftPalmRotWorld =
                                 weaponRot * glm::mat3(handMountRotation(c.leftPalmAuthored));
