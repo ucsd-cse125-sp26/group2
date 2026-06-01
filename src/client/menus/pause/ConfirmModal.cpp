@@ -46,9 +46,9 @@ ConfirmResult ConfirmModal::drawAndPoll()
             result = ConfirmResult::Cancelled;
         }
         ImGui::SameLine();
-        const bool confirmPressed =
-            request_.confirmIsDanger ? menu_theme::dangerButton(request_.confirmText.c_str(), {buttonWidth, 34.0f})
-                                     : menu_theme::accentButton(request_.confirmText.c_str(), {buttonWidth, 34.0f});
+        const bool confirmPressed = request_.confirmIsDanger
+                                        ? menu_theme::dangerButton(request_.confirmText.c_str(), {buttonWidth, 34.0f})
+                                        : menu_theme::accentButton(request_.confirmText.c_str(), {buttonWidth, 34.0f});
         if (confirmPressed) {
             result = ConfirmResult::Confirmed;
         }

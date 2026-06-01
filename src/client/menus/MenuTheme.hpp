@@ -29,7 +29,8 @@ float scaleFor(const ImVec2& display);
 /// @param showTitle  When true, draws a large accent title + underline rule.
 /// @param extraFlags Additional ImGuiWindowFlags to OR in.
 /// @return ImGui::Begin() result.  Always pair with endPanel(), even when this returns false.
-bool beginPanel(const char* idAndTitle, float baseWidth, float baseHeight, bool showTitle, ImGuiWindowFlags extraFlags = 0);
+bool beginPanel(
+    const char* idAndTitle, float baseWidth, float baseHeight, bool showTitle, ImGuiWindowFlags extraFlags = 0);
 
 /// @brief End a panel opened with beginPanel().
 void endPanel();

@@ -65,6 +65,16 @@ enum class HudIcon : uint8_t
     None = 0,
 };
 
+/// @brief Visual category for generic transient HUD popup messages.
+enum class HudPopupKind : std::uint8_t
+{
+    Info,         ///< Neutral informational popup.
+    Success,      ///< Positive confirmation popup.
+    Warning,      ///< Warning or attention popup.
+    PlayerJoined, ///< Player joined the active match.
+    PlayerLeft    ///< Player left the active match.
+};
+
 // ── Vertex ──────────────────────────────────────────────────────────────────
 
 /// @brief Per-vertex data for all HUD geometry (48 bytes).
@@ -221,6 +231,13 @@ struct HudPickupNotification
     int qty = 1;       ///< Amount picked up.
 };
 
+/// @brief Generic transient HUD popup message.
+struct HudPopupMessage
+{
+    HudPopupKind kind = HudPopupKind::Info; ///< Styling category.
+    std::string text;                       ///< Already-formatted display text.
+};
+
 /// @brief Local player K/D/A — feeds the top-right counter.
 struct HudKdaCounter
 {
@@ -346,6 +363,7 @@ struct HudGameState
     HudGrenadeRadialState grenadeRadial;                        ///< Held-G grenade selection radial.
     HudAbilitySelectionState abilitySelection;                  ///< Pending level-up ability choice.
     std::span<const HudPickupNotification> pickupNotifications; ///< Slide-in pickup messages this frame.
+    std::span<const HudPopupMessage> popupMessages;             ///< Generic popup messages this frame.
     HudKdaCounter kda;                                          ///< Local player kill/assist/death counter (top-right).
     HudChatState chat;                                          ///< Bottom-left all-chat log/input.
     std::span<const HudVoiceSpeaker> voiceSpeakers;             ///< Currently audible proximity voice speakers.

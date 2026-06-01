@@ -524,7 +524,7 @@ SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device)
     return SDL_CreateGPUSampler(device, &samplerInfo);
 }
 
-SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device,SDL_GPUFilter filterMode)
+SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device, SDL_GPUFilter filterMode)
 {
     SDL_GPUSamplerCreateInfo samplerInfo{};
     samplerInfo.min_filter = filterMode;

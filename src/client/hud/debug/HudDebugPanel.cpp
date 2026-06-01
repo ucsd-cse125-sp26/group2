@@ -21,6 +21,7 @@
 #include "hud/widgets/Minimap.hpp"
 #include "hud/widgets/PickupNotification.hpp"
 #include "hud/widgets/PickupPrompt.hpp"
+#include "hud/widgets/PopupNotification.hpp"
 #include "hud/widgets/RailgunScopeWidget.hpp"
 #include "hud/widgets/RoundTimer.hpp"
 #include "hud/widgets/Scoreboard.hpp"
@@ -107,6 +108,8 @@ const char* widgetName(const HudWidget* widget)
         return "Pickup Notification";
     if (dynamic_cast<const PickupPrompt*>(widget))
         return "Pickup Prompt";
+    if (dynamic_cast<const PopupNotification*>(widget))
+        return "Popup Notification";
     if (dynamic_cast<const RailgunScopeWidget*>(widget))
         return "Railgun Scope";
     if (dynamic_cast<const RoundTimer*>(widget))

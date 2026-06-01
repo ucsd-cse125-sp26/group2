@@ -483,7 +483,7 @@ bool ParticleRenderer::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, S
     ribbonBuf_.init(dev, sizeof(RibbonVertex) * 24576, GpuParticleBuffer::Mode::Vertex);
     hitscanBuf_.init(dev, sizeof(HitscanBeam) * 64);
     arcBuf_.init(dev, sizeof(ArcVertex) * 4096, GpuParticleBuffer::Mode::Vertex); // hitscan + tesla beams share this
-    smokeBuf_.init(dev, sizeof(SmokeParticle) * 1024); // 48 B × 1024 = 48 KB
+    smokeBuf_.init(dev, sizeof(SmokeParticle) * 1024);                            // 48 B × 1024 = 48 KB
     decalBuf_.init(dev, sizeof(DecalInstance) * 512);
     sdfWorldBuf_.init(dev, sizeof(SdfGlyphGPU) * 4096);
     sdfHudBuf_.init(dev, sizeof(SdfGlyphGPU) * 4096);

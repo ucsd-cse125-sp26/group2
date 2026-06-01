@@ -10,6 +10,7 @@
 #include "network/MatchStatus.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/RosterEvent.hpp"
 #include "network/discovery/GlobalDiscoveryProtocol.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/PacketHeader.hpp"
@@ -405,10 +406,24 @@ void Server::flushAllOutbound()
 
 void Server::enqueueReliableEvent(const void* data, int len)
 {
+    enqueueReliableEventExcept({}, data, len);
+}
+
+void Server::enqueueReliableEventExcept(std::span<const ClientId> excluded, const void* data, int len)
+{
+    // Keep the public roster API simple while allowing future callers to skip
+    // multiple recipients without duplicating reliable fan-out logic.
+    const auto isExcluded = [excluded](const ClientId& id) {
+        return std::find(excluded.begin(), excluded.end(), id) != excluded.end();
+    };
+
     if (usingUdpSession_) {
         std::shared_lock<std::shared_mutex> lock(stateMutex_);
-        for (auto& [_, conn] : clients)
+        for (auto& [id, conn] : clients) {
+            if (isExcluded(id))
+                continue;
             session_.send(conn.connectionId, net::ChannelId::EventReliableOrdered, data, len);
+        }
         return;
     }
 
@@ -441,13 +456,17 @@ void Server::enqueueReliableEvent(const void* data, int len)
 
         if (!transportConfig_.eventsOverUdp || !udpEndpoint_.isOpen()) {
             // TCP fallback. replaceKey = 0 → never drop on age, always ship.
-            for (auto& [_, conn] : clients) {
+            for (auto& [id, conn] : clients) {
+                if (isExcluded(id))
+                    continue;
                 conn.outbound.enqueue(0, sharedFramed);
             }
             return;
         }
 
-        for (auto& [_, conn] : clients) {
+        for (auto& [id, conn] : clients) {
+            if (isExcluded(id))
+                continue;
             conn.reliableQueue.push_back(Connection::PendingReliableEvent{
                 .sequence = conn.reliableNextSequence++,
                 .remainingSends = k_reliableRedundancy,
@@ -1903,4 +1922,15 @@ bool Server::sendMatchConfigToClient(ClientId clientId, const MatchConfig& confi
     buf[0] = static_cast<uint8_t>(PacketType::MATCH_CONFIG);
     std::memcpy(buf.data() + 1, &config, sizeof(MatchConfig));
     return sendToClient(clientId, buf.data(), static_cast<int>(buf.size()));
+}
+
+void Server::broadcastRosterEventExcept(ClientId excluded, const PlayerRosterEvent& event)
+{
+    // Roster events are reliable, ordered UI notifications. The payload is
+    // fixed-size so clients can decode it with a single bounds check.
+    std::vector<uint8_t> buf(sizeof(PacketType) + sizeof(PlayerRosterEvent));
+    buf[0] = static_cast<uint8_t>(PacketType::ROSTER_UPDATE);
+    std::memcpy(buf.data() + 1, &event, sizeof(PlayerRosterEvent));
+    const std::array excludedClients{excluded};
+    enqueueReliableEventExcept(excludedClients, buf.data(), static_cast<int>(buf.size()));
 }

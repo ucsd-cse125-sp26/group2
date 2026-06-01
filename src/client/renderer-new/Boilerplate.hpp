@@ -229,7 +229,7 @@ SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device);
 /// @brief Create a linear-filtering, comparison sampler (for shadow map depth comparison).
 /// @param device The GPU device.
 /// @return The created GPU sampler.
-SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device,SDL_GPUFilter filterMode);
+SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device, SDL_GPUFilter filterMode);
 
 /// @brief Create a linear-filtering, clamp-to-edge sampler.
 /// @param device The GPU device.

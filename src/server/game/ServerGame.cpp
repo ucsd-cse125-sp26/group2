@@ -68,6 +68,7 @@
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/PacketType.hpp"
+#include "network/RosterEvent.hpp"
 #include "network/ShotDebugReport.hpp"
 #include "network/ShotEvent.hpp"
 #include "perf/Parallel.hpp"
@@ -81,6 +82,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <glm/geometric.hpp>
 
 namespace
@@ -399,10 +401,39 @@ void ServerGame::eventHandler(const Event& event)
         }
         lobbyManager.addPlayer(event.clientId);
         server->sendMatchConfigToClient(event.clientId, matchController.getMatchConfig());
+        // Lobby updates already cover joins before the match starts. Once the
+        // match is active, send a lightweight roster popup event instead.
+        if (!isLobbyPhase(matchController.getCurrentPhase())) {
+            PlayerRosterEvent rosterEvent{
+                .type = RosterEventType::PlayerJoined,
+                .id = event.clientId,
+            };
+            if (const auto* playerName = registry.try_get<PlayerName>(clientEntities[event.clientId]))
+                std::memcpy(
+                    rosterEvent.name, playerName->c_str(), std::min(sizeof(rosterEvent.name), playerName->name.size()));
+            server->broadcastRosterEventExcept(event.clientId, rosterEvent);
+        }
         break;
     }
     case EventType::Disconnected: {
         GROUP2_PROF_SCOPE("eventDisconnected");
+        // Build the roster event before removing the player entity so the
+        // display name is still available for the client-side popup.
+        if (!isLobbyPhase(matchController.getCurrentPhase())) {
+            PlayerRosterEvent rosterEvent{
+                .type = RosterEventType::PlayerLeft,
+                .id = event.clientId,
+            };
+            if (const auto entityIt = clientEntities.find(event.clientId);
+                entityIt != clientEntities.end() && registry.valid(entityIt->second))
+            {
+                if (const auto* playerName = registry.try_get<PlayerName>(entityIt->second))
+                    std::memcpy(rosterEvent.name,
+                                playerName->c_str(),
+                                std::min(sizeof(rosterEvent.name), playerName->name.size()));
+            }
+            server->broadcastRosterEventExcept(event.clientId, rosterEvent);
+        }
         lobbyManager.removePlayer(event.clientId);
         matchController.removeExpectedPlayer(event.clientId);
         deletePlayerEntity(event.clientId);
@@ -1210,10 +1241,10 @@ void ServerGame::updateLagCompTargets()
     netById.clear();
     netById.reserve(netCache.size());
     for (const auto& s : netCache)
-        netById.emplace(
-            s.id,
-            NetCacheEntry{
-                .rttMs = s.rttMs, .interpDelaySnapshots = s.interpDelaySnapshots, .interpDelayMs = s.interpDelayMs});
+        netById.emplace(s.id,
+                        NetCacheEntry{.rttMs = s.rttMs,
+                                      .interpDelaySnapshots = s.interpDelaySnapshots,
+                                      .interpDelayMs = s.interpDelayMs});
 
     // Snapshot interval in physics ticks — used to convert the
     // client's interpDelaySnapshots into a tick count.  Read from
@@ -1478,4 +1509,9 @@ bool ServerGame::isGameplayInputAllowed(MatchPhase phase) const
     default:
         return true;
     }
+}
+
+bool ServerGame::isLobbyPhase(MatchPhase phase) const
+{
+    return phase == MatchPhase::LOBBY;
 }

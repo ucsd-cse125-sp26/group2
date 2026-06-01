@@ -264,6 +264,9 @@ private:
     /// @brief Determine if server should allow input based on phase
     [[nodiscard]] bool isGameplayInputAllowed(MatchPhase phase) const;
 
+    /// @brief Return true when roster changes should use lobby updates instead of in-match popups.
+    [[nodiscard]] bool isLobbyPhase(MatchPhase phase) const;
+
     // ── PR-27: pending client SHOT_INTENTs ───────────────────────────────
     //
     // The network thread enqueues `EventType::ShotIntent` events into

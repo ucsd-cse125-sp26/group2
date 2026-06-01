@@ -31,8 +31,9 @@ struct UserSettings
 
     float gamepadYawSensitivity{6.0f};                      ///< radians/sec
     float gamepadPitchSensitivity{6.0f};
-    float gamepadLookDeadzone{0.12f};                       ///< Gamepad look deadzone radius in [0, 1]. Ignores stick drift out of the box.
-    float gamepadMoveDeadzone{0.18f};                       ///< Gamepad move deadzone radius in [0, 1]. Higher than look — drift-walking is worse than drift-aim.
+    float gamepadLookDeadzone{0.12f}; ///< Gamepad look deadzone radius in [0, 1]. Ignores stick drift out of the box.
+    float gamepadMoveDeadzone{
+        0.18f}; ///< Gamepad move deadzone radius in [0, 1]. Higher than look — drift-walking is worse than drift-aim.
     bool aimAssistEnabled{true};
     float aimAssistStrength{1.0f}; ///< Aim assist strength in [0, 1], where 0 is no assist and 1 is full assist.
     bool gamepadSwapSticks{false}; ///< If true, swap the left and right sticks for look and move input.

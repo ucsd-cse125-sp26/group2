@@ -172,9 +172,8 @@ bool beginPanel(const char* idAndTitle, float baseWidth, float baseHeight, bool 
     size.x = std::min(size.x, io.DisplaySize.x * 0.94f);
     size.y = std::min(size.y, io.DisplaySize.y * 0.94f);
 
-    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
-                            ImGuiCond_Always,
-                            ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowPos(
+        ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
@@ -262,7 +261,8 @@ void drawBackground(SDL_GPUDevice* device)
 
     if (bgState.tex) {
         const auto id = (ImTextureID)(intptr_t)&bgState.binding;
-        dl->AddImage(id, ImVec2(0.0f, 0.0f), disp, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32(255, 255, 255, 205));
+        dl->AddImage(
+            id, ImVec2(0.0f, 0.0f), disp, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32(255, 255, 255, 205));
         // Darken slightly so panel text stays legible over the photo.
         dl->AddRectFilled(ImVec2(0.0f, 0.0f), disp, IM_COL32(6, 8, 12, 120));
     }

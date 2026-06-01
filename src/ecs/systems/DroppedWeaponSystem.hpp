@@ -40,11 +40,8 @@ struct PendingWeaponDrop
 /// @param initialVel   Initial velocity (e.g. a gentle toss for swap drops).
 /// @param gun          The gun being dropped; its ammo state is snapshotted.
 /// @param pickupDelay  Pickup-immunity window (s) before the drop can be grabbed.
-void spawnDroppedWeapon(Registry& registry,
-                        glm::vec3 pos,
-                        glm::vec3 initialVel,
-                        const GunInstance& gun,
-                        float pickupDelay);
+void spawnDroppedWeapon(
+    Registry& registry, glm::vec3 pos, glm::vec3 initialVel, const GunInstance& gun, float pickupDelay);
 
 /// @brief Tick dropped weapons: handle pickup (overlap-refill or look+F replace) and despawn timer.
 /// @param registry  The ECS registry.

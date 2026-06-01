@@ -67,6 +67,7 @@
 #include "hud/VoidfallStyle.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
 #include "network/EntityInterpolation.hpp"
+#include "network/RosterEvent.hpp"
 #include "network/ShotEvent.hpp"
 #include "particles/ParticleEvents.hpp"
 #include "renderer-new/Asset.hpp"
@@ -470,6 +471,19 @@ const char* lookupPlayerName(const Registry& registry, ClientId cid, char* outBu
     }
     SDL_snprintf(outBuf, bufSize, "Player #%d", cid.value);
     return outBuf;
+}
+
+std::string rosterEventPlayerName(const Registry& registry, const PlayerRosterEvent& event)
+{
+    // Prefer the server-snapshotted name because disconnects can remove the
+    // replicated player entity before this client renders the notification.
+    const auto* nameBegin = event.name;
+    const auto* nameEnd = std::find(nameBegin, nameBegin + sizeof(event.name), '\0');
+    if (nameEnd != nameBegin)
+        return std::string(nameBegin, nameEnd);
+
+    char nameBuf[32];
+    return lookupPlayerName(registry, event.id, nameBuf, sizeof(nameBuf));
 }
 
 struct ClientRagdollBonePose
@@ -1338,6 +1352,17 @@ bool Game::init(AppContext& ctx)
     });
 
     client->onTextChat([this](const net::chat::ServerTextChat& chat) { appendChatMessage(chat.sender, chat.message); });
+    client->onRosterEvent([this](const PlayerRosterEvent& event) {
+        const std::string playerName = rosterEventPlayerName(registry, event);
+        switch (event.type) {
+        case RosterEventType::PlayerJoined:
+            appendPopupMessage(HudPopupKind::PlayerJoined, playerName + " JOINED THE MATCH");
+            break;
+        case RosterEventType::PlayerLeft:
+            appendPopupMessage(HudPopupKind::PlayerLeft, playerName + " LEFT THE MATCH");
+            break;
+        }
+    });
     client->onVoiceFrame([this](const net::voice::ServerVoiceFrame& frame) { voiceChat_.enqueueFrame(frame); });
 
     // PR-20: hand each SHOT_DEBUG_REPORT off to the DebugUI's ring
@@ -1679,6 +1704,14 @@ void Game::appendLocalChatMessage(std::string_view message)
         chatMessages_.erase(chatMessages_.begin(),
                             chatMessages_.begin() +
                                 static_cast<std::ptrdiff_t>(chatMessages_.size() - k_maxChatHistory));
+}
+
+void Game::appendPopupMessage(HudPopupKind kind, std::string_view message)
+{
+    HudPopupMessage popup;
+    popup.kind = kind;
+    popup.text = std::string(message);
+    pendingPopupMessages_.push_back(std::move(popup));
 }
 
 void Game::clearGameplayInputForChat()
@@ -6267,8 +6300,7 @@ SDL_AppResult Game::iterate()
                 // center. If static world geometry is hit before reaching the
                 // enemy, a wall is in the way — flag it so the HUD hides the
                 // floating bar/name (no see-through-walls wallhack).
-                const glm::vec3 bodyCenter =
-                    pos.value + glm::vec3{0.f, shape.halfExtents.y * 0.5f * headDir, 0.f};
+                const glm::vec3 bodyCenter = pos.value + glm::vec3{0.f, shape.halfExtents.y * 0.5f * headDir, 0.f};
                 const glm::vec3 toEnemy = bodyCenter - cachedEye_;
                 const float distToEnemy = glm::length(toEnemy);
                 if (distToEnemy > 1.f) {
@@ -6340,6 +6372,7 @@ SDL_AppResult Game::iterate()
             // Ship the pending list and drain — each notification is a
             // one-shot event; the widget owns its lifetime.
             hudState.pickupNotifications = pendingPickupNotifications_;
+            hudState.popupMessages = pendingPopupMessages_;
         }
 
         // ── Voidfall HUD: gravity direction ──
@@ -6387,6 +6420,7 @@ SDL_AppResult Game::iterate()
 
         // Drain pickup notifications now that the HUD has consumed them.
         pendingPickupNotifications_.clear();
+        pendingPopupMessages_.clear();
     }
     phaseSnap(phaseStats.hudMs);
 
@@ -6641,6 +6675,7 @@ void Game::quit()
         client->onMatchStateUpdate({});
         client->onKillEvent({});
         client->onTextChat({});
+        client->onRosterEvent({});
         client->onVoiceFrame({});
         client->onShotDebugReport({});
     }

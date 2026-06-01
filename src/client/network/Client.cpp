@@ -15,6 +15,7 @@
 #include "network/NetKillEvent.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/RosterEvent.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/PacketHeader.hpp"
 
@@ -256,6 +257,12 @@ void Client::shutdown()
     }
 
     std::lock_guard<std::mutex> lock(stateMutex_);
+    // Gracefully notify the UDP session peer before tearing down local
+    // transport state so the server can remove this client without timeout.
+    if (usingUdpSession_ && connectionId_ != 0) {
+        session_.disconnect(connectionId_);
+    }
+
     session_.close();
     usingUdpSession_ = false;
     udpSessionLastBytesSent_ = 0;
@@ -1467,6 +1474,18 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         const auto chat = net::chat::decodeServerText(std::span<const std::uint8_t>(data, size));
         if (chat && textChatFn_)
             textChatFn_(*chat);
+        break;
+    }
+    case PacketType::ROSTER_UPDATE: {
+        if (payloadSize < sizeof(PlayerRosterEvent))
+            break;
+
+        // Roster events are small fixed-size payloads and ride the same
+        // reliable event path as kill/chat-style notifications.
+        PlayerRosterEvent event{};
+        std::memcpy(&event, payload, sizeof(PlayerRosterEvent));
+        if (rosterEventFn_)
+            rosterEventFn_(event);
         break;
     }
     case PacketType::VOICE_FRAME: {
