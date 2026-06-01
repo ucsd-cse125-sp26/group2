@@ -43,6 +43,11 @@ struct Vertex
     glm::vec4 tangent;
 };
 
+struct AABB
+{
+    glm::vec4 min{FLT_MAX};
+    glm::vec4 max{-FLT_MAX};
+};
 /// @brief A single mesh: CPU-side vertex/index data plus GPU buffer info.
 struct Mesh
 {
@@ -50,7 +55,10 @@ struct Mesh
     std::vector<uint32_t> indexData_;
     GeoBufferInfo vBufferInfo_;
     GeoBufferInfo iBufferInfo_;
+    AABB aabb_;
 };
+
+
 
 struct CpuMesh
 {
@@ -92,6 +100,8 @@ struct ModelElement
     MeshIdInt meshId_;
     MaterialIdInt materialId_ = 0;
     glm::mat4 cachedTransform_;
+    AABB cachedAabb_;
+;
 };
 
 struct ModelNode

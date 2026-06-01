@@ -5,6 +5,18 @@
 
 #include <glm/glm.hpp>
 
+#define NUM_FRUSTUM_PLANES 6
+
+struct FrustumPlanes
+{
+    glm::vec4 left;
+    glm::vec4 right;
+    glm::vec4 bottom;
+    glm::vec4 top;
+    glm::vec4 near;
+    glm::vec4 far;
+};
+
 /// @brief Camera for the new renderer, combining view and projection into one matrix.
 class NewCamera
 {
@@ -49,8 +61,11 @@ public:
     /// @brief Recompute the combined view-projection matrix from current parameters.
     void computeViewProjectionMatrix();
 
+    static FrustumPlanes gribbHartmannFrustumPlanes(const glm::mat4 &viewProjectionMat);
+
     /// @brief Return the combined view-projection matrix.
     [[nodiscard]] glm::mat4 getViewProjectionMatrix() const { return view_projection_; }
+    [[nodiscard]] FrustumPlanes getViewProjectionFrustumPlane() const { return viewProjectionFrustumPlanes_; }
     [[nodiscard]] glm::mat4 getViewMatrix() const { return view_; }
     [[nodiscard]] glm::mat4 getProjectionMatrix() const { return projection_; }
 
@@ -76,4 +91,6 @@ private:
     glm::mat4 view_{1.0f};
     glm::mat4 projection_{1.0f};
     glm::mat4 view_projection_{1.0f};
+
+    FrustumPlanes viewProjectionFrustumPlanes_;
 };

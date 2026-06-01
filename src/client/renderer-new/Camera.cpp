@@ -83,6 +83,29 @@ void NewCamera::computeViewProjectionMatrix()
     view_ = glm::lookAt(eye_, target_, up_);
     projection_ = glm::perspective(fovy_, aspect_, zNear_, zFar_);
     view_projection_ = projection_ * view_;
+
+    viewProjectionFrustumPlanes_ = gribbHartmannFrustumPlanes(view_projection_);
+
+}
+
+
+FrustumPlanes NewCamera::gribbHartmannFrustumPlanes(const glm::mat4 &viewProjectionMat)
+{
+    FrustumPlanes frustumPlanes;
+
+    glm::mat4 viewProjectionMatTranspose = glm::transpose(viewProjectionMat);
+
+    frustumPlanes.left = viewProjectionMatTranspose[3] - viewProjectionMatTranspose[0];
+    frustumPlanes.right = viewProjectionMatTranspose[3] + viewProjectionMatTranspose[0];
+
+    frustumPlanes.bottom = viewProjectionMatTranspose[3] - viewProjectionMatTranspose[1];
+    frustumPlanes.top = viewProjectionMatTranspose[3] + viewProjectionMatTranspose[1];
+
+    frustumPlanes.near = viewProjectionMatTranspose[3] - viewProjectionMatTranspose[2];
+    frustumPlanes.far = viewProjectionMatTranspose[3] + viewProjectionMatTranspose[2];
+
+    return frustumPlanes;
+
 }
 
 glm::vec3 NewCamera::getForward() const
