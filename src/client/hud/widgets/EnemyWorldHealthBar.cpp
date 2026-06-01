@@ -35,6 +35,7 @@ void EnemyWorldHealthBar::update(float dt, const HudGameState& state, HudTweenPo
         e.maxHp = std::max(1, we.maxHealth);
         e.maxSh = std::max(1, we.maxArmor);
         e.alive = we.isAlive;
+        e.occluded = we.occluded;
 
         const int newHp = we.health;
         const int newSh = we.armor;
@@ -110,6 +111,11 @@ void EnemyWorldHealthBar::draw(HudContext& ctx, float /*drawX*/, float /*drawY*/
 
     for (const auto& [_, e] : enemies_) {
         if (!e.alive)
+            continue;
+        // Hide when a wall is between the camera and the enemy — no
+        // wallhack-style HP bars. The damage-timer cache above is still kept
+        // up to date so the bar reappears correctly once line of sight returns.
+        if (e.occluded)
             continue;
         // Hide entirely until this enemy has been damaged recently.
         if (e.showTimer <= 0.f)

@@ -23,6 +23,8 @@ const char* weaponDisplayName(int weaponId)
         return "Rail Gun";
     case 3:
         return "Energy Gun";
+    case 4:
+        return "Shotgun";
     default:
         return "Weapon";
     }
@@ -45,7 +47,7 @@ void PickupPrompt::update(float /*dt*/, const HudGameState& state, HudTweenPool&
     visible = state.isAlive && state.pickupAvailable;
     weaponId_ = state.pickupWeaponId;
     if (state.bindings) {
-        keyLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Pickup));
+        keyLabel_ = InputBindings::bindingLabel(state.bindings->get(Action::Pickup, state.activeInputDevice));
     }
 }
 

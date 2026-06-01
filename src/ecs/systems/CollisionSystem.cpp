@@ -26,6 +26,8 @@
 #include "ecs/systems/KinematicCharacterController.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 
+#include <cmath>
+#include <glm/common.hpp>
 #include <glm/geometric.hpp>
 
 // PR-7 (server-perf): optional parallel-STL hooks for the player loop.
@@ -520,6 +522,52 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
             // Stuck grenades don't move under physics — they're glued in place.
             if (frozen) {
                 return;
+            }
+
+            // Sticky grenades home in on wall-running players: a gentle,
+            // capped-turn-rate curve toward the nearest wall-runner in range.
+            // Skill-rewarding — it can still miss, and does nothing when no
+            // wall-runner is nearby (the grenade flies ballistic). Only applies
+            // to in-flight stickies (not yet stuck).
+            if (projectile.sticky && !projectile.stuck) {
+                constexpr float k_homingRadius = 700.0f;
+                constexpr float k_homingTurnRate = 1.5708f; // ~90°/s max turn (radians).
+                const float speed = glm::length(vel.value);
+                if (speed > 1e-3f) {
+                    entt::entity target = entt::null;
+                    float bestDistSq = k_homingRadius * k_homingRadius;
+                    glm::vec3 targetPos{0.0f};
+                    registry.view<Player, Position, PlayerVisState>().each(
+                        [&](entt::entity pe, const Position& ppos, const PlayerVisState& pvis) {
+                            if (pe == projectile.owner || pvis.isDead)
+                                return;
+                            if (pvis.moveMode != MoveMode::WallRunning)
+                                return;
+                            const glm::vec3 d = ppos.value - pos.value;
+                            const float dsq = glm::dot(d, d);
+                            if (dsq < bestDistSq) {
+                                bestDistSq = dsq;
+                                target = pe;
+                                targetPos = ppos.value;
+                            }
+                        });
+                    if (target != entt::null) {
+                        const glm::vec3 curDir = vel.value / speed;
+                        const glm::vec3 toTarget = targetPos - pos.value;
+                        const float tlen = glm::length(toTarget);
+                        if (tlen > 1e-3f) {
+                            const glm::vec3 desiredDir = toTarget / tlen;
+                            const float angle = std::acos(glm::clamp(glm::dot(curDir, desiredDir), -1.0f, 1.0f));
+                            const float maxStep = k_homingTurnRate * dt;
+                            glm::vec3 newDir = desiredDir;
+                            if (angle > maxStep && angle > 1e-4f) {
+                                // Rotate curDir toward desiredDir by at most maxStep.
+                                newDir = glm::normalize(glm::mix(curDir, desiredDir, maxStep / angle));
+                            }
+                            vel.value = newDir * speed; // preserve speed, only steer direction
+                        }
+                    }
+                }
             }
 
             // Apply gravity to grenade projectiles only. Rockets (and other non-grenade

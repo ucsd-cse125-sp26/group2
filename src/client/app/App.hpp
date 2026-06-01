@@ -86,4 +86,7 @@ private:
 
     /// @brief Show a modal message on the active home screen, if it is active.
     void showHomePopupMessage(const std::string& message);
+
+    /// @brief Ask a locally hosted server to shut down before falling back to process termination.
+    bool shutdownHostedServerGracefully();
 };

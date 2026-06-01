@@ -3,7 +3,7 @@
 
 #include "CharacterAnimator.hpp"
 
-#include "ecs/physics/TitanfallConstants.hpp"
+#include "AnimationLocomotion.hpp"
 
 #include <SDL3/SDL_log.h>
 
@@ -29,21 +29,15 @@
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <initializer_list>
 
 namespace
 {
 
-/// Phase 1 locomotion thresholds (u/s).  Tracks `tms` so the animation speed
-/// bands match the physics movement speeds exactly.
-constexpr float k_idleCutoff = 10.0f;
-
-/// Reference speeds for the walk / run clips — used for speed-scaling so
-/// foot contact frequency matches the character's actual world speed.
-constexpr float k_walkSpeedRef = 320.0f;        ///< tms::k_walkSpeed
-constexpr float k_runSpeedRef = 530.0f;         ///< tms::k_sprintSpeed
-
-constexpr float k_speedLowPassTau = 0.08f;      ///< Low-pass time constant for speed (s).
-constexpr float k_dirLowPassTau = 0.10f;        ///< Low-pass time constant for directional components (s).
+constexpr float k_accelLowPassTau = 0.045f;     ///< Responsive velocity catch-up while accelerating (s).
+constexpr float k_decelLowPassTau = 0.065f;     ///< Slightly softer decay when releasing movement input (s).
+constexpr float k_dirLowPassTau = 0.055f;       ///< Directional velocity smoothing for normal steering (s).
+constexpr float k_dirFlipLowPassTau = 0.035f;   ///< Faster catch-up for hard left/right or forward/back flips (s).
 constexpr float k_modeCrossfadeSeconds = 0.15f; ///< Slide/WallRun ↔ locomotion crossfade (s).
 constexpr float k_spinePitchMax = 1.5708f;      ///< Max total spine pitch magnitude (~90 degrees).
 
@@ -55,11 +49,12 @@ static constexpr size_t kSpineChainLength = 5;
 ///  [1] loco secondary   (Walk / Run during 1-D speed band blend)
 ///  [2] loco strafe      (StrafeLeft / StrafeRight / walk variants)
 ///  [3] override         (Slide / WallRun / Jump / debug clip)
-///  [4] reserved         (future: additive upper-body layer)
+///  [4] transition       (short start / stop / pivot overlays)
 constexpr size_t k_slotLocoA = 0;
 constexpr size_t k_slotLocoB = 1;
 constexpr size_t k_slotStrafe = 2;
 constexpr size_t k_slotOverride = 3;
+constexpr size_t k_slotTransition = 4;
 
 enum class Mode : uint8_t
 {
@@ -351,6 +346,15 @@ struct CharacterAnimator::Impl
     float smoothedRightSpeed = 0.0f;   ///< Low-pass filtered rightward velocity component (u/s).
     float locomotionPhase = 0.0f;      ///< Shared loco time ratio in [0, 1].
     float overrideTime = 0.0f;         ///< Independent time ratio for the override slot.
+
+    // Short locomotion transitions. Slot 4 is blended on top of the continuous
+    // locomotion tree for starts, stops, and hard pivots. Missing authored clips
+    // fall back to existing clips at reduced weight, so the graph stays smooth
+    // while art catches up.
+    anim_locomotion::TransitionTracker transitionTracker;
+    anim_locomotion::TransitionIntent activeTransition;
+    ClipId activeTransitionClip = ClipId::_Count;
+    float transitionElapsedSec = 0.0f;
 
     // Wallrun mirror state — true when the wallrun animation needs to be
     // mirrored in X so the character leans toward the correct wall side.
@@ -927,93 +931,6 @@ const std::vector<glm::mat4>& CharacterAnimator::skinMatrices() const noexcept
 namespace
 {
 
-/// @brief Pick the two dominant forward/backward locomotion clips + their blend from current speed.
-/// @param speed              Smoothed horizontal speed.
-/// @param smoothedForward    Low-pass filtered forward velocity component.
-/// @param outA / outB        Clip IDs for primary + secondary slot.
-/// @param outBlend           Weight of B in [0,1]; weight of A is (1-blend).
-void pickLocomotion(float speed, float smoothedForward, ClipId& outA, ClipId& outB, float& outBlend)
-{
-    // Moving backward when the smoothed forward component is clearly negative.
-    const bool reverseLike = (smoothedForward < -k_idleCutoff);
-
-    if (speed < k_idleCutoff) {
-        outA = ClipId::Idle;
-        outB = ClipId::Idle;
-        outBlend = 0.0f;
-        return;
-    }
-    if (speed < k_walkSpeedRef) {
-        // Idle - Walk (or Idle - RunBackward when moving backward).
-        outA = ClipId::Idle;
-        outB = reverseLike ? ClipId::RunBackward : ClipId::Walk;
-        outBlend = std::clamp((speed - k_idleCutoff) / (k_walkSpeedRef - k_idleCutoff), 0.0f, 1.0f);
-        return;
-    }
-    if (speed < k_runSpeedRef) {
-        // Walk - Run (or RunBackward at any speed in the run band).
-        outA = reverseLike ? ClipId::RunBackward : ClipId::Walk;
-        outB = reverseLike ? ClipId::RunBackward : ClipId::Run;
-        outBlend =
-            reverseLike ? 0.0f : std::clamp((speed - k_walkSpeedRef) / (k_runSpeedRef - k_walkSpeedRef), 0.0f, 1.0f);
-        return;
-    }
-    // Run (or RunBackward) at cap.
-    const ClipId runId = reverseLike ? ClipId::RunBackward : ClipId::Run;
-    outA = runId;
-    outB = runId;
-    outBlend = 0.0f;
-}
-
-/// @brief Pick the strafe clip based on lateral speed and speed band.
-///
-/// NOTE: the clip names in the FBX pack ("left strafe", "right strafe") are
-/// from the *animation's* visual perspective.  In practice the left-named
-/// clip shows the character leaning / stepping right and vice-versa, so the
-/// mapping is intentionally crossed here to match the actual player input.
-///
-/// @param smoothedRight  Low-pass filtered rightward velocity component.
-/// @param speed          Smoothed total horizontal speed.
-/// @return ClipId of the strafe clip, or _Count if no strafe is needed.
-ClipId pickStrafeClip(float smoothedRight, float speed)
-{
-    if (std::abs(smoothedRight) < k_idleCutoff)
-        return ClipId::_Count; // negligible strafe
-
-    // Swapped: positive rightSpeed (player moving right) uses Left-named clip
-    // because the "left strafe" animation visually moves the character rightward.
-    const bool right = (smoothedRight > 0.0f);
-    if (speed < k_walkSpeedRef) {
-        return right ? ClipId::StrafeLeftWalk : ClipId::StrafeRightWalk;
-    }
-    return right ? ClipId::StrafeLeft : ClipId::StrafeRight;
-}
-
-/// @brief Pick crouch forward/backward locomotion clips + blend from current speed.
-void pickCrouchLocomotion(float speed, float smoothedForward, ClipId& outA, ClipId& outB, float& outBlend)
-{
-    const bool reverseLike = (smoothedForward < -k_idleCutoff);
-
-    if (speed < k_idleCutoff) {
-        outA = ClipId::CrouchIdle;
-        outB = ClipId::CrouchIdle;
-        outBlend = 0.0f;
-        return;
-    }
-    // Crouch only has walk-speed clips — blend from idle to walk, capped at walkSpeedRef.
-    outA = ClipId::CrouchIdle;
-    outB = reverseLike ? ClipId::CrouchWalkBackward : ClipId::CrouchWalk;
-    outBlend = std::clamp((speed - k_idleCutoff) / (k_walkSpeedRef - k_idleCutoff), 0.0f, 1.0f);
-}
-
-/// @brief Pick crouch strafe clip based on lateral speed.
-ClipId pickCrouchStrafeClip(float smoothedRight)
-{
-    if (std::abs(smoothedRight) < k_idleCutoff)
-        return ClipId::_Count;
-    return (smoothedRight > 0.0f) ? ClipId::CrouchWalkLeft : ClipId::CrouchWalkRight;
-}
-
 /// @brief Weighted-average loop duration used for phase-sync.
 float blendedDuration(const AnimationLibrary& lib, ClipId a, ClipId b, float blend)
 {
@@ -1025,24 +942,60 @@ float blendedDuration(const AnimationLibrary& lib, ClipId a, ClipId b, float ble
     return (w > 0.0f) ? w : 1.0f;
 }
 
-/// @brief Compute speed-scaling multiplier so the animation playback rate
-/// matches the character's actual world speed.
-float computeSpeedScale(float speed)
+ClipId firstLoaded(const AnimationLibrary& lib, std::initializer_list<ClipId> clips)
 {
-    if (speed < k_idleCutoff)
-        return 1.0f;
-
-    float refSpeed;
-    if (speed < k_walkSpeedRef) {
-        refSpeed = k_walkSpeedRef;
-    } else if (speed < k_runSpeedRef) {
-        const float t = (speed - k_walkSpeedRef) / (k_runSpeedRef - k_walkSpeedRef);
-        refSpeed = k_walkSpeedRef + t * (k_runSpeedRef - k_walkSpeedRef);
-    } else {
-        refSpeed = k_runSpeedRef;
+    for (ClipId clip : clips) {
+        if (clip != ClipId::_Count && lib.has(clip))
+            return clip;
     }
+    return ClipId::_Count;
+}
 
-    return speed / refSpeed;
+ClipId resolveLocomotionClip(const AnimationLibrary& lib, ClipId requested)
+{
+    if (requested == ClipId::_Count || lib.has(requested))
+        return requested;
+
+    switch (requested) {
+    case ClipId::CrouchWalk:
+        return firstLoaded(lib, {ClipId::CrouchWalkLeft, ClipId::CrouchWalkRight, ClipId::Walk, ClipId::Idle});
+    case ClipId::CrouchWalkBackward:
+        return firstLoaded(lib, {ClipId::RunBackward, ClipId::CrouchWalkRight, ClipId::Walk, ClipId::Idle});
+    case ClipId::CrouchWalkLeft:
+    case ClipId::CrouchWalkRight:
+        return firstLoaded(lib, {ClipId::CrouchWalk, ClipId::CrouchIdle});
+    case ClipId::StrafeLeftWalk:
+        return firstLoaded(lib, {ClipId::StrafeLeft});
+    case ClipId::StrafeRightWalk:
+        return firstLoaded(lib, {ClipId::StrafeRight});
+    case ClipId::StrafeLeft:
+        return firstLoaded(lib, {ClipId::StrafeLeftWalk});
+    case ClipId::StrafeRight:
+        return firstLoaded(lib, {ClipId::StrafeRightWalk});
+    case ClipId::Walk:
+        return firstLoaded(lib, {ClipId::Run, ClipId::SlowRun, ClipId::Idle});
+    case ClipId::Run:
+        return firstLoaded(lib, {ClipId::SlowRun, ClipId::Walk, ClipId::Idle});
+    case ClipId::RunBackward:
+        return firstLoaded(lib, {ClipId::Walk, ClipId::Idle});
+    case ClipId::CrouchIdle:
+        return firstLoaded(lib, {ClipId::Idle});
+    default:
+        return ClipId::_Count;
+    }
+}
+
+ClipId resolveTransitionClip(const AnimationLibrary& lib, const anim_locomotion::TransitionIntent& intent)
+{
+    if (intent.kind == anim_locomotion::TransitionKind::None)
+        return ClipId::_Count;
+    if (intent.preferredClip != ClipId::_Count && lib.has(intent.preferredClip))
+        return intent.preferredClip;
+
+    const ClipId fallback = anim_locomotion::fallbackTransitionClip(intent.kind, intent.preferredClip);
+    if (fallback != ClipId::_Count && lib.has(fallback))
+        return fallback;
+    return ClipId::_Count;
 }
 
 } // namespace
@@ -1063,25 +1016,30 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
         return;
     }
 
-    // --- 1. Low-pass smoothed speed + directional components. ---
-    const glm::vec3 vhoriz{inputs.velocityWorld.x, 0.0f, inputs.velocityWorld.z};
-    const float speed = glm::length(vhoriz);
-    const float cosYaw = std::cos(inputs.yawRad);
-    const float sinYaw = std::sin(inputs.yawRad);
-    const glm::vec3 forward{sinYaw, 0.0f, cosYaw};
-    const glm::vec3 right{cosYaw, 0.0f, -sinYaw};
-    const float forwardSpeed = glm::dot(vhoriz, forward);
-    const float rightSpeed = glm::dot(vhoriz, right);
+    // --- 1. Smooth local-space velocity. ---
+    const anim_locomotion::LocalVelocity rawLocal =
+        anim_locomotion::localVelocityFromWorld(inputs.velocityWorld, inputs.yawRad);
+    const float rawSpeed = anim_locomotion::speed(rawLocal);
 
-    // Exponential smoothing for total speed.
-    const float alphaSpd = (dt > 0.0f) ? (1.0f - std::exp(-dt / k_speedLowPassTau)) : 0.0f;
-    impl_->smoothedSpeed += (speed - impl_->smoothedSpeed) * alphaSpd;
+    const auto smoothAxis = [dt](float current, float target) {
+        const bool signFlip = current * target < 0.0f;
+        const float tau = signFlip ? k_dirFlipLowPassTau : k_dirLowPassTau;
+        const float alpha = anim_locomotion::smoothingAlpha(dt, tau);
+        return current + (target - current) * alpha;
+    };
+    impl_->smoothedForwardSpeed = smoothAxis(impl_->smoothedForwardSpeed, rawLocal.forward);
+    impl_->smoothedRightSpeed = smoothAxis(impl_->smoothedRightSpeed, rawLocal.right);
 
-    // Separate smoothing for directional components — prevents abrupt clip
-    // switches when the player changes direction (e.g. forward → backward).
-    const float alphaDir = (dt > 0.0f) ? (1.0f - std::exp(-dt / k_dirLowPassTau)) : 0.0f;
-    impl_->smoothedForwardSpeed += (forwardSpeed - impl_->smoothedForwardSpeed) * alphaDir;
-    impl_->smoothedRightSpeed += (rightSpeed - impl_->smoothedRightSpeed) * alphaDir;
+    const float smoothedLocalSpeed =
+        anim_locomotion::speed({.forward = impl_->smoothedForwardSpeed, .right = impl_->smoothedRightSpeed});
+    const float speedTau = rawSpeed >= impl_->smoothedSpeed ? k_accelLowPassTau : k_decelLowPassTau;
+    const float speedAlpha = anim_locomotion::smoothingAlpha(dt, speedTau);
+    impl_->smoothedSpeed += (smoothedLocalSpeed - impl_->smoothedSpeed) * speedAlpha;
+    if (rawSpeed < anim_locomotion::k_idleCutoff && impl_->smoothedSpeed < 1.0f) {
+        impl_->smoothedSpeed = 0.0f;
+        impl_->smoothedForwardSpeed = 0.0f;
+        impl_->smoothedRightSpeed = 0.0f;
+    }
 
     // --- 2. Determine target mode. ---
     Mode targetMode = Mode::Locomotion;
@@ -1131,27 +1089,42 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
     const float groupLoco = 1.0f - impl_->groupWeightOverride;
 
     // --- 4. Locomotion slots (always computed for phase continuity). ---
-    ClipId locoA = ClipId::Idle;
-    ClipId locoB = ClipId::Idle;
-    float locoBlend = 0.0f;
-    ClipId strafeClip = ClipId::_Count;
-    float strafeRatio = 0.0f;
-
     const bool crouchActive = (impl_->currentMode == Mode::Crouch);
-    if (crouchActive) {
-        pickCrouchLocomotion(impl_->smoothedSpeed, impl_->smoothedForwardSpeed, locoA, locoB, locoBlend);
-        strafeClip = pickCrouchStrafeClip(impl_->smoothedRightSpeed);
-    } else {
-        pickLocomotion(impl_->smoothedSpeed, impl_->smoothedForwardSpeed, locoA, locoB, locoBlend);
-        strafeClip = pickStrafeClip(impl_->smoothedRightSpeed, impl_->smoothedSpeed);
+    const anim_locomotion::LocalVelocity smoothedLocal{
+        .forward = impl_->smoothedForwardSpeed,
+        .right = impl_->smoothedRightSpeed,
+    };
+    const anim_locomotion::LocomotionSelection requestedLoco =
+        anim_locomotion::selectLocomotion(smoothedLocal, crouchActive);
+
+    const auto applyClipFallback = [this](ClipId requested) {
+        const ClipId resolved = resolveLocomotionClip(*impl_->library, requested);
+        if (requested != ClipId::_Count && resolved != requested &&
+            !impl_->missingClipLogged[static_cast<size_t>(requested)])
+        {
+            SDL_Log("CharacterAnimator: clip '%s' not loaded — using '%s' fallback",
+                    clipName(requested),
+                    resolved == ClipId::_Count ? "(none)" : clipName(resolved));
+            impl_->missingClipLogged[static_cast<size_t>(requested)] = true;
+        }
+        return resolved;
+    };
+
+    ClipId locoA = applyClipFallback(requestedLoco.primary);
+    ClipId locoB = applyClipFallback(requestedLoco.secondary);
+    ClipId strafeClip = applyClipFallback(requestedLoco.strafeClip);
+    float locoBlend = requestedLoco.secondaryWeight;
+    if (locoA == ClipId::_Count) {
+        locoA = ClipId::Idle;
+        locoBlend = 0.0f;
     }
-    strafeRatio =
-        (impl_->smoothedSpeed > k_idleCutoff && strafeClip != ClipId::_Count)
-            ? std::clamp(std::abs(impl_->smoothedRightSpeed) / std::max(impl_->smoothedSpeed, 1.0f), 0.0f, 1.0f)
-            : 0.0f;
+    if (locoB == ClipId::_Count)
+        locoB = locoA;
+    if (locoB == locoA)
+        locoBlend = 0.0f;
 
-    const float speedScale = computeSpeedScale(impl_->smoothedSpeed);
-
+    const float strafeRatio = (strafeClip != ClipId::_Count) ? requestedLoco.strafeBlend : 0.0f;
+    const float speedScale = requestedLoco.speedScale;
     const float loopSec = blendedDuration(*impl_->library, locoA, locoB, locoBlend);
     impl_->locomotionPhase += dt * speedScale / loopSec;
     if (impl_->locomotionPhase >= 1.0f)
@@ -1163,7 +1136,7 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
     auto& s1 = impl_->samplers[k_slotLocoB];
     auto& sStrafe = impl_->samplers[k_slotStrafe];
     auto& sOvr = impl_->samplers[k_slotOverride];
-    auto& sReserved = impl_->samplers[4];
+    auto& sTransition = impl_->samplers[k_slotTransition];
 
     // Strafe is applied as a per-joint blend on the legs only (see
     // runSamplingAndSkinning). The forward/backward locomotion clips therefore
@@ -1195,6 +1168,48 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
     sStrafe.playbackSpeed = speedScale;
     sStrafe.active = (strafeRatio > 1e-4f) && (groupLoco > 1e-4f) && (strafeClip != ClipId::_Count) &&
                      impl_->library->has(strafeClip);
+
+    const anim_locomotion::TransitionIntent transitionIntent =
+        (groupLoco > 1e-4f) ? anim_locomotion::updateTransitionTracker(impl_->transitionTracker, rawLocal, dt)
+                            : anim_locomotion::TransitionIntent{};
+    if (transitionIntent.kind != anim_locomotion::TransitionKind::None) {
+        impl_->activeTransition = transitionIntent;
+        impl_->activeTransitionClip = resolveTransitionClip(*impl_->library, transitionIntent);
+        impl_->transitionElapsedSec = 0.0f;
+        if (transitionIntent.preferredClip != ClipId::_Count &&
+            impl_->activeTransitionClip != transitionIntent.preferredClip &&
+            !impl_->missingClipLogged[static_cast<size_t>(transitionIntent.preferredClip)])
+        {
+            SDL_Log("CharacterAnimator: transition clip '%s' not loaded — using '%s' fallback",
+                    clipName(transitionIntent.preferredClip),
+                    impl_->activeTransitionClip == ClipId::_Count ? "(none)" : clipName(impl_->activeTransitionClip));
+            impl_->missingClipLogged[static_cast<size_t>(transitionIntent.preferredClip)] = true;
+        }
+    }
+
+    sTransition.active = false;
+    sTransition.weight = 0.0f;
+    if (impl_->activeTransition.kind != anim_locomotion::TransitionKind::None) {
+        impl_->transitionElapsedSec += dt;
+        const float weight = anim_locomotion::transitionWeight(impl_->activeTransition.kind,
+                                                               impl_->transitionElapsedSec,
+                                                               impl_->activeTransition.durationSec,
+                                                               impl_->activeTransition.peakWeight) *
+                             groupLoco;
+        if (impl_->activeTransitionClip != ClipId::_Count && weight > 1e-4f) {
+            sTransition.id = impl_->activeTransitionClip;
+            sTransition.timeRatio = anim_locomotion::transitionPlaybackRatio(impl_->transitionElapsedSec,
+                                                                             impl_->activeTransition.durationSec);
+            sTransition.weight = weight;
+            sTransition.playbackSpeed = 1.0f;
+            sTransition.active = impl_->library->has(impl_->activeTransitionClip);
+        }
+        if (impl_->transitionElapsedSec >= impl_->activeTransition.durationSec || groupLoco <= 1e-4f) {
+            impl_->activeTransition = {};
+            impl_->activeTransitionClip = ClipId::_Count;
+            impl_->transitionElapsedSec = 0.0f;
+        }
+    }
 
     // --- 5. Override slot (Slide / WallRun / Jump / Debug). ---
     ClipId overrideClip = ClipId::_Count;
@@ -1258,8 +1273,6 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
         sOvr.active = false;
         sOvr.weight = 0.0f;
     }
-    sReserved.active = false;
-    sReserved.weight = 0.0f;
 
     // --- 6. Wallrun mirror state. ---
     impl_->wallRunMirror =
@@ -1324,14 +1337,11 @@ void CharacterAnimator::renderFromServer(const AnimSnapshot& serverState, const 
     // depend on the exact value — the mask zeroes the strafe layer on the torso
     // unconditionally — so an instantaneous (unsmoothed) estimate is fine.
     {
-        const glm::vec3 vhoriz{inputs.velocityWorld.x, 0.0f, inputs.velocityWorld.z};
-        const float speed = glm::length(vhoriz);
-        if (speed > k_idleCutoff) {
-            const float cosYaw = std::cos(inputs.yawRad);
-            const float sinYaw = std::sin(inputs.yawRad);
-            const glm::vec3 right{cosYaw, 0.0f, -sinYaw};
-            const float rightSpeed = glm::dot(vhoriz, right);
-            impl_->strafeBlend = std::clamp(std::abs(rightSpeed) / std::max(speed, 1.0f), 0.0f, 1.0f);
+        const anim_locomotion::LocalVelocity local =
+            anim_locomotion::localVelocityFromWorld(inputs.velocityWorld, inputs.yawRad);
+        const float speed = anim_locomotion::speed(local);
+        if (speed > anim_locomotion::k_idleCutoff) {
+            impl_->strafeBlend = std::clamp(std::abs(local.right) / std::max(speed, 1.0f), 0.0f, 1.0f);
         } else {
             impl_->strafeBlend = 0.0f;
         }

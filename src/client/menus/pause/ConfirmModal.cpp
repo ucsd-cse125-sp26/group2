@@ -1,5 +1,7 @@
 #include "ConfirmModal.hpp"
 
+#include "menus/MenuTheme.hpp"
+
 #include <imgui.h>
 #include <utility>
 
@@ -44,16 +46,11 @@ ConfirmResult ConfirmModal::drawAndPoll()
             result = ConfirmResult::Cancelled;
         }
         ImGui::SameLine();
-        if (request_.confirmIsDanger) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.58f, 0.12f, 0.12f, 1.0f});
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{0.72f, 0.16f, 0.16f, 1.0f});
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{0.45f, 0.08f, 0.08f, 1.0f});
-        }
-        if (ImGui::Button(request_.confirmText.c_str(), {buttonWidth, 34.0f})) {
+        const bool confirmPressed = request_.confirmIsDanger
+                                        ? menu_theme::dangerButton(request_.confirmText.c_str(), {buttonWidth, 34.0f})
+                                        : menu_theme::accentButton(request_.confirmText.c_str(), {buttonWidth, 34.0f});
+        if (confirmPressed) {
             result = ConfirmResult::Confirmed;
-        }
-        if (request_.confirmIsDanger) {
-            ImGui::PopStyleColor(3);
         }
 
         if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {

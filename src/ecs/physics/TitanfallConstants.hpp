@@ -15,14 +15,13 @@ namespace tms
 
 // Ground movement speeds
 
-constexpr float k_walkSpeed =
-    550.0f; ///< Max wish speed when walking (u/s). Sprint removed; this is the only base speed.
-            ///< Kept for non-walking callers (currentWishSpeed, DebugUI). On-foot walking
-            ///< uses the asymmetric forward/strafe pair below.
+constexpr float k_walkSpeed = 550.0f; ///< Max wish speed when walking (u/s). Sprint removed; this is the only base
+                                      ///< speed. Kept for non-walking callers (currentWishSpeed, DebugUI). On-foot
+                                      ///< walking uses the asymmetric forward/strafe pair below.
 constexpr float k_walkForwardSpeed = 620.0f; ///< Forward (W/S) wish speed on foot (u/s) — slightly faster than the
                                              ///< legacy uniform value so a pure forward run feels punchier.
 constexpr float k_walkStrafeSpeed = 350.0f;  ///< Side strafe (A/D) wish speed on foot (u/s). Sits below
-                                             ///< k_slideMinStartSpeed so pure-strafe momentum can never trigger a slide.
+                                            ///< k_slideMinStartSpeed so pure-strafe momentum can never trigger a slide.
 constexpr float k_sprintSpeed = 550.0f; ///< Deprecated: sprint removed. Kept equal to k_walkSpeed for safety.
 constexpr float k_crouchSpeed = 350.0f; ///< Max wish speed when crouching (u/s).
 constexpr float k_adsSpeed = 280.0f;    ///< Max wish speed while ADS-ing a precision (charge) weapon (u/s).
@@ -72,10 +71,11 @@ constexpr float k_slideBrakingDecelMin = 200.0f;     ///< Initial braking decele
 constexpr float k_slideBrakingDecelMax = 400.0f;     ///< Maximum braking deceleration (u/s^2).
 constexpr float k_slideBrakingRampTime = 3.0f;       ///< Time to ramp from min to max braking (s).
 constexpr float k_slideFloorInfluenceForce = 400.0f; ///< How much slope angle affects slide speed (u/s^2).
-constexpr float k_slideSteerAccel = 200.0f;          ///< Sideways accel from WASD while sliding (u/s^2).
-                                                     ///< Applied along the component of wishDir perpendicular
-                                                     ///< to current motion, so it gently rotates the slide
-                                                     ///< trajectory without adding forward speed.
+constexpr float k_slideSteerTurnRate = 1.8f;         ///< Max heading turn rate while sliding (rad/s).
+                                                     ///< The slide's velocity is rotated toward the WASD/view
+                                                     ///< wish direction at up to this rate, preserving speed, so
+                                                     ///< the player can carve their trajectory without instantly
+                                                     ///< pivoting.
 constexpr int k_slideFatigueDecayTicks = 200;        ///< Ticks (at 128Hz = 3s) to reset one fatigue level.
 constexpr int k_slideFatigueMax = 4;                 ///< Max fatigue levels (boost fully killed at this).
 
@@ -123,7 +123,7 @@ constexpr float k_speedCap = 7000.0f; ///< Hard horizontal speed limit (u/s).
 
 // Bullet-hit slow
 
-constexpr float k_bulletHitSlowFactor = 0.5f;   ///< Multiplier on wish speed while bullet-slowed (0.5 = halved).
+constexpr float k_bulletHitSlowFactor = 0.8f;   ///< Multiplier on wish speed while bullet-slowed (0.8 = 20% slow).
 constexpr float k_bulletHitSlowDuration = 0.5f; ///< Seconds the slow lingers after the last bullet hit. Each new
                                                 ///< hit refreshes the timer, so sustained fire keeps the target slowed.
 
@@ -154,11 +154,12 @@ constexpr float k_crouchingCapsuleHalfHeight = k_crouchingHalfHeight - k_playerC
 
 // Grappling hook (Widowmaker-style: direct pull → look-biased launch)
 
-constexpr float k_grappleMaxRange = 4000.0f;  ///< Max hook distance (~20 m in Quake units).
-constexpr float k_grapplePullSpeed = 4000.0f; ///< Direct velocity toward anchor (u/s). Overrides, not additive.
-constexpr float k_grappleDetachDist = 80.0f;  ///< Auto-detach when this close to anchor (~2 m).
-constexpr float k_grappleMaxDuration = 5.0f;  ///< Safety timeout (s).
-constexpr float k_grappleCooldown = 5.0f;     ///< Cooldown between grapples (s).
+constexpr float k_grappleMaxRange = 2200.0f; ///< Max hook distance (nerfed from 4000 — shorter reach).
+constexpr float k_grapplePullSpeed =
+    2400.0f; ///< Direct velocity toward anchor (u/s). Overrides, not additive (nerfed from 4000 — slower pull).
+constexpr float k_grappleDetachDist = 80.0f; ///< Auto-detach when this close to anchor (~2 m).
+constexpr float k_grappleMaxDuration = 5.0f; ///< Safety timeout (s).
+constexpr float k_grappleCooldown = 5.0f;    ///< Cooldown between grapples (s).
 constexpr float k_grappleLaunchLookBias =
     0.6f; ///< Look-direction weight on detach launch (0 = pure grapple dir, 1 = pure look).
 constexpr float k_grappleLaunchSpeedMult = 1.15f; ///< Speed multiplier on launch (slight boost for momentum).

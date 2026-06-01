@@ -17,6 +17,9 @@ namespace systems
 /// @brief Maximum distance (units) at which a player can press F to pick up.
 constexpr float k_pickupRange = 140.0f;
 
+/// @brief Shared pickup collision half-extents for weapon spawners and dropped weapons.
+inline const glm::vec3 k_weaponPickupHalfExtents{32.0f, 32.0f, 32.0f};
+
 /// @brief Half-angle (degrees) of the look cone for press-F pickup.
 constexpr float k_pickupMaxAngleDeg = 12.0f;
 

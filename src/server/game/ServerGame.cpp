@@ -15,6 +15,7 @@
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/ClientId.hpp"
 #include "ecs/components/CollisionShape.hpp"
+#include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/HealthPackSpawner.hpp"
@@ -29,12 +30,13 @@
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerName.hpp"
 #include "ecs/components/PlayerNicknames.hpp"
-#include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
+#include "ecs/components/PlayerSimState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/PowerupState.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnPoint.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponSpawner.hpp"
@@ -55,8 +57,10 @@
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/JumpPadSystem.hpp"
 #include "ecs/systems/KillzoneSystem.hpp"
+#include "ecs/systems/MatchSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
 #include "ecs/systems/PlayerStatusSystem.hpp"
+#include "ecs/systems/PickupGeometry.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
@@ -64,11 +68,13 @@
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
 #include "ecs/systems/WeaponSystem.hpp"
 #include "network/PacketType.hpp"
+#include "network/RosterEvent.hpp"
 #include "network/ShotDebugReport.hpp"
 #include "network/ShotEvent.hpp"
 #include "perf/Parallel.hpp"
 #include "perf/Profiler.hpp"
 #include "perf/ShotLog.hpp"
+#include "server/game/LagCompMath.hpp"
 #include "server/systems/HitboxHistorySystem.hpp"
 
 #include <SDL3/SDL.h>
@@ -76,6 +82,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <glm/geometric.hpp>
 
 namespace
@@ -99,6 +106,14 @@ std::vector<AbilityType> chooseTwoAbilities(const std::array<AbilityType, N>& po
         choices.erase(choices.begin() + static_cast<std::ptrdiff_t>(idx));
     }
     return selected;
+}
+
+AbilityState resetAbilityProgressForMatchStart(const AbilityState& current)
+{
+    AbilityState reset{};
+    reset.primaryChoices = current.primaryChoices;
+    reset.secondaryChoices = current.secondaryChoices;
+    return reset;
 }
 } // namespace
 
@@ -201,18 +216,18 @@ void ServerGame::run()
         registry.emplace<WeaponSpawner>(
             spawner,
             WeaponSpawner{.type = weaponType, .spawnCooldown = systems::weaponCooldownTime, .hasWeapon = true});
-        CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
+        CollisionShape shape{.halfExtents = systems::k_weaponPickupHalfExtents};
         glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
 
         registry.emplace<Position>(spawner, centeredPos);
         registry.emplace<CollisionShape>(spawner, shape);
     }
 
-    // Respawn points (with cooldown state)
-    for (const glm::vec3& spawnPos : gamemap::spawnPoints_) {
+    // Respawn points (with cooldown state + authored facing yaw)
+    for (const gamemap::SpawnPoint& sp : gamemap::spawnPoints_) {
         const entt::entity spawnPoint = registry.create();
-        registry.emplace<RespawnPoint>(spawnPoint, RespawnPoint{});
-        registry.emplace<Position>(spawnPoint, spawnPos);
+        registry.emplace<RespawnPoint>(spawnPoint, RespawnPoint{.yaw = sp.yaw});
+        registry.emplace<Position>(spawnPoint, sp.pos);
     }
 
     // Powerup spawners
@@ -386,11 +401,41 @@ void ServerGame::eventHandler(const Event& event)
         }
         lobbyManager.addPlayer(event.clientId);
         server->sendMatchConfigToClient(event.clientId, matchController.getMatchConfig());
+        // Lobby updates already cover joins before the match starts. Once the
+        // match is active, send a lightweight roster popup event instead.
+        if (!isLobbyPhase(matchController.getCurrentPhase())) {
+            PlayerRosterEvent rosterEvent{
+                .type = RosterEventType::PlayerJoined,
+                .id = event.clientId,
+            };
+            if (const auto* playerName = registry.try_get<PlayerName>(clientEntities[event.clientId]))
+                std::memcpy(
+                    rosterEvent.name, playerName->c_str(), std::min(sizeof(rosterEvent.name), playerName->name.size()));
+            server->broadcastRosterEventExcept(event.clientId, rosterEvent);
+        }
         break;
     }
     case EventType::Disconnected: {
         GROUP2_PROF_SCOPE("eventDisconnected");
+        // Build the roster event before removing the player entity so the
+        // display name is still available for the client-side popup.
+        if (!isLobbyPhase(matchController.getCurrentPhase())) {
+            PlayerRosterEvent rosterEvent{
+                .type = RosterEventType::PlayerLeft,
+                .id = event.clientId,
+            };
+            if (const auto entityIt = clientEntities.find(event.clientId);
+                entityIt != clientEntities.end() && registry.valid(entityIt->second))
+            {
+                if (const auto* playerName = registry.try_get<PlayerName>(entityIt->second))
+                    std::memcpy(rosterEvent.name,
+                                playerName->c_str(),
+                                std::min(sizeof(rosterEvent.name), playerName->name.size()));
+            }
+            server->broadcastRosterEventExcept(event.clientId, rosterEvent);
+        }
         lobbyManager.removePlayer(event.clientId);
+        matchController.removeExpectedPlayer(event.clientId);
         deletePlayerEntity(event.clientId);
         break;
     }
@@ -524,6 +569,11 @@ void ServerGame::eventHandler(const Event& event)
 
         SDL_Log("ServerGame: host clientId %u requested server shutdown", event.clientId.value);
         shutdown();
+        break;
+    }
+    case EventType::GameplayReady: {
+        GROUP2_PROF_SCOPE("eventGameplayReady");
+        matchController.markGameplayReady(event.clientId);
         break;
     }
     default:
@@ -665,6 +715,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     // unicast to the shooter after the broadcast events block below.
     std::vector<net::shotdebug::ShotDebugCapture> shotDebugReports;
     std::vector<net::shotdebug::ShotDebugCapture>* shotDebugSink = shotDebugEnabled_ ? &shotDebugReports : nullptr;
+    const bool inputAllowed = isGameplayInputAllowed(matchController.getCurrentPhase());
     {
         // PR-27: stash pending SHOT_INTENTs onto each shooter as a
         // transient `PendingShotIntent` component, keyed by the
@@ -697,18 +748,16 @@ void ServerGame::tick(float dt, Uint64 nextTick)
                 registry.remove<PendingShotIntent>(entity);
             }
         }
-        GROUP2_PROF_SCOPE("weapon");
-        systems::runWeapon(registry, dt, particleEvents, pendingKillEvents, shotDebugSink);
-    }
-    {
-        GROUP2_PROF_SCOPE("ability");
-        systems::runAbility(registry, abilityRegistry, dt);
-    }
-    {
-        GROUP2_PROF_SCOPE("movement");
-        systems::runMovement(registry, dt, physics::activeWorld());
-    }
-    {
+        if (inputAllowed) {
+            GROUP2_PROF_SCOPE("weapon");
+            systems::runWeapon(registry, dt, particleEvents, pendingKillEvents, shotDebugSink);
+            GROUP2_PROF_SCOPE("ability");
+            systems::runAbility(registry, abilityRegistry, dt);
+            GROUP2_PROF_SCOPE("movement");
+            systems::runMovement(registry, dt, physics::activeWorld());
+        } else {
+            registry.view<Player, Velocity>().each([](Velocity& vel) { vel = Velocity{}; });
+        }
         GROUP2_PROF_SCOPE("collision");
         systems::runCollision(registry, dt, physics::activeWorld());
     }
@@ -793,7 +842,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
                 if (lobbyManager.hostStartMatch(lobbyStartRequester)) {
                     selectMatchAbilityPool();
                     server->resetAppliedInputTicks();
-                    matchController.hostStartedMatch();
+                    matchController.hostStartedMatch(lobbyManager.playerIds());
                     matchController.update(dt, registry, *server);
                 } else {
                     server->broadcastMatchStatus(MatchStatePacket{
@@ -807,8 +856,10 @@ void ServerGame::tick(float dt, Uint64 nextTick)
             const MatchPhase previousPhase = matchController.getCurrentPhase();
             matchController.update(dt, registry, *server);
             if (previousPhase != MatchPhase::COUNTDOWN && matchController.getCurrentPhase() == MatchPhase::COUNTDOWN) {
+                // toggle movement on countdown + reset positions
                 selectMatchAbilityPool();
                 server->resetAppliedInputTicks();
+                resetPlayersForCountdown();
             }
             if (previousPhase != MatchPhase::LOBBY && matchController.getCurrentPhase() == MatchPhase::LOBBY)
                 lobbyManager.resetReadyStatuses();
@@ -955,9 +1006,13 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
                                          .radius = 16.0f,
                                          .halfHeight = 20.0f,
                                      });
-    registry.emplace<Position>(player, systems::chooseAndResolveSpawnPosition(registry, player));
+    const systems::SpawnResolution initialSpawn = systems::chooseAndResolveSpawnPosition(registry, player);
+    registry.emplace<Position>(player, initialSpawn.center);
+    registry.get<InputSnapshot>(player).yaw = initialSpawn.yaw; // Face the spawn's authored direction.
     registry.emplace<Velocity>(player);
-    registry.emplace<PlayerVisState>(player);
+    PlayerVisState initialVis{};
+    initialVis.spawnViewYaw = initialSpawn.yaw;
+    registry.emplace<PlayerVisState>(player, initialVis);
     registry.emplace<PlayerSimState>(player);
     registry.emplace<Renderable>(player, Renderable{.modelIndex = 1, .scale = glm::vec3(100.0f)});
     registry.emplace<Health>(player, Health{}); // Defaults to 100/100 health and 100/100 armor
@@ -1180,12 +1235,16 @@ void ServerGame::updateLagCompTargets()
     {
         uint16_t rttMs;
         uint8_t interpDelaySnapshots;
+        uint16_t interpDelayMs;
     };
     static thread_local std::unordered_map<ClientId, NetCacheEntry> netById;
     netById.clear();
     netById.reserve(netCache.size());
     for (const auto& s : netCache)
-        netById.emplace(s.id, NetCacheEntry{.rttMs = s.rttMs, .interpDelaySnapshots = s.interpDelaySnapshots});
+        netById.emplace(s.id,
+                        NetCacheEntry{.rttMs = s.rttMs,
+                                      .interpDelaySnapshots = s.interpDelaySnapshots,
+                                      .interpDelayMs = s.interpDelayMs});
 
     // Snapshot interval in physics ticks — used to convert the
     // client's interpDelaySnapshots into a tick count.  Read from
@@ -1201,24 +1260,25 @@ void ServerGame::updateLagCompTargets()
         const auto netIt = netById.find(clientId);
         const uint16_t rttMs = (netIt != netById.end()) ? netIt->second.rttMs : 0;
         const uint8_t interpDelaySnapshots = (netIt != netById.end()) ? netIt->second.interpDelaySnapshots : 0;
-        // PR-20.7: full-RTT (NOT half-RTT) in ticks.  Round-to-nearest
-        // via integer-only `(rttMs * Hz + 500) / 1000`.  See the long
-        // header comment on this function for the derivation; in
-        // short, our client renders remote players at
-        // `most_recent_snapshot_apply − cl_interp` rather than
-        // predicting them forward to estimated server-now, so the
-        // rewind has to absorb both the inbound and outbound legs of
-        // the RTT — not just the outbound half.
-        const uint32_t rttTicks = (static_cast<uint32_t>(rttMs) * static_cast<uint32_t>(tickRateHz) + 500u) / 1000u;
+        const uint16_t interpDelayMs = (netIt != netById.end()) ? netIt->second.interpDelayMs : 0;
 
-        // PR-12: client render-delay term.  The client renders remote
-        // entities at `most_recent_apply − interpDelaySnapshots ×
-        // snapshotInterval`; the rewind subtracts this on top of the
-        // full-RTT term so the server lands on exactly the historical
-        // capsule state the client SAW on screen at fire time.
-        const uint32_t interpDelayTicks = static_cast<uint32_t>(interpDelaySnapshots) * snapshotEveryNTicksLocal;
-
-        const uint32_t lagTicks = std::min<uint32_t>(rttTicks + interpDelayTicks, k_maxLagCompTicks);
+        // PR-20.7: full-RTT (NOT half-RTT) — our client renders remotes at
+        // `most_recent_snapshot_apply − cl_interp` rather than predicting
+        // them forward to estimated server-now, so the rewind absorbs both
+        // RTT legs.  PR-12: plus the client's render-delay term so the
+        // server lands on exactly the historical capsule state the client
+        // SAW on screen at fire time.  PR-31: that render-delay term now
+        // prefers the client's *measured* `interpDelayMs` (EMA of observed
+        // snapshot cadence) over `interpDelaySnapshots × nominal cadence`,
+        // so the rewind tracks the real render time under jitter / warm-up;
+        // it falls back to the snapshot-count path when ms is 0.  See
+        // server::lagcomp::computeRewindTicks for the full derivation.
+        const uint32_t lagTicks = server::lagcomp::computeRewindTicks(rttMs,
+                                                                      interpDelayMs,
+                                                                      interpDelaySnapshots,
+                                                                      snapshotEveryNTicksLocal,
+                                                                      static_cast<uint32_t>(tickRateHz),
+                                                                      k_maxLagCompTicks);
         const uint32_t targetTick = (lagTicks == 0 || lagTicks >= currentServerTick)
                                         ? 0u // explicit "no rewind" sentinel
                                         : (currentServerTick - lagTicks);
@@ -1376,4 +1436,82 @@ bool ServerGame::setIdleShutdownMinutes(int minutes)
     lastNonEmptyMs_ = SDL_GetTicks();
 
     return true;
+}
+
+void ServerGame::resetPlayersForCountdown()
+{
+    const WeaponConfig& rifleConfig = getWeaponConfig(WeaponType::Rifle);
+    const WeaponConfig& railConfig = getWeaponConfig(WeaponType::RailGun);
+
+    systems::resetStats(registry);
+
+    registry.view<Player, Position, Velocity, PlayerVisState, PlayerSimState, CollisionShape>().each(
+        [&](entt::entity player,
+            Position& pos,
+            Velocity& vel,
+            PlayerVisState& vis,
+            PlayerSimState& sim,
+            CollisionShape&) {
+            const systems::SpawnResolution spawn = systems::chooseAndResolveSpawnPosition(registry, player);
+            pos.value = spawn.center;
+            vel = Velocity{};
+            vis = PlayerVisState{};
+            vis.spawnViewYaw = spawn.yaw; // client snaps local view here on the dead→alive edge.
+            sim = PlayerSimState{};
+
+            systems::destroyRagdoll(registry, player);
+            registry.remove<RespawnTimer>(player);
+            registry.remove<DeathInfo>(player);
+            if (auto* renderable = registry.try_get<Renderable>(player)) {
+                renderable->visible = true;
+            }
+            // Face the spawn point's authored direction.
+            InputSnapshot freshInput{};
+            freshInput.yaw = spawn.yaw;
+            registry.emplace_or_replace<InputSnapshot>(player, freshInput);
+            registry.emplace_or_replace<Health>(player, Health{});
+
+            WeaponState weaponState{};
+            weaponState.current = WeaponSlot::PRIMARY;
+            getSlot(weaponState, WeaponSlot::PRIMARY) = GunInstance{
+                .type = WeaponType::Rifle,
+                .totalAmmo = rifleConfig.defaultAmmoCapacity,
+                .currentMagAmmo = rifleConfig.magazineSize,
+                .fireCooldown = 0.0f,
+            };
+            getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
+                .type = WeaponType::RailGun,
+                .totalAmmo = railConfig.defaultAmmoCapacity,
+                .currentMagAmmo = railConfig.magazineSize,
+                .fireCooldown = 0.0f,
+            };
+
+            registry.emplace_or_replace<WeaponState>(player, weaponState);
+            registry.emplace_or_replace<GrenadeState>(player, makeDefaultGrenadeState());
+            registry.emplace_or_replace<PowerupState>(player, PowerupState{});
+
+            if (const auto* abilityState = registry.try_get<AbilityState>(player)) {
+                registry.emplace_or_replace<AbilityState>(player, resetAbilityProgressForMatchStart(*abilityState));
+            } else {
+                AbilityState freshAbilityState{};
+                applyMatchAbilityChoices(freshAbilityState);
+                registry.emplace<AbilityState>(player, freshAbilityState);
+            }
+        });
+}
+
+bool ServerGame::isGameplayInputAllowed(MatchPhase phase) const
+{
+    switch (phase) {
+    case MatchPhase::COUNTDOWN:
+    case MatchPhase::FINISHED:
+        return false;
+    default:
+        return true;
+    }
+}
+
+bool ServerGame::isLobbyPhase(MatchPhase phase) const
+{
+    return phase == MatchPhase::LOBBY;
 }

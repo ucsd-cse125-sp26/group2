@@ -38,6 +38,16 @@ enum class ClipId : uint8_t
     CrouchWalkLeft,
     CrouchWalkRight,
     CrouchWalkBackward,
+    StartForward,
+    StartBackward,
+    StartLeft,
+    StartRight,
+    StopForward,
+    StopBackward,
+    StopLeft,
+    StopRight,
+    PivotLeft,
+    PivotRight,
     _Count, ///< Sentinel; also used as "no clip / no override".
 };
 

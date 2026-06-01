@@ -3,6 +3,7 @@
 
 #include "Home.hpp"
 
+#include "menus/MenuTheme.hpp"
 #include "ui/HomeUI.hpp"
 #include "util/InputCapture.hpp"
 #include "util/LocalAddress.hpp"
@@ -93,6 +94,7 @@ SDL_AppResult Home::iterate()
     ImGui_ImplSDLGPU3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    menu_theme::drawBackground(renderer ? renderer->getDevice() : nullptr);
     if (openPopupMessage) {
         ImGui::OpenPopup("Server Notice");
         openPopupMessage = false;

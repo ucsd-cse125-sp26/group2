@@ -47,7 +47,7 @@ public:
     bool consumeServerShutdownNotice();
 
 private:
-    /// @brief True when all connected non-host players are ready; a host-only lobby may start.
+    /// @brief True when at least one non-host is connected and all connected non-host players are ready.
     bool canHostStartMatch() const;
 
     /// @brief Advance the local countdown timer using SDL_GetTicksNS delta.

@@ -13,10 +13,16 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
     case MatchPhase::LOBBY:
         break;
     case MatchPhase::WARMUP: {
+        // min 5 seconds elapse or 30 seconds max
+        countdownTimer -= deltaTime;
+        if (countdownTimer <= 0.0f || (countdownTimer <= 20.0f && allExpectedPlayersReady())) {
+            SDL_Log("MatchController: warmup timeout elapsed, starting match");
+            currentPhase = MatchPhase::COUNTDOWN;
+            countdownTimer = k_countdownDuration;
+        }
         break;
     }
     case MatchPhase::COUNTDOWN: {
-        // NOTE: Can still kill players during countdown.
         countdownTimer -= deltaTime;
         if (countdownTimer <= 0.0f) {
             SDL_Log("MatchController: countdown finished, starting match");
@@ -26,8 +32,9 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
         break;
     }
     case MatchPhase::IN_PROGRESS: {
-        if (systems::handleWinCondition(registry, config.killsToWin)) {
+        if (const auto matchWinner = systems::handleWinCondition(registry, config.killsToWin)) {
             SDL_Log("MatchController: player has won, ending match");
+            winnerId = matchWinner->value;
             currentPhase = MatchPhase::FINISHED;
             countdownTimer = k_finishedDuration;
         }
@@ -37,6 +44,7 @@ void MatchController::update(float deltaTime, Registry& registry, Server& server
         countdownTimer -= deltaTime;
         if (countdownTimer <= 0.0f) {
             SDL_Log("MatchController: finished duration elapsed");
+            winnerId = -1;
             currentPhase = MatchPhase::LOBBY;
             countdownTimer = 0.0f;
             systems::resetStats(registry);
@@ -62,15 +70,13 @@ MatchPhase MatchController::getCurrentPhase()
     return currentPhase;
 }
 
-void MatchController::hostStartedMatch()
+void MatchController::hostStartedMatch(std::span<const ClientId> expectedPlayers)
 {
     if (currentPhase != MatchPhase::LOBBY)
         return;
 
     SDL_Log("MatchController: host started match, starting countdown");
-    currentPhase = MatchPhase::COUNTDOWN;
-    countdownTimer = k_countdownDuration;
-    winnerId = -1;
+    beginWarmup(expectedPlayers);
 }
 
 void MatchController::setSkipLobby(bool v)
@@ -172,4 +178,38 @@ bool MatchController::setMaxPlayers(int maxPlayers)
 [[nodiscard]] MatchConfig MatchController::getMatchConfig() const
 {
     return config;
+}
+
+void MatchController::beginWarmup(std::span<const ClientId> expectedPlayers)
+{
+    currentPhase = MatchPhase::WARMUP;
+    countdownTimer = k_warmupDuration;
+    winnerId = -1;
+
+    playerReadyStatus.clear();
+    for (ClientId clientId : expectedPlayers) {
+        playerReadyStatus[clientId] = false;
+    }
+}
+
+void MatchController::markGameplayReady(ClientId clientId)
+{
+    auto it = playerReadyStatus.find(clientId);
+    if (it != playerReadyStatus.end()) {
+        it->second = true;
+    }
+}
+
+void MatchController::removeExpectedPlayer(ClientId clientId)
+{
+    playerReadyStatus.erase(clientId);
+}
+
+[[nodiscard]] bool MatchController::allExpectedPlayersReady() const
+{
+    for (const auto& [_, ready] : playerReadyStatus) {
+        if (!ready)
+            return false;
+    }
+    return true;
 }

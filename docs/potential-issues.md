@@ -464,18 +464,9 @@ LDR. The renderer advertises `getHdrFormat() = R16G16B16A16_FLOAT` but no pipeli
 
 ## Animations
 
-### 🔴 ANIM-1. `CrouchWalk` and `CrouchWalkBackward` both point to backward FBX
+### 🟡 ANIM-1. Straight forward crouch-walk FBX is missing
 
-`AnimationLibrary.cpp:122-129`:
-
-```cpp
-case ClipId::CrouchWalk:
-    return "crouch/Walk Crouching Backward.fbx";
-case ClipId::CrouchWalkBackward:
-    return "crouch/Walk Crouching Backward.fbx";
-```
-
-Forward crouch is mapped to the backward clip.
+`CrouchWalk` now maps to `crouch/Walk Crouching Forward.fbx`, while `CrouchWalkBackward` maps to `crouch/Walk Crouching Backward.fbx`. The forward file is not currently present under `assets/animations/crouch/`, so runtime falls back to an existing crouch movement clip until that asset is downloaded.
 
 ### 🟠 ANIM-2. `wallRunMirror` can persist past mode-exit due to floating-point `tBlend`
 

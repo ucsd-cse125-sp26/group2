@@ -1,5 +1,7 @@
 #include "PauseMenu.hpp"
 
+#include "menus/MenuTheme.hpp"
+
 #include <SDL3/SDL_keyboard.h>
 
 #include <algorithm>
@@ -7,8 +9,6 @@
 
 namespace
 {
-constexpr float k_minMouseSensitivity = 0.0001f;
-constexpr float k_maxMouseSensitivity = 0.005f;
 constexpr float k_minFovDegrees = 50.0f;
 constexpr float k_maxFovDegrees = 120.0f;
 constexpr float k_minGamepadSensitivity = 1.0f;
@@ -19,6 +19,9 @@ constexpr float k_minGamepadMoveDeadzone = 0.0f;
 constexpr float k_maxGamepadMoveDeadzone = 0.5f;
 constexpr float k_minAimAssistStrength = 0.0f;
 constexpr float k_maxAimAssistStrength = 1.0f;
+constexpr float k_settingsWindowBaseWidth = 740.0f;
+constexpr float k_settingsWindowBaseHeight = 860.0f;
+constexpr float k_viewportWindowMargin = 0.94f;
 
 MouseButton mouseButtonFromSdl(uint8_t button)
 {
@@ -235,19 +238,29 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
     ImDrawList* background = ImGui::GetBackgroundDrawList();
     background->AddRectFilled({0.0f, 0.0f}, display, IM_COL32(0, 0, 0, 150));
 
-    const ImVec2 windowSize = settingsOpen ? ImVec2{740.0f, 760.0f} : ImVec2{420.0f, 250.0f};
     ImGui::SetNextWindowPos({display.x * 0.5f, display.y * 0.5f}, ImGuiCond_Always, {0.5f, 0.5f});
-    ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
 
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                                   ImGuiWindowFlags_NoSavedSettings;
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
+    float settingsUiScale = 1.0f;
+    if (settingsOpen) {
+        flags |= ImGuiWindowFlags_NoResize;
+        const float scaled = std::min(menu_theme::scaleFor(display), 1.0f);
+        ImVec2 settingsSize{k_settingsWindowBaseWidth * scaled, k_settingsWindowBaseHeight * scaled};
+        settingsSize.x = std::min(settingsSize.x, k_settingsWindowBaseWidth);
+        settingsSize.x = std::min(settingsSize.x, display.x * k_viewportWindowMargin);
+        settingsSize.y = std::min(settingsSize.y, display.y * k_viewportWindowMargin);
+        settingsUiScale = std::clamp(settingsSize.x / k_settingsWindowBaseWidth, 0.5f, 1.0f);
+        ImGui::SetNextWindowSize(settingsSize, ImGuiCond_Always);
+    } else {
+        // Auto-fit the compact pause page so it always fits its buttons and never scrolls.
+        flags |= ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+    }
     if (ImGui::Begin("Paused", nullptr, flags)) {
-        const float buttonWidth = ImGui::GetContentRegionAvail().x;
-        if (!settingsOpen) {
-            ImGui::TextUnformatted("Game Paused");
-            ImGui::Separator();
+        ImGui::SetWindowFontScale(settingsOpen ? settingsUiScale : 1.0f);
 
-            if (ImGui::Button("Resume", {buttonWidth, 36.0f})) {
+        const float buttonWidth = settingsOpen ? ImGui::GetContentRegionAvail().x : 360.0f;
+        if (!settingsOpen) {
+            if (menu_theme::accentButton("Resume", {buttonWidth, 36.0f})) {
                 result.resumeGame = true;
             }
 
@@ -280,13 +293,22 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             }
             ImGui::PopStyleColor(3);
         } else {
-            ImGui::TextUnformatted("Settings");
-            ImGui::Separator();
+            menu_theme::heading("Settings");
 
             const float previousSensitivity = draftMouseSensitivity;
-            ImGui::SliderFloat(
-                "Mouse Sensitivity", &draftMouseSensitivity, k_minMouseSensitivity, k_maxMouseSensitivity, "%.4f");
-            draftMouseSensitivity = std::clamp(draftMouseSensitivity, k_minMouseSensitivity, k_maxMouseSensitivity);
+            float displayedMouseSensitivity =
+                draftMouseSensitivity * user_settings::kMouseSensitivityDisplayScale;
+            ImGui::SliderFloat("Mouse Sensitivity",
+                               &displayedMouseSensitivity,
+                               user_settings::kMinMouseSensitivity *
+                                   user_settings::kMouseSensitivityDisplayScale,
+                               user_settings::kMaxMouseSensitivity *
+                                   user_settings::kMouseSensitivityDisplayScale,
+                               "%.3f");
+            draftMouseSensitivity = displayedMouseSensitivity / user_settings::kMouseSensitivityDisplayScale;
+            draftMouseSensitivity = std::clamp(draftMouseSensitivity,
+                                               user_settings::kMinMouseSensitivity,
+                                               user_settings::kMaxMouseSensitivity);
             if (draftMouseSensitivity != previousSensitivity)
                 dirty = true;
 
@@ -375,8 +397,8 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
                 draftShowControllerBindings ? BindingDevice::Controller : BindingDevice::KeyboardMouse;
             if (ImGui::BeginTable("bindings", 3, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg)) {
                 ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
-                ImGui::TableSetupColumn("Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f);
-                ImGui::TableSetupColumn("Alt Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f);
+                ImGui::TableSetupColumn("Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f * settingsUiScale);
+                ImGui::TableSetupColumn("Alt Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f * settingsUiScale);
                 ImGui::TableHeadersRow();
 
                 for (Action action : InputBindings::actions()) {
@@ -414,7 +436,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             }
 
             ImGui::Spacing();
-            if (ImGui::Button("Reset to Defaults", {buttonWidth, 30.0f})) {
+            if (ImGui::Button("Reset to Defaults", {buttonWidth, 30.0f * settingsUiScale})) {
                 const UserSettings defaults;
                 draftBindings = defaults.inputBindings;
                 draftMouseSensitivity = defaults.mouseSensitivity;
@@ -433,7 +455,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             }
 
             const float halfWidth = (buttonWidth - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-            if (ImGui::Button("Apply", {halfWidth, 34.0f})) {
+            if (menu_theme::accentButton("Apply", {halfWidth, 34.0f * settingsUiScale})) {
                 settings.inputBindings = draftBindings;
                 settings.mouseSensitivity = draftMouseSensitivity;
                 settings.horizontalFovDegrees = draftHorizontalFovDegrees;
@@ -452,7 +474,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
                 result.settingsApplied = true;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Cancel", {halfWidth, 34.0f})) {
+            if (ImGui::Button("Cancel", {halfWidth, 34.0f * settingsUiScale})) {
                 if (dirty) {
                     requestDiscardSettingsConfirm();
                 } else {

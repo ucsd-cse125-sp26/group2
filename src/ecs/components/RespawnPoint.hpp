@@ -13,4 +13,5 @@ struct RespawnPoint
 {
     float cooldown = 0.0f; ///< Seconds remaining before the point is preferred again.
     bool available = true; ///< True when cooldown has elapsed (ready for use).
+    float yaw = 0.0f;      ///< Authored facing direction (radians) applied to players spawning here.
 };

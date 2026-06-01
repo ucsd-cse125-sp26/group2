@@ -14,7 +14,6 @@
 #include "widgets/DamageNumberWidget.hpp"
 #include "widgets/EnemyWorldHealthBar.hpp"
 #include "widgets/EquipmentSlots.hpp"
-#include "widgets/GrenadeRadialWidget.hpp"
 #include "widgets/GrenadeSlotsWidget.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
@@ -22,6 +21,8 @@
 #include "widgets/Minimap.hpp"
 #include "widgets/PickupNotification.hpp"
 #include "widgets/PickupPrompt.hpp"
+#include "widgets/PopupNotification.hpp"
+#include "widgets/PrematchBanner.hpp"
 #include "widgets/RailgunScopeWidget.hpp"
 #include "widgets/Scoreboard.hpp"
 #include "widgets/ShotgunPelletWidget.hpp"
@@ -192,7 +193,6 @@ void Hud::createWidgets()
     // Directional damage arcs around the reticle.
     widgets_.push_back(std::make_unique<DamageIndicator>());
     widgets_.push_back(std::make_unique<AbilitySelectionWidget>());
-    widgets_.push_back(std::make_unique<GrenadeRadialWidget>());
 
     // Top right: killfeed.
     widgets_.push_back(std::make_unique<KillFeed>());
@@ -205,11 +205,15 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<HealthArmorBar>()); // Vitals (bottom-left)
     widgets_.push_back(std::make_unique<EquipmentSlots>()); // bottom-center
     widgets_.push_back(std::make_unique<GrenadeSlotsWidget>());
-    widgets_.push_back(std::make_unique<AmmoCounter>());    // weapon panel (bottom-right)
-    widgets_.push_back(std::make_unique<ChatWidget>());     // chat should sit above gameplay chrome
+    widgets_.push_back(std::make_unique<PopupNotification>());
+    widgets_.push_back(std::make_unique<AmmoCounter>()); // weapon panel (bottom-right)
+    widgets_.push_back(std::make_unique<ChatWidget>());  // chat should sit above gameplay chrome
 
     // Modal panels (only visible when toggled).
     // TeamStatusBar is intentionally omitted in the Voidfall design.
     widgets_.push_back(std::make_unique<Scoreboard>());
     widgets_.push_back(std::make_unique<PickupPrompt>());
+
+    // Pre-match overlay (warmup waiting message + countdown integer).
+    widgets_.push_back(std::make_unique<PrematchBanner>());
 }

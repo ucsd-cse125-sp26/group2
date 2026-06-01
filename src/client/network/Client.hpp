@@ -15,6 +15,7 @@
 #include "network/NetworkConfig.hpp"
 #include "network/OutboundQueue.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/RosterEvent.hpp"
 #include "network/ShotDebugReport.hpp" // PR-20: shared wire-format + runtime capture struct.
 #include "network/ShotEvent.hpp"
 #include "network/VoiceProtocol.hpp"
@@ -79,6 +80,8 @@ public:
     using MatchStateUpdateFn = std::function<void(const MatchStatePacket&)>;
     using KillEventCallback = std::function<void(const NetKillEvent&)>;
     using TextChatCallback = std::function<void(const net::chat::ServerTextChat&)>;
+    /// @brief Fired for server-authored mid-match join/leave notifications.
+    using RosterEventCallback = std::function<void(const PlayerRosterEvent&)>;
     using VoiceFrameCallback = std::function<void(const net::voice::ServerVoiceFrame&)>;
     /// @brief PR-20: callback for SHOT_DEBUG_REPORT.  Fired on the
     /// game thread inside `dispatchMessage` after the bytes have been
@@ -105,7 +108,8 @@ public:
                       Uint16 port,
                       const TransportConfig& transport = {},
                       int timeoutMs = -1,
-                      const std::optional<net::UdpSessionTransport::RelayConfig>& relay = std::nullopt);
+                      const std::optional<net::UdpSessionTransport::RelayConfig>& relay = std::nullopt,
+                      const std::optional<net::UdpSessionTransport::PunchAssist>& punch = std::nullopt);
 
     /// @brief Close the socket and release the resolved address.
     void shutdown();
@@ -190,6 +194,8 @@ public:
     /// @brief Register the kill-event callback, fired for each replicated kill from the server.
     void onKillEvent(KillEventCallback fn) { killEventFn_ = std::move(fn); }
     void onTextChat(TextChatCallback fn) { textChatFn_ = std::move(fn); }
+    /// @brief Register the roster-event callback, fired for each mid-match join/leave.
+    void onRosterEvent(RosterEventCallback fn) { rosterEventFn_ = std::move(fn); }
     void onVoiceFrame(VoiceFrameCallback fn) { voiceFrameFn_ = std::move(fn); }
     /// @brief Register the shot-debug callback (PR-20); fired for each SHOT_DEBUG_REPORT.
     void onShotDebugReport(ShotDebugCallback fn) { shotDebugFn_ = std::move(fn); }
@@ -221,6 +227,9 @@ public:
 
     /// @brief Return the latest lobby roster received from the server, if any.
     std::optional<std::pair<std::vector<LobbyPlayer>, ClientId>> getLatestLobbyState() const;
+
+    /// @brief Return the latest server display name received from the server, if any.
+    std::optional<std::string> getLatestServerName() const { return latestServerName_; }
 
     /// @brief Latest server-acked client predict tick.
     ///
@@ -396,6 +405,8 @@ public:
         return simulatedLossPercent_.load(std::memory_order_relaxed);
     }
 
+    bool sendGameplayReady();
+
 private:
     MessageStream msgStream{nullptr};              ///< Framed message stream for server communication.
     NET_Address* serverAddr = nullptr;             ///< Resolved server address.
@@ -404,6 +415,7 @@ private:
     MatchStateUpdateFn matchStateUpdateFn_;        ///< Called whenever a MATCH_STATE packet is received.
     KillEventCallback killEventFn_;                ///< Called for each replicated kill event from server.
     TextChatCallback textChatFn_;                  ///< Called for server-broadcast all-chat messages.
+    RosterEventCallback rosterEventFn_;            ///< Called for mid-match player join/leave updates.
     VoiceFrameCallback voiceFrameFn_;              ///< Called for proximity-routed Opus voice frames.
     ShotDebugCallback shotDebugFn_;                ///< PR-20: called for each SHOT_DEBUG_REPORT from server.
     LobbyUpdateCallback lobbyUpdateFn_;            ///< Called for each lobby update received from server.
@@ -414,7 +426,8 @@ private:
         latestMatchState_;                         ///< Most-recent MATCH_STATE packet; populated by dispatchMessage.
     std::optional<MatchConfig> latestMatchConfig_; ///< Most-recent MATCH_CONFIG packet; populated by dispatchMessage.
     std::optional<std::vector<LobbyPlayer>> latestLobbyPlayers_; ///< Most-recent lobby roster received from the server.
-    std::optional<ClientId> latestLobbyLocalId_; ///< This client's ID as reported in the LOBBY_STATE packet.
+    std::optional<ClientId> latestLobbyLocalId_;  ///< This client's ID as reported in the LOBBY_STATE packet.
+    std::optional<std::string> latestServerName_; ///< Server display name reported by the latest LOBBY_STATE packet.
 
     // ── PR-10 + PR-14 (server-perf): snapshot delta encoding state ────
     //

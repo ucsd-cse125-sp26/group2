@@ -14,8 +14,6 @@ namespace user_settings
 {
 namespace
 {
-constexpr float k_minMouseSensitivity = 0.0001f;
-constexpr float k_maxMouseSensitivity = 0.0050f;
 constexpr float k_minFovDegrees = 70.0f;
 constexpr float k_maxFovDegrees = 120.0f;
 constexpr float k_minGamepadSensitivity = 1.0f;
@@ -65,7 +63,7 @@ UserSettings load(const std::string& path)
 
     const toml::node_view input = tbl["input"] ? tbl["input"] : tbl["user"];
     if (auto v = input["mouse-sensitivity"].value<float>()) {
-        settings.mouseSensitivity = std::clamp(*v, k_minMouseSensitivity, k_maxMouseSensitivity);
+        settings.mouseSensitivity = std::clamp(*v, kMinMouseSensitivity, kMaxMouseSensitivity);
     }
     if (auto v = input["horizontal-fov-degrees"].value<float>()) {
         settings.horizontalFovDegrees = std::clamp(*v, k_minFovDegrees, k_maxFovDegrees);
@@ -136,7 +134,7 @@ bool save(const std::string& path, const UserSettings& settings)
     }
 
     out << "[input]\n";
-    out << "mouse-sensitivity = " << std::clamp(settings.mouseSensitivity, k_minMouseSensitivity, k_maxMouseSensitivity)
+    out << "mouse-sensitivity = " << std::clamp(settings.mouseSensitivity, kMinMouseSensitivity, kMaxMouseSensitivity)
         << "\n";
     out << "horizontal-fov-degrees = " << std::clamp(settings.horizontalFovDegrees, k_minFovDegrees, k_maxFovDegrees)
         << "\n";

@@ -27,4 +27,5 @@ enum class EventType
     MatchConfigUpdated,       ///< Client proposed a new match config (e.g. kill threshold).
     DiscoverySettingsUpdated, ///< Client proposed new discovery advertisement settings.
     ServerShutdownRequested,  ///< Client requested server shutdown.
+    GameplayReady,            ///< Client finished initializing game
 };

@@ -18,10 +18,11 @@ struct Scoreboard : HudWidget
     void draw(HudContext& ctx, float drawX, float drawY) override;
 
     /// @brief Set visibility via TAB key (called from Hud::processEvent).
-    void setOpen(bool open) { visible = open; }
+    void setOpen(bool open) { manualOpen_ = open; }
 
 private:
     std::vector<HudTeamMemberStatus> allies_;
     std::vector<HudTeamMemberStatus> enemies_;
     int allyScore_ = 0, enemyScore_ = 0;
+    bool manualOpen_ = false;
 };

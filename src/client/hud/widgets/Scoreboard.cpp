@@ -16,6 +16,7 @@ void Scoreboard::update(float /*dt*/, const HudGameState& state, HudTweenPool& /
     enemies_.assign(state.enemies.begin(), state.enemies.end());
     allyScore_ = state.allyScore;
     enemyScore_ = state.enemyScore;
+    visible = manualOpen_ || state.forceScoreboardOpen;
 }
 
 void Scoreboard::draw(HudContext& ctx, float cx, float cy)

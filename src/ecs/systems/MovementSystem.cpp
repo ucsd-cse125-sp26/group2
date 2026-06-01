@@ -597,17 +597,25 @@ void handleSliding(glm::vec3& vel, PlayerStateRef state, const InputSnapshot& in
         vel.z *= k_scale;
     }
 
-    // Slight steering: apply lateral wish acceleration so WASD can gently
-    // rotate the slide trajectory. The lateral component is wishDir minus
-    // its projection onto current motion, so forward input is ignored and
-    // only the perpendicular part curves the slide.
+    // Steering: rotate the slide's heading toward the WASD/view wish
+    // direction so the player can carve where they're going. Speed is
+    // preserved (only the direction changes) and the turn is capped at a max
+    // rate per tick, so the slide can be redirected but never pivoted
+    // instantly. Holding W steers toward where you look; A/D let you carve.
     if (k_hs > 0.001f) {
         const glm::vec3 k_wishDir =
             physics::computeWishDir(input.yaw, input.forward, input.back, input.left, input.right);
         if (glm::length(k_wishDir) > 0.001f) {
             const glm::vec3 k_horizDir = horizVel(vel) / k_hs;
-            const glm::vec3 k_lateral = k_wishDir - k_horizDir * glm::dot(k_wishDir, k_horizDir);
-            vel += k_lateral * tms::k_slideSteerAccel * dt;
+            const float k_angle = std::acos(std::clamp(glm::dot(k_horizDir, k_wishDir), -1.0f, 1.0f));
+            if (k_angle > 1e-4f) {
+                const float k_maxTurn = tms::k_slideSteerTurnRate * dt;
+                // Fraction of the way to wishDir we may rotate this tick.
+                const float k_t = std::min(1.0f, k_maxTurn / k_angle);
+                const glm::vec3 k_newDir = glm::normalize(k_horizDir + (k_wishDir - k_horizDir) * k_t);
+                vel.x = k_newDir.x * k_hs;
+                vel.z = k_newDir.z * k_hs;
+            }
         }
     }
 

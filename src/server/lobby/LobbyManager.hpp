@@ -33,8 +33,8 @@ public:
 
     /// @brief Validate a host-initiated match start request.
     ///
-    /// Rejects if sender is not the host or any connected non-host player is unready.
-    /// Host-only lobbies are valid.
+    /// Rejects if sender is not the host, the lobby is empty, or any connected non-host player is
+    /// unready. A solo host (no other players) may start the match.
     /// @return True if the match may proceed.
     bool hostStartMatch(ClientId sender);
 
@@ -43,6 +43,9 @@ public:
 
     /// @brief Clear all ready flags and broadcast Unready events; resends full lobby state to every client.
     void resetReadyStatuses();
+
+    /// @brief Return current lobby player IDs
+    [[nodiscard]] std::vector<ClientId> playerIds() const;
 
 private:
     Server* server = nullptr;         ///< Authoritative server; not owned.

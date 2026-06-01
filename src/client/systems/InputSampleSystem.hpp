@@ -4,6 +4,7 @@
 #pragma once
 
 #include "config/InputBindings.hpp"
+#include "config/UserSettings.hpp"
 #include "ecs/components/Controllable.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
@@ -26,22 +27,23 @@ namespace systems
 
 /// @brief Tracks previous-frame key state for edge detection.
 inline bool prevKillSelfKey = false;
-/// @brief Tracks previous-frame G key state for grenade quick-throw / radial behavior.
+/// @brief Tracks previous-frame G (CycleGrenade) key state for tap-throw vs hold-cycle.
 inline bool prevGrenadeKey = false;
-/// @brief Seconds the grenade key has been continuously held.
-inline float grenadeHeldSeconds = 0.0f;
-/// @brief True while the grenade radial selector is open.
-inline bool grenadeRadialActive = false;
-/// @brief Current mouse-relative aim vector inside the grenade radial selector.
-inline glm::vec2 grenadeRadialAim{0.0f, -1.0f};
-/// @brief Latched quick-throw request consumed by HUD/gameplay code.
+/// @brief True once a cycle (next/prev) fired during the current G hold — suppresses throw on release.
+inline bool grenadeCycledThisHold = false;
+/// @brief Previous-frame Shoot/Scope state while G held, for cycle edge detection (keyboard/mouse).
+inline bool prevGrenadeCycleNext = false;
+inline bool prevGrenadeCyclePrev = false;
+/// @brief Gamepad equivalents of the above for the hold-(D-pad Left) + RT/LT cycle chord.
+inline bool prevGamepadGrenadeKey = false;
+inline bool gamepadGrenadeCycledThisHold = false;
+inline bool prevGamepadGrenadeCycleNext = false;
+inline bool prevGamepadGrenadeCyclePrev = false;
+/// @brief Latched throw request, consumed once per frame by the game loop.
 inline bool pendingGrenadeThrow = false;
-/// @brief Hold duration before the grenade quick-throw becomes radial selection.
-inline constexpr float k_grenadeRadialHoldSeconds = 0.24f;
-/// @brief Minimum radial aim distance required to choose a grenade slot.
-inline constexpr float k_grenadeRadialDeadzone = 18.0f;
-/// @brief Maximum stored cursor distance from the grenade radial center.
-inline constexpr float k_grenadeRadialMaxDistance = 130.0f;
+/// @brief Latched cycle next/prev requests, consumed once per frame by the game loop.
+inline bool pendingGrenadeCycleNext = false;
+inline bool pendingGrenadeCyclePrev = false;
 /// @brief Tracks previous-frame Alt+LMB state for ability choice edge detection.
 inline bool prevAbilitySelectLeft = false;
 /// @brief Tracks previous-frame Alt+RMB state for ability choice edge detection.
@@ -82,39 +84,28 @@ inline bool gamepadConnected(SDL_Gamepad* gamepad)
     return gamepad != nullptr && SDL_GamepadConnected(gamepad);
 }
 
-/// @brief Convert the current grenade radial aim vector into a grenade slot index.
-/// @return Selected grenade slot, or kInvalidGrenadeSelectIndex inside the radial deadzone.
-inline std::uint8_t grenadeRadialIndexFromAim()
-{
-    if (glm::dot(grenadeRadialAim, grenadeRadialAim) < k_grenadeRadialDeadzone * k_grenadeRadialDeadzone) {
-        return kInvalidGrenadeSelectIndex;
-    }
-
-    constexpr glm::vec2 directions[3] = {
-        {0.0f, -1.0f},
-        {0.8660254f, 0.5f},
-        {-0.8660254f, 0.5f},
-    };
-
-    const glm::vec2 aim = glm::normalize(grenadeRadialAim);
-    std::uint8_t bestIndex = 0;
-    float bestDot = glm::dot(aim, directions[0]);
-    for (std::uint8_t i = 1; i < 3; ++i) {
-        const float d = glm::dot(aim, directions[i]);
-        if (d > bestDot) {
-            bestDot = d;
-            bestIndex = i;
-        }
-    }
-    return bestIndex;
-}
-
-/// @brief Consume and clear the queued grenade quick-throw request.
+/// @brief Consume and clear the queued grenade throw request.
 inline bool consumePendingGrenadeThrow()
 {
     const bool shouldThrow = pendingGrenadeThrow;
     pendingGrenadeThrow = false;
     return shouldThrow;
+}
+
+/// @brief Consume and clear the queued "cycle to next grenade" request.
+inline bool consumePendingGrenadeCycleNext()
+{
+    const bool requested = pendingGrenadeCycleNext;
+    pendingGrenadeCycleNext = false;
+    return requested;
+}
+
+/// @brief Consume and clear the queued "cycle to previous grenade" request.
+inline bool consumePendingGrenadeCyclePrev()
+{
+    const bool requested = pendingGrenadeCyclePrev;
+    pendingGrenadeCyclePrev = false;
+    return requested;
 }
 
 /// @brief Sample mouse delta and accumulate into yaw / pitch.
@@ -135,15 +126,6 @@ inline void runMouseLook(Registry& registry, float mouseSensitivity, bool gravit
     float mdx = 0.0f;
     float mdy = 0.0f;
     SDL_GetRelativeMouseState(&mdx, &mdy);
-
-    if (grenadeRadialActive) {
-        grenadeRadialAim += glm::vec2{mdx, mdy};
-        const float len = glm::length(grenadeRadialAim);
-        if (len > k_grenadeRadialMaxDistance) {
-            grenadeRadialAim *= k_grenadeRadialMaxDistance / len;
-        }
-        return;
-    }
 
     // When gravity is flipped the camera is rolled 180°, which swaps
     // both screen-left/right and screen-up/down relative to world space.
@@ -238,8 +220,7 @@ inline void runDeadInput(Registry& registry, const InputBindings& bindings)
 ///
 /// @param registry  The ECS registry.
 /// @param bindings  The input bindings.
-/// @param dt        Frame delta time in seconds, used to detect grenade radial hold duration.
-inline void runWeaponKeys(Registry& registry, const InputBindings& bindings, float dt = 0.0f)
+inline void runWeaponKeys(Registry& registry, const InputBindings& bindings)
 {
     const bool* const kKeys = SDL_GetKeyboardState(nullptr);
     const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
@@ -253,38 +234,48 @@ inline void runWeaponKeys(Registry& registry, const InputBindings& bindings, flo
     prevAbilitySelectLeft = selectLeftNow;
     prevAbilitySelectRight = selectRightNow;
 
+    // Grenade: hold CycleGrenade (G) as a modifier. While held, Shoot cycles to
+    // the next grenade and Scope to the previous (both edge-triggered and
+    // suppressed from firing). A quick tap of G with no cycle throws the
+    // selected grenade — detected as a release where no cycle fired this hold.
+    // Cycle/throw requests are latched here and pulsed once per frame by the
+    // game loop (mirrors throwGrenade) so the server applies each exactly once.
     const bool grenadeKeyNow = bindings.pressed(Action::CycleGrenade, kKeys, mouse);
     if (grenadeKeyNow) {
         if (!prevGrenadeKey) {
-            grenadeHeldSeconds = 0.0f;
-            grenadeRadialActive = false;
-            grenadeRadialAim = glm::vec2{0.0f, -1.0f};
-        } else {
-            grenadeHeldSeconds += dt;
+            grenadeCycledThisHold = false;
         }
-
-        if (!grenadeRadialActive && grenadeHeldSeconds >= k_grenadeRadialHoldSeconds) {
-            grenadeRadialActive = true;
+        const bool cycleNextNow = shootDown && !abilityMenuHeld;
+        const bool cyclePrevNow = scopeDown && !abilityMenuHeld;
+        if (cycleNextNow && !prevGrenadeCycleNext) {
+            pendingGrenadeCycleNext = true;
+            grenadeCycledThisHold = true;
         }
-    } else if (prevGrenadeKey) {
-        if (!grenadeRadialActive) {
+        if (cyclePrevNow && !prevGrenadeCyclePrev) {
+            pendingGrenadeCyclePrev = true;
+            grenadeCycledThisHold = true;
+        }
+        prevGrenadeCycleNext = cycleNextNow;
+        prevGrenadeCyclePrev = cyclePrevNow;
+    } else {
+        if (prevGrenadeKey && !grenadeCycledThisHold) {
             pendingGrenadeThrow = true;
         }
-        grenadeHeldSeconds = 0.0f;
-        grenadeRadialActive = false;
+        prevGrenadeCycleNext = false;
+        prevGrenadeCyclePrev = false;
     }
     prevGrenadeKey = grenadeKeyNow;
-    const std::uint8_t grenadeSelectIndex =
-        grenadeRadialActive ? grenadeRadialIndexFromAim() : kInvalidGrenadeSelectIndex;
+
+    // Suppress fire/aim while the grenade modifier is held — Shoot/Scope are
+    // repurposed for cycling, exactly as AbilityMenu repurposes them for ability
+    // selection.
+    const bool fireSuppressed = abilityMenuHeld || grenadeKeyNow;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
-        snap.shooting = shootDown && !abilityMenuHeld;
-        snap.scoped = scopeDown && !abilityMenuHeld;
+        snap.shooting = shootDown && !fireSuppressed;
+        snap.scoped = scopeDown && !fireSuppressed;
         snap.switchToPrimary = bindings.pressed(Action::SwitchToPrimary, kKeys, mouse);
         snap.switchToSecondary = bindings.pressed(Action::SwitchToSecondary, kKeys, mouse);
-        snap.throwGrenade = false;
-        snap.grenadeMenuHeld = grenadeRadialActive;
-        snap.grenadeSelectIndex = grenadeSelectIndex;
         snap.reload = bindings.pressed(Action::Reload, kKeys, mouse);
         snap.pickup = bindings.pressed(Action::Pickup, kKeys, mouse);
         snap.abilitySelectHeld = abilityMenuHeld;
@@ -295,8 +286,11 @@ inline void runWeaponKeys(Registry& registry, const InputBindings& bindings, flo
 
 /// @brief Legacy combined sampler — calls both runMouseLook and runMovementKeys.
 /// @param registry          The ECS registry.
-/// @param mouseSensitivity  Radians per pixel (default 0.001).
-inline void runInputSample(Registry& registry, const InputBindings& bindings, float mouseSensitivity = 0.001f)
+/// @param mouseSensitivity  Radians per pixel.
+inline void runInputSample(
+    Registry& registry,
+    const InputBindings& bindings,
+    float mouseSensitivity = user_settings::kDefaultMouseSensitivity)
 {
     runMouseLook(registry, mouseSensitivity);
     runMovementKeys(registry, bindings);
@@ -495,14 +489,45 @@ inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const Inp
     prevGamepadAbilitySelectLeft = selectLeftNow;
     prevGamepadAbilitySelectRight = selectRightNow;
 
+    // Grenade: mirror of the keyboard hold-G chord. Hold CycleGrenade (D-pad
+    // Left) as a modifier; Right Trigger (Shoot) cycles next, Left Trigger
+    // (Scope) cycles previous; a tap with no cycle throws. Latches feed the same
+    // once-per-frame pulse as the keyboard path.
+    if (padCycleGrenade) {
+        if (!prevGamepadGrenadeKey) {
+            gamepadGrenadeCycledThisHold = false;
+        }
+        const bool cycleNextNow = padShoot && !abilityMenuHeld;
+        const bool cyclePrevNow = padScope && !abilityMenuHeld;
+        if (cycleNextNow && !prevGamepadGrenadeCycleNext) {
+            pendingGrenadeCycleNext = true;
+            gamepadGrenadeCycledThisHold = true;
+        }
+        if (cyclePrevNow && !prevGamepadGrenadeCyclePrev) {
+            pendingGrenadeCyclePrev = true;
+            gamepadGrenadeCycledThisHold = true;
+        }
+        prevGamepadGrenadeCycleNext = cycleNextNow;
+        prevGamepadGrenadeCyclePrev = cyclePrevNow;
+    } else {
+        if (prevGamepadGrenadeKey && !gamepadGrenadeCycledThisHold) {
+            pendingGrenadeThrow = true;
+        }
+        prevGamepadGrenadeCycleNext = false;
+        prevGamepadGrenadeCyclePrev = false;
+    }
+    prevGamepadGrenadeKey = padCycleGrenade;
+
+    // Suppress fire/aim while either modifier (ability menu or grenade) is held.
+    const bool fireSuppressed = abilityMenuHeld || padCycleGrenade;
+
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
-        snap.shooting |= padShoot && !abilityMenuHeld;
-        snap.scoped |= padScope && !abilityMenuHeld;
+        snap.shooting |= padShoot && !fireSuppressed;
+        snap.scoped |= padScope && !fireSuppressed;
         snap.reload |= padReload;
         snap.pickup |= padPickup;
         snap.switchToPrimary |= padPrimary;
         snap.switchToSecondary |= padSecondary;
-        snap.grenadeMenuHeld |= padCycleGrenade;
         snap.abilitySelectHeld |= abilityMenuHeld;
         snap.abilitySelectLeft |= selectLeftEdge;
         snap.abilitySelectRight |= selectRightEdge;
@@ -518,8 +543,12 @@ inline void runGamepadDeadInput(Registry& registry, SDL_Gamepad* gamepad, const 
     if (!gamepadConnected(gamepad))
         return;
     const bool skipRespawn = bindings.controllerPressed(Action::Jump, gamepad);
+    // OR into the flag the keyboard path (runDeadInput) just set — the gamepad
+    // sampler runs right after it, so an assignment here would stomp a Space
+    // press on keyboard whenever a pad is connected. Mirrors how the alive-path
+    // gamepad inputs compose with |= rather than overwriting.
     registry.view<InputSnapshot, LocalPlayer, RespawnTimer>().each(
-        [&](InputSnapshot& snap, const RespawnTimer& /*unused*/) { snap.skipRespawn = skipRespawn; });
+        [&](InputSnapshot& snap, const RespawnTimer& /*unused*/) { snap.skipRespawn |= skipRespawn; });
 }
 
 } // namespace systems

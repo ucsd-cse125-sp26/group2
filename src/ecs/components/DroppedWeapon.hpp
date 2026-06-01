@@ -16,4 +16,5 @@ struct DroppedWeapon
     int totalAmmo = 0;                   ///< Reserve ammo at death.
     int currentMagAmmo = 0;              ///< Ammo in the magazine at death.
     float despawnTimer = 0.0f;           ///< Seconds until the entity is destroyed.
+    float pickupDelay = 0.0f;            ///< Pickup-immunity (s); blocks re-grabbing a weapon you just swapped out.
 };

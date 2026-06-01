@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "network/MatchStatus.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -11,6 +13,9 @@
 #include <string>
 
 class InputBindings;
+/// Opaque enum declaration — value 0 is KeyboardMouse (see config/InputBindings.hpp).
+/// Lets HudGameState store the active device without pulling in the full header.
+enum class BindingDevice : std::uint8_t;
 
 // ── Colors ──────────────────────────────────────────────────────────────────
 
@@ -58,6 +63,16 @@ enum class HudIcon : uint8_t
 {
     // Placeholder — populated when the icon atlas is authored.
     None = 0,
+};
+
+/// @brief Visual category for generic transient HUD popup messages.
+enum class HudPopupKind : std::uint8_t
+{
+    Info,         ///< Neutral informational popup.
+    Success,      ///< Positive confirmation popup.
+    Warning,      ///< Warning or attention popup.
+    PlayerJoined, ///< Player joined the active match.
+    PlayerLeft    ///< Player left the active match.
 };
 
 // ── Vertex ──────────────────────────────────────────────────────────────────
@@ -157,6 +172,7 @@ struct HudWorldEnemy
     int health = 100, maxHealth = 100;
     int armor = 0, maxArmor = 100;
     bool isAlive = true;
+    bool occluded = false; ///< True when world geometry blocks the line of sight from the camera (hide bar/name).
 };
 
 /// @brief Equipment slot state — drives the bottom-center grapple/grenade/tactical row.
@@ -213,6 +229,13 @@ struct HudPickupNotification
 {
     std::string label; ///< E.g. "PULSE·MAG".
     int qty = 1;       ///< Amount picked up.
+};
+
+/// @brief Generic transient HUD popup message.
+struct HudPopupMessage
+{
+    HudPopupKind kind = HudPopupKind::Info; ///< Styling category.
+    std::string text;                       ///< Already-formatted display text.
 };
 
 /// @brief Local player K/D/A — feeds the top-right counter.
@@ -281,6 +304,7 @@ struct HudShotgunBlast
 struct HudGameState
 {
     const InputBindings* bindings = nullptr; ///< Live input bindings for HUD key prompts.
+    BindingDevice activeInputDevice{};       ///< Last-used input device; selects KBM vs controller glyphs (0 == KBM).
 
     int health = 100, maxHealth = 100;
     int armor = 0, maxArmor = 100;
@@ -293,8 +317,11 @@ struct HudGameState
     float roundTimeRemaining = 0.f;
     bool isAlive = true;
     bool isBuyPhase = false;
+    MatchPhase currentPhase = MatchPhase::IN_PROGRESS; ///< Current server match phase.
+    bool matchWon = false;                             ///< True if the local player won the finished match.
+    bool forceScoreboardOpen = false;                  ///< True when match flow should show scoreboard automatically.
     bool isReloading = false;
-    float reloadProgress = 0.0f; ///< 0-1
+    float reloadProgress = 0.0f;                       ///< 0-1
 
     // Events (valid for this frame only).
     std::span<const HudKillFeedEntry> killFeedEvents;
@@ -336,6 +363,7 @@ struct HudGameState
     HudGrenadeRadialState grenadeRadial;                        ///< Held-G grenade selection radial.
     HudAbilitySelectionState abilitySelection;                  ///< Pending level-up ability choice.
     std::span<const HudPickupNotification> pickupNotifications; ///< Slide-in pickup messages this frame.
+    std::span<const HudPopupMessage> popupMessages;             ///< Generic popup messages this frame.
     HudKdaCounter kda;                                          ///< Local player kill/assist/death counter (top-right).
     HudChatState chat;                                          ///< Bottom-left all-chat log/input.
     std::span<const HudVoiceSpeaker> voiceSpeakers;             ///< Currently audible proximity voice speakers.

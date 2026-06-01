@@ -15,6 +15,7 @@
 #include "network/NetKillEvent.hpp"
 #include "network/PacketType.hpp"
 #include "network/RegistrySerialization.hpp"
+#include "network/RosterEvent.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 #include "network/transport/PacketHeader.hpp"
 
@@ -46,9 +47,19 @@ ConnectError Client::init(const char* addr,
                           Uint16 port,
                           const TransportConfig& transport,
                           int timeoutMs,
-                          const std::optional<net::UdpSessionTransport::RelayConfig>& relay)
+                          const std::optional<net::UdpSessionTransport::RelayConfig>& relay,
+                          const std::optional<net::UdpSessionTransport::PunchAssist>& punch)
 {
+    if (networkThread_.joinable() || msgStream.socket != nullptr || usingUdpSession_) {
+        shutdown();
+    }
+
     transportConfig_ = transport;
+    latestLobbyPlayers_.reset();
+    latestLobbyLocalId_.reset();
+    latestServerName_.reset();
+    latestMatchState_.reset();
+    latestMatchConfig_.reset();
 
     if (const char* envDelay = SDL_getenv("GROUP2_CLIENT_INTERP_DELAY_SNAPSHOTS")) {
         const int parsed = SDL_atoi(envDelay);
@@ -62,6 +73,8 @@ ConnectError Client::init(const char* addr,
         session_.preferRelay(transportConfig_.forceRelay && !transportConfig_.noRelay);
         if (relay && !transportConfig_.noRelay)
             session_.setRelayConfig(*relay);
+        if (punch)
+            session_.setPunchAssist(*punch);
         if (!session_.connectClient(addr, port, timeoutMs)) {
             SDL_Log("Client: UDP session connection to %s:%u failed", addr, port);
             session_.close();
@@ -244,6 +257,12 @@ void Client::shutdown()
     }
 
     std::lock_guard<std::mutex> lock(stateMutex_);
+    // Gracefully notify the UDP session peer before tearing down local
+    // transport state so the server can remove this client without timeout.
+    if (usingUdpSession_ && connectionId_ != 0) {
+        session_.disconnect(connectionId_);
+    }
+
     session_.close();
     usingUdpSession_ = false;
     udpSessionLastBytesSent_ = 0;
@@ -376,7 +395,7 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
         ++inputRingCount_;
 
     // Pack [PacketType::INPUT (1B)] [count (1B)] [rttMs (2B)]
-    //      [interpDelaySnapshots (1B)] [InputSnapshot * count].
+    //      [interpDelaySnapshots (1B)] [interpDelayMs (2B)] [InputSnapshot * count].
     //
     // Inputs are written oldest-first so the server can apply them in
     // tick order with a simple `tick > lastAppliedInputTick` check.
@@ -406,21 +425,40 @@ bool Client::sendInputSnapshot(const InputSnapshot& snap)
     const auto rttMs = static_cast<uint16_t>(std::lround(rttClamped));
     const auto interpDelaySnapshots =
         static_cast<uint8_t>(std::clamp(interpDelaySnapshots_, 0, static_cast<int>(InterpolationBuffer::k_capacity)));
-    uint8_t buf[5 + k_inputRedundancy * sizeof(InputSnapshot)];
+
+    // PR-31: the client's *measured* render delay in milliseconds —
+    // `interpDelaySnapshots × snapshotIntervalEmaNs_`, where the EMA tracks
+    // the actually-observed snapshot-apply interval (Client::applyRegistry).
+    // The server prefers this over the snapshot-count byte so its lag-comp
+    // rewind locks onto the real render time the client displayed, even when
+    // jitter or the post-join warm-up window pushes the effective cadence
+    // away from the nominal rate. See server::lagcomp::computeRewindTicks.
+    // Zero when render-delay interp is off, which selects the server's
+    // snapshot-count fallback path. Clamped to 1000 ms here; the server
+    // re-clamps the combined rewind to the HitboxHistory ring in ticks.
+    uint16_t interpDelayMs = 0;
+    if (interpDelaySnapshots_ > 0) {
+        const Uint64 delayNs = static_cast<Uint64>(interpDelaySnapshots_) * snapshotIntervalEmaNs_;
+        const Uint64 delayMs = (delayNs + 500'000ULL) / 1'000'000ULL; // round ns → ms
+        interpDelayMs = static_cast<uint16_t>(std::min<Uint64>(delayMs, 1000ULL));
+    }
+
+    uint8_t buf[7 + k_inputRedundancy * sizeof(InputSnapshot)];
     buf[0] = static_cast<uint8_t>(PacketType::INPUT);
     buf[1] = count;
     std::memcpy(buf + 2, &rttMs, sizeof(uint16_t));
     buf[4] = interpDelaySnapshots;
+    std::memcpy(buf + 5, &interpDelayMs, sizeof(uint16_t));
 
     // Oldest-first iteration: when ring is full, oldest is at head; otherwise
     // entries [0, count) are already in order.
     const size_t firstIdx = (inputRingCount_ == k_inputRedundancy) ? inputRingHead_ : 0;
     for (size_t i = 0; i < inputRingCount_; ++i) {
         const size_t srcIdx = (firstIdx + i) % k_inputRedundancy;
-        std::memcpy(buf + 5 + i * sizeof(InputSnapshot), &inputRing_[srcIdx], sizeof(InputSnapshot));
+        std::memcpy(buf + 7 + i * sizeof(InputSnapshot), &inputRing_[srcIdx], sizeof(InputSnapshot));
     }
 
-    const uint32_t totalLen = 5 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
+    const uint32_t totalLen = 7 + count * static_cast<uint32_t>(sizeof(InputSnapshot));
 
     if (usingUdpSession_) {
         return session_.send(connectionId_, net::ChannelId::InputUnreliable, buf, static_cast<int>(totalLen));
@@ -1404,16 +1442,29 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         constexpr std::uint32_t k_maxLobbyPlayers = 256;
         if (count > k_maxLobbyPlayers)
             break;
-        const size_t expectedSize =
-            sizeof(int) + sizeof(uint32_t) + static_cast<std::size_t>(count) * sizeof(LobbyPlayer);
-        if (static_cast<std::size_t>(payloadSize) != expectedSize)
+        const size_t playersOffset = sizeof(int) + sizeof(uint32_t);
+        const size_t playersBytes = static_cast<std::size_t>(count) * sizeof(LobbyPlayer);
+        const size_t minExpectedSize = playersOffset + playersBytes;
+        if (static_cast<std::size_t>(payloadSize) < minExpectedSize)
             break;
 
         std::vector<LobbyPlayer> players(count);
-        std::memcpy(players.data(), payload + sizeof(int) + sizeof(uint32_t), count * sizeof(LobbyPlayer));
+        std::memcpy(players.data(), payload + playersOffset, playersBytes);
+
+        std::optional<std::string> serverName;
+        if (static_cast<std::size_t>(payloadSize) > minExpectedSize) {
+            const auto nameLen = static_cast<std::uint8_t>(payload[minExpectedSize]);
+            const size_t expectedSize = minExpectedSize + sizeof(std::uint8_t) + nameLen;
+            if (static_cast<std::size_t>(payloadSize) != expectedSize)
+                break;
+            serverName =
+                std::string(reinterpret_cast<const char*>(payload + minExpectedSize + sizeof(std::uint8_t)), nameLen);
+        }
 
         latestLobbyPlayers_ = players;
         latestLobbyLocalId_ = localId;
+        if (serverName)
+            latestServerName_ = *serverName;
 
         if (lobbyStateFn_)
             lobbyStateFn_(players, localId);
@@ -1423,6 +1474,18 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
         const auto chat = net::chat::decodeServerText(std::span<const std::uint8_t>(data, size));
         if (chat && textChatFn_)
             textChatFn_(*chat);
+        break;
+    }
+    case PacketType::ROSTER_UPDATE: {
+        if (payloadSize < sizeof(PlayerRosterEvent))
+            break;
+
+        // Roster events are small fixed-size payloads and ride the same
+        // reliable event path as kill/chat-style notifications.
+        PlayerRosterEvent event{};
+        std::memcpy(&event, payload, sizeof(PlayerRosterEvent));
+        if (rosterEventFn_)
+            rosterEventFn_(event);
         break;
     }
     case PacketType::VOICE_FRAME: {
@@ -1501,4 +1564,10 @@ bool Client::poll()
     }
 
     return true;
+}
+
+bool Client::sendGameplayReady()
+{
+    const auto type = static_cast<uint8_t>(PacketType::GAMEPLAY_READY);
+    return send(&type, sizeof(type));
 }

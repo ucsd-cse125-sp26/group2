@@ -194,6 +194,9 @@ private:
     /// @brief Queue a locally-authored chat echo while waiting for server replication.
     void appendLocalChatMessage(std::string_view message);
 
+    /// @brief Queue a generic transient HUD popup message.
+    void appendPopupMessage(HudPopupKind kind, std::string_view message);
+
     /// @brief Clear held gameplay actions so typing chat cannot leak into movement or weapons.
     void clearGameplayInputForChat();
 
@@ -259,9 +262,11 @@ private:
 
     /// @brief Currently-bound gamepad, or nullptr if none is plugged in.
     ///
-    /// Opened on SDL_EVENT_GAMEPAD_ADDED (first device wins — extra controllers
-    /// are ignored until the active one disconnects), closed on
-    /// SDL_EVENT_GAMEPAD_REMOVED.  SDL3's gamepad mapping database normalises
+    /// Opened by scanForConnectedGamepads() at init (for pads already plugged
+    /// in before the match) and on SDL_EVENT_GAMEPAD_ADDED for runtime hot-plug
+    /// (first device wins — extra controllers are ignored until the active one
+    /// disconnects), closed on SDL_EVENT_GAMEPAD_REMOVED.  SDL3's gamepad
+    /// mapping database normalises
     /// every supported controller (Xbox 360 / One, DualShock, Switch Pro, ...)
     /// onto the same logical buttons + axes, so the input mapping in
     /// InputSampleSystem.hpp works uniformly across devices.
@@ -270,6 +275,10 @@ private:
     /// device on SDL_EVENT_GAMEPAD_REMOVED so we don't tear down a different
     /// controller when a second one disconnects.
     SDL_JoystickID activeGamepadId_ = 0;
+    /// @brief Last input device the player actually used, for HUD glyph
+    /// selection. Flips to Controller on gamepad button/stick/trigger input and
+    /// back to KeyboardMouse on key/mouse input. Value-init is KeyboardMouse (0).
+    BindingDevice lastInputDevice_{};
     /// @brief Right-stick look speed in radians per second at full deflection.
     /// 6.0 rad/s ≈ 343°/s — most testers found 3.0 too sluggish for tracking
     /// players during firefights; this is in line with mainstream console FPS
@@ -299,14 +308,19 @@ private:
     /// AFTER `init()` reads the env override.
     std::unique_ptr<WorkerPool> workerPool_;
 
+    /// @brief Local player's dead state last frame — used to detect the
+    ///        dead→alive (respawn) edge and snap the view to the spawn yaw.
+    bool localWasDead_ = false;
+
     // Runtime-tunable loop settings (exposed via ImGui)
-    float mouseSensitivity = 0.0007f;      ///< Radians per pixel of mouse movement.
+    float mouseSensitivity = user_settings::kDefaultMouseSensitivity; ///< Radians per pixel of mouse movement.
     float horizontalFovDegrees = 90.0f;    ///< Player-facing horizontal camera field of view in degrees.
     bool renderSeparateFromPhysics = true; ///< Render every iterate() with interpolation (true)
                                            ///  vs only after a physics tick (false).
     bool inputSyncedWithPhysics = true;    ///< Sample mouse once per physics tick (true)
                                            ///  vs every iterate() call (false).
-    bool limitFPSToMonitor = true;         ///< VSync on (true) / off (false).
+    bool limitFPSToMonitor = false;        ///< VSync on (true) / off (false). Default off = uncapped
+                                           ///  (mailbox present); toggle live via the debug menu.
 
     Uint64 softLimitPeriod = 0;            ///< Target frame period in perf-counter ticks (0 = disabled).
     Uint64 softLimitNextFrame = 0;         ///< Performance counter target for next frame deadline.
@@ -346,6 +360,7 @@ private:
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
     bool showHudDebug_ = false;                          ///< Show the HUD Tweaker panel.
+    bool showMenuThemeUI_ = false;                       ///< Show the Menu Theme Tweaker panel.
     bool flashlightEnabled_ = false;                     ///< Point light at camera position.
     float flashlightIntensity_ = 8.0f;                   ///< Flashlight brightness.
     float flashlightRange_ = 800.0f;                     ///< Flashlight attenuation range.
@@ -440,6 +455,12 @@ private:
     /// when the local player's WeaponState gains a new weapon type or their
     /// reserve ammo grows beyond the previous frame's reading.
     std::vector<HudPickupNotification> pendingPickupNotifications_;
+
+    /// @brief Generic popup notifications queued for the next HUD frame.
+    ///
+    /// The HUD widget consumes each entry once, then owns display lifetime,
+    /// animation, and expiration.
+    std::vector<HudPopupMessage> pendingPopupMessages_;
     std::vector<HudChatMessage> chatMessages_;
     std::vector<HudVoiceSpeaker> voiceSpeakers_;
     std::string chatDraft_;
@@ -696,8 +717,26 @@ private:
     /// the same event drives both audio and visuals.
     void onWeaponFired(const struct WeaponFiredEvent& evt);
 
+    /// @brief Open the gamepad with the given SDL_JoystickID and make it the
+    /// active controller, but only if none is currently bound (first-device-wins
+    /// policy).  Shared by the SDL_EVENT_GAMEPAD_ADDED hot-plug path and the
+    /// init-time scan below, so both routes apply identical state + logging.
+    void adoptGamepad(SDL_JoystickID id);
+
+    /// @brief Open the first already-connected gamepad, if any.
+    ///
+    /// SDL fires SDL_EVENT_GAMEPAD_ADDED for pads present at SDL_Init time, but
+    /// those events are delivered to whatever screen is active then (the lobby /
+    /// Home), not the Game which doesn't exist yet — so a controller plugged in
+    /// before the match starts would otherwise never be bound until the user
+    /// physically reconnected it.  Game::init() calls this to enumerate
+    /// SDL_GetGamepads() and adopt the first one, covering the "connected before
+    /// launch" case; the event handler still covers runtime hot-plug.
+    void scanForConnectedGamepads();
+
     // Match State
     MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.
+    ClientId currentWinnerId = ClientId{-1};          ///< ClientId of the current match winner, if in POSTMATCH.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
     bool returnToLobbyRequested = false;         ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
     bool returnToMainMenuRequested_ = false;     ///< Latched true when the pause menu or disconnect requests leaving.

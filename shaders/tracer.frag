@@ -12,25 +12,23 @@ void main()
 {
     float dist = abs(vUV.y);
 
-    // Two-layer profile: solid core + tight falloff
-    float core = 1.0 - smoothstep(0.0, 0.25, dist);  // bright centre
-    float body = 1.0 - smoothstep(0.0, 0.50, dist);  // visible body
-    float edge = 1.0 - smoothstep(0.20, 0.70, dist); // soft outer edge
+    // Bright projectile profile: hot center plus a soft readable glow.
+    float core = 1.0 - smoothstep(0.0, 0.28, dist);
+    float glow = 1.0 - smoothstep(0.12, 0.95, dist);
 
-    // Tip-to-tail brightness: tail stays visible
-    float tipFade = 0.45 + 0.55 * vUV.x;
+    // Tail fades smoothly; the front half carries the visible bullet head.
+    float tailFade = smoothstep(-0.05, 0.72, vUV.x);
+    float headHot = smoothstep(0.45, 1.0, vUV.x);
 
-    // Base color — fully saturated orange, not washed out
-    vec3 baseRGB = mix(vEdgeColor.rgb, vCoreColor.rgb, body);
+    vec3 hdrColor = vEdgeColor.rgb * glow * 1.75;
+    hdrColor += vCoreColor.rgb * core * (3.4 + 3.0 * headHot);
+    hdrColor *= vBrightness * tailFade;
 
-    // HDR push — values well above 1.0 trigger bloom, making the tracer
-    // glow visibly even against bright lit surfaces.
-    vec3 hdrColor = baseRGB * 3.0 * vBrightness * tipFade;
-    hdrColor += vec3(2.5, 1.0, 0.2) * core * vBrightness * tipFade;
+    float alpha =
+        vBrightness * tailFade * (glow * vEdgeColor.a + core * vCoreColor.a * (0.45 + 0.55 * headHot));
 
-    // Nearly fully opaque across the entire body so it reads as a solid
-    // streak, not a ghostly overlay. Only the outer fringe fades.
-    float alpha = mix(edge * 0.8, 1.0, body) * vBrightness * tipFade;
+    if (alpha <= 0.003)
+        discard;
 
     outColor = vec4(hdrColor, alpha);
 }

@@ -67,6 +67,7 @@ enum class PacketType : uint8_t
     LOBBY_STATE,    ///< Server -> single Client: full lobby snapshot on join. Format: [count:u32][LobbyPlayer*count]
     HOST_READY,     ///< Client -> Server: host signals ready to start match.
     START_MATCH,    ///< Client -> Server: host requests match start.
+    ROSTER_UPDATE,  /// Server -> Clients: player join/leaves (used for midmatch)
 
     TEXT_CHAT,      ///< Client <-> Server: bounded UTF-8 all-chat message.
     VOICE_FRAME,    ///< Client <-> Server: Opus voice frame for proximity chat.
@@ -81,4 +82,5 @@ enum class PacketType : uint8_t
     UPDATE_DISCOVERY_SETTINGS, ///< Client -> Server: host updates global/LAN advertisement toggles.
 
     REQUEST_SERVER_SHUTDOWN,   ///< Client -> Server: current host requests authoritative server shutdown.
+    GAMEPLAY_READY, ///< Client -> Server: signals that the client has finished loading and is ready to begin match
 };
