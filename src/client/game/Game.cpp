@@ -1436,7 +1436,10 @@ bool Game::init(AppContext& ctx)
         // wired below (clipFile()); Mixamo-name procedural features in CharacterAnimator
         // degrade gracefully on this skeleton.
         const std::string rigPath = std::string(base ? base : "") + "assets/wraith.glb";
-        if (!charRig_.loadFromFBX(rigPath, /*flipUVs=*/true)) {
+        // flipUVs=false: wraith.glb's UVs are authored in the opposite V convention
+        // from the weapon GLBs, so her body samples textures right-side-up without
+        // the flip (toggled after textures came in flipped).
+        if (!charRig_.loadFromFBX(rigPath, /*flipUVs=*/false)) {
             SDL_Log("[client] WARNING: rig load failed — animated characters disabled");
         } else {
             SDL_Log("[client] rig loaded — %d joints, %zu mesh(es)", charRig_.numJoints(), charRig_.meshes().size());
@@ -1445,6 +1448,16 @@ bool Game::init(AppContext& ctx)
                 const std::vector<RigMeshSource> rigMeshes = buildRigMeshSources(charRig_);
                 if (!renderer->setRig(rigMeshes, charRig_.numJoints())) {
                     SDL_Log("[client] WARNING: renderer rejected skinned rig — remote player bodies may be invisible");
+                }
+                // Register Wraith's embedded materials/textures (load the GLB as a
+                // hidden static model) and bind them per-mesh to the player skinned
+                // renderer, so the body renders textured instead of normal-shaded.
+                const int wraithTexModelIdx = renderer->loadSceneModel("wraith.glb", glm::vec3{0.0f}, 1.0f, true);
+                if (wraithTexModelIdx >= 0) {
+                    renderer->setModelScenePass(wraithTexModelIdx, false);
+                    renderer->setPlayerBodyTextures(wraithTexModelIdx);
+                } else {
+                    SDL_Log("[client] WARNING: wraith.glb texture-load failed — body renders untextured");
                 }
             }
 
@@ -4010,8 +4023,9 @@ SDL_AppResult Game::iterate()
         for (const auto& c : candidates) {
             if (!c.hasWeapon || !c.drawThisFrame || c.weaponModelIdx < 0)
                 continue;
-            candidateWeaponCmds.push_back(
-                EntityRenderCmd{.modelIndex = c.weaponModelIdx, .worldTransform = c.weaponWorld});
+            candidateWeaponCmds.push_back(EntityRenderCmd{.modelIndex = c.weaponModelIdx,
+                                                          .worldTransform = c.weaponWorld,
+                                                          .applyNormalTint = false});
             entitiesWithCandidateWeapon.insert(c.entity);
         }
 

@@ -61,6 +61,11 @@ public:
     /// @brief Diffuse texture + sampler bound for all meshes when textured.
     void setDiffuseTexture(SDL_GPUTexture* tex, SDL_GPUSampler* sampler);
 
+    /// @brief Per-mesh diffuse textures (parallel to the rig's mesh order), bound
+    /// individually in the draw loop. Used for multi-material characters (e.g.
+    /// Wraith's 6 body meshes). Entry may be null (that mesh falls back to white).
+    void setPerMeshDiffuse(std::vector<SDL_GPUTexture*> textures, SDL_GPUSampler* sampler);
+
     /// @brief Install the shared character rig.  Call ONCE after `init`.
     /// @param meshes     One source-mesh entry per skinned mesh in the rig (typically 1-3 for humanoid rigs).
     /// @param numJoints  Number of skeleton joints.  Determines per-instance palette stride in the shader.
@@ -197,8 +202,10 @@ private:
 
     // Textured mode (first-person weapon viewmodel) ──────────────────────────
     bool textured_ = false;
-    SDL_GPUTexture* diffuseTex_ = nullptr;   ///< Borrowed; bound when textured_.
+    SDL_GPUTexture* diffuseTex_ = nullptr;   ///< Borrowed; bound when textured_ (single-texture, e.g. viewmodel).
     SDL_GPUSampler* diffuseSampler_ = nullptr;
+    std::vector<SDL_GPUTexture*> perMeshDiffuse_; ///< Per-mesh diffuse (multi-material body); parallel to skinnedMeshes_.
+    SDL_GPUSampler* perMeshSampler_ = nullptr;    ///< Sampler for perMeshDiffuse_ binds.
 
     // ─── Owned: per-frame GPU resources (grow on demand) ─────────────────────
     // SDL_GPUBuffer* palettesSsbo_ = nullptr;  ///< STORAGE_READ, mat4[numInstances * numJoints].

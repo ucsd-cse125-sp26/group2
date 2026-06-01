@@ -445,9 +445,20 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
             "mixamorig:Neck",
             "mixamorig:Head",
         };
+        // Apex legend (Wraith) spine chain — same 5-segment structure, so the
+        // procedural aim-pitch distribution (look up/down → spine bend) maps 1:1.
+        static constexpr std::array<const char*, kSpineChainLength> k_spineBoneNamesApex = {
+            "def_c_spineA",
+            "def_c_spineB",
+            "def_c_spineC",
+            "def_c_neckA",
+            "def_c_head",
+        };
         int foundBones = 0;
         for (size_t i = 0; i < kSpineChainLength; ++i) {
-            const auto it = jm.find(k_spineBoneNames[i]);
+            auto it = jm.find(k_spineBoneNames[i]);
+            if (it == jm.end())
+                it = jm.find(k_spineBoneNamesApex[i]);
             if (it == jm.end())
                 continue;
             impl_->spineBend.bones[i] = it->second;
@@ -458,7 +469,10 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
         // Phase F hip-lean: a small counter-pitch applied to the hips (and
         // everything below — Hips is the root of the rig, so the mask is
         // mostly used for completeness/parity with the spine bend code path).
-        if (const auto hipsIt = jm.find("mixamorig:Hips"); hipsIt != jm.end()) {
+        auto hipsIt = jm.find("mixamorig:Hips");
+        if (hipsIt == jm.end())
+            hipsIt = jm.find("def_c_hip");
+        if (hipsIt != jm.end()) {
             impl_->hipsJointIdx = hipsIt->second;
             impl_->hipsDescendants = buildDescendantMask(rig.skeleton(), impl_->hipsJointIdx);
         }

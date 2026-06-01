@@ -345,6 +345,11 @@ public:
     /// animated weapon viewmodel (so the skinned gun renders textured).
     void setViewmodelTexture(int modelInstanceIndex);
 
+    /// @brief Load per-mesh diffuse textures for the third-person player body from
+    /// a model instance (whose GLB carries the embedded materials), and bind them
+    /// to the player skinned renderer. Call once after the player rig loads.
+    void setPlayerBodyTextures(int modelInstanceIndex);
+
     /// @brief First-person arms (hands) rig — a second skinned viewmodel rig
     /// driven by the same clips as the gun so the hands hold the weapon.
     bool setViewmodelArmsRig(const std::vector<RigMeshSource>& meshes, int numJoints);
@@ -408,7 +413,8 @@ private:
     void drawModel(ModelIdInt modelId,
                    const glm::mat4& modelTransform,
                    SDL_GPURenderPass* renderPass,
-                   SDL_GPUCommandBuffer* cmd);
+                   SDL_GPUCommandBuffer* cmd,
+                   bool applyNormalTint = true);
 
     void drawModelDepth(ModelIdInt modelId,
                         const glm::mat4& modelTransform,

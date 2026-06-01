@@ -147,7 +147,7 @@ bool NewRenderer::init(SDL_Window* window)
 
     camera_ = NewCamera();
 
-    skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
+    skinnedRenderer_.init(device_, colorTarget_, shaderFormat_, /*textured=*/true);
     viewmodelSkinned_.init(device_, colorTarget_, shaderFormat_, /*textured=*/true);
     viewmodelArmsSkinned_.init(device_, colorTarget_, shaderFormat_, /*textured=*/true);
 
@@ -655,7 +655,7 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommand
         if (depth) {
             drawModelDepth(modelId, entityCmd.worldTransform, renderPass, cmd);
         } else {
-            drawModel(modelId, entityCmd.worldTransform, renderPass, cmd);
+            drawModel(modelId, entityCmd.worldTransform, renderPass, cmd, entityCmd.applyNormalTint);
         }
     }
 }
@@ -663,7 +663,8 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommand
 void NewRenderer::drawModel(ModelIdInt modelId,
                             const glm::mat4& modelTransform,
                             SDL_GPURenderPass* renderPass,
-                            SDL_GPUCommandBuffer* cmd)
+                            SDL_GPUCommandBuffer* cmd,
+                            bool applyNormalTint)
 {
     Asset::Model& model = Asset::models_.at(modelId);
     for (auto& element : model.modelElements_) {
@@ -712,7 +713,7 @@ void NewRenderer::drawModel(ModelIdInt modelId,
             useTexture ? 1u : 0u,
             normalTexture != texture_ ? 1u : 0u,
             metallicRoughnessTexture != texture_ ? 1u : 0u,
-            1u, // _pad0 repurposed: apply normal-direction tint (world spatial-orientation aid)
+            applyNormalTint ? 1u : 0u, // _pad0: normal-direction tint (world orientation aid); off for held weapons
         };
         SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
         SDL_PushGPUFragmentUniformData(cmd, 1, &materialFlags, sizeof(materialFlags));
@@ -1158,6 +1159,38 @@ void NewRenderer::setViewmodelTexture(int modelInstanceIndex)
             return;
         }
     }
+}
+
+void NewRenderer::setPlayerBodyTextures(int modelInstanceIndex)
+{
+    // Build a per-mesh diffuse-texture list for the multi-material player body
+    // (e.g. Wraith's 6 meshes), parallel to the rig's mesh order, and hand it to
+    // the player skinned renderer. The model instance is loaded purely to register
+    // the GLB's embedded materials/textures (its mesh is hidden from the scene).
+    if (modelInstanceIndex < 0 || static_cast<size_t>(modelInstanceIndex) >= Asset::modelInstances_.size())
+        return;
+    const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
+    if (!Asset::models_.contains(modelId))
+        return;
+    Asset::Model& model = Asset::models_.at(modelId);
+    std::vector<SDL_GPUTexture*> perMesh;
+    perMesh.reserve(model.modelElements_.size());
+    int withTex = 0;
+    for (auto& element : model.modelElements_) {
+        SDL_GPUTexture* tex = nullptr;
+        if (Asset::materials_.contains(element.materialId_)) {
+            const Asset::Material& mat = Asset::materials_.at(element.materialId_);
+            if (Asset::textures_.contains(mat.diffuseTexture))
+                tex = Asset::textures_.at(mat.diffuseTexture).tex;
+        }
+        perMesh.push_back(tex);
+        if (tex)
+            ++withTex;
+    }
+    skinnedRenderer_.setPerMeshDiffuse(std::move(perMesh), sampler_);
+    SDL_Log("[renderer] player body textures: %d/%zu meshes have a diffuse texture",
+            withTex,
+            model.modelElements_.size());
 }
 
 bool NewRenderer::setViewmodelArmsRig(const std::vector<RigMeshSource>& meshes, int numJoints)

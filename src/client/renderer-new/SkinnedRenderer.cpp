@@ -201,6 +201,12 @@ void SkinnedRenderer::setDiffuseTexture(SDL_GPUTexture* tex, SDL_GPUSampler* sam
     diffuseSampler_ = sampler;
 }
 
+void SkinnedRenderer::setPerMeshDiffuse(std::vector<SDL_GPUTexture*> textures, SDL_GPUSampler* sampler)
+{
+    perMeshDiffuse_ = std::move(textures);
+    perMeshSampler_ = sampler;
+}
+
 bool SkinnedRenderer::ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes)
 {
     auto growBuf = [&](SDL_GPUBuffer*& buf, Uint32& cap, Uint32 want, SDL_GPUBufferUsageFlags use) {
@@ -302,18 +308,12 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
 
     SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
-    if (textured_ && diffuseTex_ && diffuseSampler_) {
-        // Bind diffuse to material slots 0,1,2 (geometry_shadowed.frag declares
-        // diffuse/normal/mr); normal+mr are disabled via MaterialFlags so the
-        // duplicate binds are harmless and slots are never left unbound.  The 2
-        // point-light shadow cubemaps (slots 3,4) and the light UBO (frag uniform
-        // slot 2) persist from NewRenderer::bindLightShadowInfo this pass.
-        SDL_GPUTextureSamplerBinding b{};
-        b.texture = diffuseTex_;
-        b.sampler = diffuseSampler_;
-        SDL_GPUTextureSamplerBinding binds[3] = {b, b, b};
-        SDL_BindGPUFragmentSamplers(renderPass, 0, binds, 3);
-
+    if (textured_) {
+        // Material uniforms are identical for every mesh (diffuse-only sampling,
+        // no normal tint — pad=0), so push once. Diffuse is bound to slots 0,1,2
+        // (geometry_shadowed.frag declares diffuse/normal/mr; normal+mr disabled
+        // via MaterialFlags so the duplicate binds are harmless). Point-light
+        // shadow cubemaps (slots 3,4) + light UBO persist from this pass.
         glm::vec4 materialDiffuse(1.0f, 1.0f, 1.0f, 1.0f);
         SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
         struct MaterialFlags
@@ -321,10 +321,33 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
             Uint32 useTexture, useNormalTexture, useMetallicRoughnessTexture, pad;
         } flags{1u, 0u, 0u, 0u};
         SDL_PushGPUFragmentUniformData(cmd, 1, &flags, sizeof(flags));
+
+        // Single shared diffuse (e.g. first-person viewmodel) bound once here.
+        // Multi-material bodies set perMeshDiffuse_ and bind per-mesh in the loop.
+        if (perMeshDiffuse_.empty() && diffuseTex_ && diffuseSampler_) {
+            SDL_GPUTextureSamplerBinding b{};
+            b.texture = diffuseTex_;
+            b.sampler = diffuseSampler_;
+            SDL_GPUTextureSamplerBinding binds[3] = {b, b, b};
+            SDL_BindGPUFragmentSamplers(renderPass, 0, binds, 3);
+        }
     }
-    for (auto sm : skinnedMeshes_) {
+    for (size_t mi = 0; mi < skinnedMeshes_.size(); ++mi) {
+        const SkinnedMesh& sm = skinnedMeshes_[mi];
         if (!sm.vb || !sm.boneVb || !sm.ib) {
             continue;
+        }
+        // Per-mesh diffuse (multi-material body, e.g. Wraith): bind this mesh's
+        // texture right before its draw. Parallel to skinnedMeshes_ order.
+        if (textured_ && !perMeshDiffuse_.empty() && perMeshSampler_) {
+            SDL_GPUTexture* t = (mi < perMeshDiffuse_.size()) ? perMeshDiffuse_[mi] : nullptr;
+            if (t) {
+                SDL_GPUTextureSamplerBinding b{};
+                b.texture = t;
+                b.sampler = perMeshSampler_;
+                SDL_GPUTextureSamplerBinding binds[3] = {b, b, b};
+                SDL_BindGPUFragmentSamplers(renderPass, 0, binds, 3);
+            }
         }
         std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
 

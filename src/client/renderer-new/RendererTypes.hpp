@@ -59,6 +59,8 @@ struct EntityRenderCmd
     int32_t modelIndex = -1;        ///< Renderer-side model handle (returned by `loadSceneModel` / `uploadSceneModel`).
     glm::mat4 worldTransform{1.0f}; ///< Full world transform (position × rotation × scale).
     glm::vec4 tint{1.0f};           ///< RGB multiplier into baseColorFactor (alpha unused).  Default = no tint.
+    bool applyNormalTint = true;    ///< Normal-direction orientation tint (world default). False for held weapons so
+                                    ///< the gun renders lit/textured to match the (untinted) character it's held by.
 };
 
 /// @brief Dynamic point light — built by Game, injected into the PBR light array.

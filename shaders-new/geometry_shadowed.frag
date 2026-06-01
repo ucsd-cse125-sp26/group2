@@ -87,19 +87,25 @@ void main()
 //    vec4 irradiance = light_color * cosT + ambient_color;
     vec3 irradiance = ambient_color;
 
+    // Normal-offset the shadow SAMPLE position (not the lighting position) to
+    // avoid self-shadow acne — pronounced on the animated character, which both
+    // casts into and samples the dynamic cubemap. Lighting still uses frag_worldPos.
+    vec3 shadowWorldPos = frag_worldPos + normal * SHADOW_BIAS;
+
     for (int i = 0; i < lightInfo.numPointLights; i++ ){
         PointLight pLight_i = lightInfo.pointLights[i];
 
         vec3 lightToWorldPos = frag_worldPos - pLight_i.pos;
         float r = length(lightToWorldPos);
 
-        vec3 absDir = abs(lightToWorldPos);
+        vec3 lightToShadowPos = shadowWorldPos - pLight_i.pos;
+        vec3 absDir = abs(lightToShadowPos);
         float dominantAxis = max(absDir.x, max(absDir.y, absDir.z));
         float depth = depthA - depthB / dominantAxis;
 
 
-        float staticShadow_i = texture(staticPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
-        float dynamicShadow_i = texture(dynamicPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
+        float staticShadow_i = texture(staticPointLightShadowMaps, vec4(lightToShadowPos, float(i)), depth);
+        float dynamicShadow_i = texture(dynamicPointLightShadowMaps, vec4(lightToShadowPos, float(i)), depth);
 
         float shadow_i = dynamicShadow_i * staticShadow_i;
 
