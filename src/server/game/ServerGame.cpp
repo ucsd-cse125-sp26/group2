@@ -30,7 +30,7 @@
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerName.hpp"
 #include "ecs/components/PlayerNicknames.hpp"
-#include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
+#include "ecs/components/PlayerSimState.hpp"
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/PowerupState.hpp"
