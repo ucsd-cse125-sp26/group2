@@ -112,7 +112,7 @@ void main()
 
     }
 
-//    albedo.rgb *= (normal * 0.5f) + 0.5f;
+    albedo.rgb *= (normal * 0.5f) + 0.5f;
     vec3 diffuse = albedo.rgb * (1.0 - metallic) * irradiance;
     vec3 metal = albedo.rgb * metallic * irradiance * (1.0 - 0.5 * roughness);
     color = vec4(diffuse + metal, albedo.a);
