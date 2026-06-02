@@ -352,8 +352,10 @@ private:
     glm::vec3 killcamEye_{0.0f};           ///< Eye position locked at the moment of death.
     float killcamYaw_{0.0f};               ///< Smoothed killcam yaw (radians).
     float killcamPitch_{0.0f};             ///< Smoothed killcam pitch (radians).
-    glm::vec3 killcamKillerCenter_{0.0f};  ///< Killer AABB center (world) for the HUD box.
-    glm::vec3 killcamKillerHalf_{0.0f};    ///< Killer AABB half-extents (world) for the HUD box.
+    glm::vec3 killcamKillerCenter_{0.0f};  ///< Killer AABB center (world) for the HUD label.
+    glm::vec3 killcamKillerHalf_{0.0f};    ///< Killer AABB half-extents (world) for the HUD label.
+    entt::entity killcamKillerEntity_{entt::null}; ///< Killer entity (drives the chams pass), or null.
+    std::string killcamKillerName_;        ///< Killer's display nickname (for the HUD label).
 
     // Map collision data — loaded from GLB, owns the vectors that back activeWorld().
     physics::MapCollisionData mapCollision_;

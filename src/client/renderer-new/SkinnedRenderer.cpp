@@ -24,6 +24,8 @@ void SkinnedRenderer::init(SDL_GPUDevice* device,
                            const SDL_GPUShaderFormat& shaderFormat)
 {
     device_ = device;
+    colorFormat_ = colorTarget;
+    shaderFormat_ = shaderFormat;
     // No GPU allocations here — buffers and pipeline are created on demand
     // (setRig allocates the rig mesh buffers; setFrame triggers SSBO growth).
     //
@@ -32,6 +34,7 @@ void SkinnedRenderer::init(SDL_GPUDevice* device,
     // `draw()` would actually issue draws.
     createSkinningPipeline(colorTarget, shaderFormat);
     createSkinnedDepthPipeline(shaderFormat);
+    createChamsPipeline();
 }
 
 void SkinnedRenderer::shutdown()
@@ -61,6 +64,8 @@ void SkinnedRenderer::shutdown()
         SDL_ReleaseGPUGraphicsPipeline(device_, pipeline_);
     if (depthPipeline_)
         SDL_ReleaseGPUGraphicsPipeline(device_, depthPipeline_);
+    if (chamsPipeline_)
+        SDL_ReleaseGPUGraphicsPipeline(device_, chamsPipeline_);
 
     palettesSsboInfo_.ssbo_ = nullptr;
     instancesSsboInfo_.ssbo_ = nullptr;
@@ -68,6 +73,7 @@ void SkinnedRenderer::shutdown()
     instanceXfer_ = nullptr;
     pipeline_ = nullptr;
     depthPipeline_ = nullptr;
+    chamsPipeline_ = nullptr;
     palettesSsboInfo_.capacityBytes_ = 0;
     instancesSsboInfo_.capacityBytes_ = 0;
     paletteXferCapacityBytes_ = 0;
@@ -239,6 +245,18 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
     framePalette_.clear();
     frameInstances_.clear();
     visibleInstanceCount_ = 0;
+    chamsInstanceIndex_ = -1;
+
+    // Record the index of the killcam-flagged instance (materialId == 1) so the
+    // chams pass can draw just that one. Scans only the colour-visible slice.
+    const auto recordChams = [&]() {
+        for (Uint32 i = 0; i < visibleInstanceCount_ && i < frameInstances_.size(); ++i) {
+            if (frameInstances_[i].materialId == 1) {
+                chamsInstanceIndex_ = static_cast<int>(i);
+                break;
+            }
+        }
+    };
 
     // Without an installed rig / a valid bounding sphere we have nothing to
     // size the cull with — submit everything untouched and treat it as visible.
@@ -247,6 +265,7 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
         frameInstances_ = instances;
         visibleInstanceCount_ = static_cast<Uint32>(instances.size());
         frameDirty_ = !instances.empty();
+        recordChams();
         return;
     }
 
@@ -296,6 +315,7 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
     }
 
     frameDirty_ = !frameInstances_.empty();
+    recordChams();
 }
 
 bool SkinnedRenderer::ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes)
@@ -458,6 +478,39 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
     //   gl_Position   = viewProjection * worldPos;
 }
 
+void SkinnedRenderer::drawChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* /*cmd*/)
+{
+    if (!rigInstalled_ || !chamsPipeline_ || chamsInstanceIndex_ < 0 || !palettesSsboInfo_.ssbo_ ||
+        !instancesSsboInfo_.ssbo_)
+    {
+        return;
+    }
+    if (static_cast<size_t>(chamsInstanceIndex_) >= frameInstances_.size())
+        return;
+
+    SDL_BindGPUGraphicsPipeline(renderPass, chamsPipeline_);
+
+    // Same view-projection UBO the geometry pass already pushed at vertex slot 0.
+    SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
+    SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
+    for (auto sm : skinnedMeshes_) {
+        if (!sm.vb || !sm.boneVb || !sm.ib)
+            continue;
+        SDL_GPUBufferBinding vertexBufferBindings[2] = {
+            {.buffer = sm.vb, .offset = 0},
+            {.buffer = sm.boneVb, .offset = 0},
+        };
+        SDL_BindGPUVertexBuffers(renderPass, 0, vertexBufferBindings, 2);
+
+        SDL_GPUBufferBinding indexBufferBinding{.buffer = sm.ib, .offset = 0};
+        SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+        // Draw just the flagged killer instance (gl_InstanceIndex = first_instance).
+        SDL_DrawGPUIndexedPrimitives(
+            renderPass, sm.indexCount, 1, 0, 0, static_cast<Uint32>(chamsInstanceIndex_));
+    }
+}
+
 void SkinnedRenderer::drawDepth(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* /*cmd*/)
 {
     if (!rigInstalled_ || !depthPipeline_ || frameInstances_.empty() || !palettesSsboInfo_.ssbo_ ||
@@ -594,4 +647,86 @@ bool SkinnedRenderer::createSkinnedDepthPipeline(const SDL_GPUShaderFormat& shad
     depthPipeline_ = Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
 
     return depthPipeline_ != nullptr;
+}
+
+bool SkinnedRenderer::createChamsPipeline()
+{
+    // Same skinned vertex shader as the colour pass (reads palette + instances),
+    // but a flat-red fragment shader and an inverted depth test so only the
+    // wall-occluded fragments are drawn. Built by hand (not via Boilerplate)
+    // because we need a GREATER compare op, depth-write OFF, and NO depth bias.
+    Boilerplate::ShaderInfo vertexShaderInfo{};
+    vertexShaderInfo.path = "shaders-new/skinned_geometry.vert";
+    vertexShaderInfo.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+    vertexShaderInfo.uniformBufferCount = 1;
+    vertexShaderInfo.storageBufferCount = 2;
+
+    Boilerplate::ShaderInfo fragmentShaderInfo{};
+    fragmentShaderInfo.path = "shaders-new/chams.frag";
+    fragmentShaderInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+
+    SDL_GPUShader* vertexShader = Boilerplate::loadShader(device_, vertexShaderInfo, shaderFormat_);
+    SDL_GPUShader* fragmentShader = Boilerplate::loadShader(device_, fragmentShaderInfo, shaderFormat_);
+    if (!vertexShader || !fragmentShader) {
+        if (vertexShader)
+            SDL_ReleaseGPUShader(device_, vertexShader);
+        if (fragmentShader)
+            SDL_ReleaseGPUShader(device_, fragmentShader);
+        return false;
+    }
+
+    SDL_GPUVertexBufferDescription vertexBufferDescription{};
+    vertexBufferDescription.slot = 0;
+    vertexBufferDescription.pitch = sizeof(ModelVertex);
+    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+    SDL_GPUVertexBufferDescription boneBufferDescription{};
+    boneBufferDescription.slot = 1;
+    boneBufferDescription.pitch = sizeof(BoneInfluence);
+    boneBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+    std::vector<SDL_GPUVertexBufferDescription> bufferDescriptions = {vertexBufferDescription, boneBufferDescription};
+    std::vector<SDL_GPUVertexAttribute> attributes = {
+        Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, position), 0),
+        Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, normal), 0),
+        Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(ModelVertex, texCoord), 0),
+        Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(ModelVertex, tangent), 0),
+        Boilerplate::makeAttribute(4, SDL_GPU_VERTEXELEMENTFORMAT_INT4, offsetof(BoneInfluence, boneIndices), 1),
+        Boilerplate::makeAttribute(5, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(BoneInfluence, boneWeights), 1),
+    };
+
+    SDL_GPUVertexInputState vertexInputState{};
+    vertexInputState.num_vertex_buffers = static_cast<Uint32>(bufferDescriptions.size());
+    vertexInputState.vertex_buffer_descriptions = bufferDescriptions.data();
+    vertexInputState.num_vertex_attributes = static_cast<Uint32>(attributes.size());
+    vertexInputState.vertex_attributes = attributes.data();
+
+    SDL_GPUColorTargetDescription colorTargetDesc{};
+    colorTargetDesc.format = colorFormat_;
+    colorTargetDesc.blend_state = Boilerplate::OVER_BLEND_MODE;
+
+    SDL_GPUGraphicsPipelineCreateInfo info{};
+    info.vertex_shader = vertexShader;
+    info.fragment_shader = fragmentShader;
+    info.vertex_input_state = vertexInputState;
+    info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    info.target_info.color_target_descriptions = &colorTargetDesc;
+    info.target_info.num_color_targets = 1;
+    info.target_info.has_depth_stencil_target = true;
+    info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    // GREATER: keep only fragments BEHIND the stored (world) depth → occluded.
+    info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER;
+    info.depth_stencil_state.enable_depth_test = true;
+    info.depth_stencil_state.enable_depth_write = false;
+    info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+    chamsPipeline_ = SDL_CreateGPUGraphicsPipeline(device_, &info);
+
+    SDL_ReleaseGPUShader(device_, vertexShader);
+    SDL_ReleaseGPUShader(device_, fragmentShader);
+
+    if (!chamsPipeline_)
+        std::cerr << "SkinnedRenderer: failed to create chams pipeline\n";
+    return chamsPipeline_ != nullptr;
 }

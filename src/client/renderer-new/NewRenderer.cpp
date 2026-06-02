@@ -661,6 +661,12 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
 
 void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
+    // Killcam chams pass runs BEFORE the normal skinned draw, so the depth
+    // buffer holds only the world + static entities (not the characters). The
+    // chams pipeline uses a GREATER depth test, so the killer is drawn flat-red
+    // only where it sits BEHIND world geometry (i.e. occluded by walls); its
+    // visible parts fail the test here and render normally in the pass below.
+    skinnedRenderer_.drawChams(renderPass, cmd);
     skinnedRenderer_.draw(renderPass, cmd);
 }
 

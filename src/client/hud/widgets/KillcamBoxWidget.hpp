@@ -1,5 +1,5 @@
 /// @file KillcamBoxWidget.hpp
-/// @brief Red bounding box framing the killer on the killcam death screen.
+/// @brief Floating killer nickname on the killcam death screen.
 
 #pragma once
 
@@ -8,17 +8,14 @@
 #include <glm/glm.hpp>
 
 /// @brief While the local player is dead and the killcam is tracking the
-/// killer, projects the killer's world AABB to screen space and draws a red
-/// target box (outline + corner brackets + label) around them.
+/// killer, floats the killer's nickname above them in red. (The wallhack
+/// silhouette itself is drawn by the 3D renderer's chams pass.)
 struct KillcamBoxWidget : HudWidget
 {
     KillcamBoxWidget();
 
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
     void draw(HudContext& ctx, float drawX, float drawY) override;
-
-    float lineThickness = 2.5f; ///< Box outline thickness (logical px at 1080p).
-    float minBoxPx = 24.f;      ///< Minimum on-screen box size so distant killers stay visible.
 
 private:
     HudKillerBox box_{};

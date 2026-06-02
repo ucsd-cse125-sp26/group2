@@ -137,6 +137,13 @@ public:
     /// UBO slot 0 (NewRenderer::drawGeometryDepthPass does this).
     void drawDepth(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
 
+    /// @brief Draw the killcam "chams" silhouette: the flagged killer instance
+    /// (materialId == 1) rendered flat-red with a GREATER depth test, so only
+    /// the parts occluded by world geometry show through. No-op when no
+    /// instance this frame is flagged. Must be called BEFORE `draw()` so the
+    /// depth buffer still holds world-only geometry.
+    void drawChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+
     /// @brief Release all GPU resources owned by this subsystem.
     /// Called from `NewRenderer::quit` (BEFORE the device is destroyed).
     void shutdown();
@@ -189,6 +196,11 @@ private:
 
     bool createSkinnedDepthPipeline(const SDL_GPUShaderFormat& shaderFormat);
 
+    /// @brief Create the killcam chams pipeline: same skinned vertex shader,
+    /// a flat-red fragment shader, GREATER depth compare, depth-write off,
+    /// alpha-blended onto the HDR color target.
+    bool createChamsPipeline();
+
     // ─── Borrowed ────────────────────────────────────────────────────────────
     SDL_GPUDevice* device_ = nullptr;
 
@@ -202,6 +214,18 @@ private:
     /// @brief Depth-only variant of the skinned pipeline, used to rasterise
     /// the rig into the shadow map so the player casts a shadow.
     SDL_GPUGraphicsPipeline* depthPipeline_ = nullptr;
+
+    /// @brief Killcam "chams" pipeline: flat-red, GREATER depth test, no depth
+    /// write — draws the flagged killer where it's occluded by world geometry.
+    SDL_GPUGraphicsPipeline* chamsPipeline_ = nullptr;
+
+    /// @brief Cached formats (from init) needed to build the chams pipeline.
+    SDL_GPUTextureFormat colorFormat_{};
+    SDL_GPUShaderFormat shaderFormat_{};
+
+    /// @brief Index into `frameInstances_` of the chams-flagged killer this
+    /// frame (materialId == 1), or -1 if none.
+    int chamsInstanceIndex_ = -1;
 
     // ─── Owned: rig (set once via setRig) ────────────────────────────────────
     bool rigInstalled_ = false;

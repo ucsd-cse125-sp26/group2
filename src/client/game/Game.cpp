@@ -2900,12 +2900,17 @@ SDL_AppResult Game::iterate()
 
                         killcamKillerCenter_ = killerPos;
                         killcamKillerHalf_ = killerHalf;
+                        killcamKillerEntity_ = killer;
+                        char nameBuf[32];
+                        killcamKillerName_ = lookupPlayerName(registry, deathInfo.killerId, nameBuf, sizeof(nameBuf));
                         killcamActive = true;
                     }
                 }
             }
         }
         killcamActive_ = killcamActive;
+        if (!killcamActive)
+            killcamKillerEntity_ = entt::null;
     }
 
     phaseSnap(phaseStats.cameraResolveMs);
@@ -4017,6 +4022,8 @@ SDL_AppResult Game::iterate()
                 instance.worldTransform = c.worldTransform;
                 instance.paletteBase = static_cast<uint32_t>(bonePalette.size());
                 instance.tint = c.tint;
+                // Flag the killer so the renderer draws its wallhack chams pass.
+                instance.materialId = (killcamActive_ && c.entity == killcamKillerEntity_) ? 1u : 0u;
 
                 bonePalette.insert(bonePalette.end(), skinMatrices.begin(), skinMatrices.end());
                 skinnedInstances.push_back(instance);
@@ -6218,6 +6225,7 @@ SDL_AppResult Game::iterate()
         hudState.killerBox.valid = killcamActive_;
         hudState.killerBox.center = killcamKillerCenter_;
         hudState.killerBox.halfExtents = killcamKillerHalf_;
+        hudState.killerBox.name = killcamKillerName_;
 
         // ── Floating damage numbers ──
         thread_local std::vector<HudDamageNumber> hudDamageNumbers;
