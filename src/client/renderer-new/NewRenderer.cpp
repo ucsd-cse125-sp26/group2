@@ -110,6 +110,11 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
+    if (!createDepthRes2Pipeline()) {
+        SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
+        return false;
+    }
+
     if (!createFxaaPipeline()) {
         SDL_Log("NewRenderer: failed to create FXAA pipeline: %s", SDL_GetError());
         return false;
@@ -370,6 +375,20 @@ bool NewRenderer::createDepthRes1Pipeline()
     return depthRes1Pipeline_ != nullptr;
 }
 
+bool NewRenderer::createDepthRes2Pipeline()
+{
+    SDL_GPURasterizerState rasterizer_state;
+    rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    rasterizer_state.enable_depth_bias = true;
+    rasterizer_state.depth_bias_constant_factor = 100.0f;
+    rasterizer_state.depth_bias_slope_factor = 1.0f;
+    rasterizer_state.depth_bias_clamp = 0.03f;
+
+    depthRes2Pipeline_ = createDepthPipeline(rasterizer_state);
+    return depthRes2Pipeline_ != nullptr;
+}
+
 void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
 {
     Asset::Mesh& mesh = Asset::meshes_.at(meshId);
@@ -439,9 +458,9 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         firstFrame_ = false;
     }
 
-    setSampleStaticPointLights();
-    drawToShadowMap(cmd, dynamicShadowMaps_,1, false, true, true,STATIC);
-    drawToShadowMap(cmd, movingLightShadowMaps_,1, true, true, true,MOVING);
+    // setSampleStaticPointLights();
+    drawToShadowMap(cmd, dynamicShadowMaps_,2, false, true, true,STATIC);
+    drawToShadowMap(cmd, movingLightShadowMaps_,2, true, true, true,MOVING);
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
@@ -497,6 +516,7 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
     switch (res) {
         case 0: depthPipeline = depthRes0Pipeline_; break;
         case 1: depthPipeline = depthRes1Pipeline_; break;
+        case 2: depthPipeline = depthRes2Pipeline_; break;
         default: return;
     }
 
@@ -572,7 +592,7 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
 
 void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
 {
-    drawToShadowMap(cmd, staticShadowMaps_,0, true, false, false,STATIC);
+    drawToShadowMap(cmd, staticShadowMaps_,2, true, false, false,STATIC);
 }
 
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)

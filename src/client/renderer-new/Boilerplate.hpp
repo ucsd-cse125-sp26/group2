@@ -11,7 +11,7 @@
 #include <vector>
 
 #define MAX_POINT_LIGHTS 6
-#define MAX_MOVING_POINT_LIGHTS 128
+#define MAX_MOVING_POINT_LIGHTS 64
 #define MAX_SHADOW_COUNT MAX_POINT_LIGHTS
 
 namespace Boilerplate

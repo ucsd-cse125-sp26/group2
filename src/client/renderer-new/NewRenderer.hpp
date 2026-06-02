@@ -369,6 +369,7 @@ private:
     SDL_GPUGraphicsPipeline* createDepthPipeline(const SDL_GPURasterizerState& rasterizer_state) const;
     bool createDepthRes0Pipeline();
     bool createDepthRes1Pipeline();
+    bool createDepthRes2Pipeline();
     bool createHudPipeline();
     bool createFxaaPipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
@@ -437,6 +438,7 @@ private:
     SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* depthRes0Pipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* depthRes1Pipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* depthRes2Pipeline_ = nullptr;
 
     SDL_GPUTextureFormat colorTarget_ = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUTexture* sceneColor_ = nullptr;
@@ -456,8 +458,8 @@ private:
 
     // constexpr uint32_t shadowSize = 2048;
     //  constexpr uint32_t shadowSize = 512;
-    static const uint32_t shadowSize = 1024;
-    static const uint32_t staticShadowSize = 4096;
+    static const uint32_t shadowSize = 512;
+    static const uint32_t staticShadowSize = 512;
     SDL_GPUTexture* dynamicShadowMaps_ = nullptr;
     SDL_GPUTexture* staticShadowMaps_ = nullptr;
     SDL_GPUSampler* staticDepthSampler_ = nullptr;
