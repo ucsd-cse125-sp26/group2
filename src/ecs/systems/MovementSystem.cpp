@@ -3,6 +3,8 @@
 
 #include "ecs/systems/MovementSystem.hpp"
 
+#include "ecs/abilities/AbilityTuning.hpp"
+#include "ecs/components/AbilityState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState + PlayerStateRef
@@ -2249,6 +2251,38 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                     // to skip all remaining movement this tick.
                     grapplePulling = state.vis.grappleActive;
                 }
+            }
+
+            // 5c. Levitate (tier-1 updraft). Toggle on a key press; toggle off on
+            //     a second press, when the timer expires, or if grappling takes
+            //     over. While active, ease vertical velocity toward a strong rise
+            //     speed. Self-contained here (no Ability subclass) so it predicts
+            //     cleanly on the client; only key *presses* (rising edges) matter,
+            //     so holding/releasing the key does nothing on its own.
+            if (auto* abil = registry.try_get<AbilityState>(e); abil != nullptr && abil->primary == AbilityType::Levitate)
+            {
+                const bool held = input.ability1;
+                const bool pressed = held && !state.sim.levitatePrevHeld;
+
+                if (state.sim.levitateActive) {
+                    const bool expired = state.sim.levitateTimer >= abilities::k_levitateMaxDuration;
+                    if (pressed || expired || grapplePulling) {
+                        // Second press / timeout / grapple → stop and start cooldown.
+                        state.sim.levitateActive = false;
+                        abil->primaryCooldown = abilities::cooldownFor(AbilityType::Levitate);
+                    } else {
+                        const float gravDirL = state.vis.gravityFlipped ? -1.0f : 1.0f;
+                        const float target = abilities::k_levitateRiseSpeed * gravDirL;
+                        vel.value.y += (target - vel.value.y) * std::min(1.0f, abilities::k_levitateResponse * dt);
+                        state.sim.levitateTimer += dt;
+                        state.vis.grounded = false;
+                    }
+                } else if (pressed && abil->primaryCooldown <= 0.0f) {
+                    // First press → activate.
+                    state.sim.levitateActive = true;
+                    state.sim.levitateTimer = 0.0f;
+                }
+                state.sim.levitatePrevHeld = held;
             }
 
             // 6. Jump handling is now step 4b (before mode-specific movement).

@@ -3905,6 +3905,12 @@ SDL_AppResult Game::iterate()
             skinnedInstances.reserve(drawSlot);
         }
 
+        // Wallhack (tier-2): while the local player's reveal window is active,
+        // every other player is drawn with the red chams pass (see-through-walls).
+        bool localWallhackActive = false;
+        registry.view<LocalPlayer, AbilityState>().each(
+            [&](const AbilityState& abil) { localWallhackActive = abil.wallhackTimer > 0.0f; });
+
         // Phase F task 14: applyHandIkTargets + weapon-world derivation moved
         // into the worker pool above. This pass is now purely sequential
         // registry writeback — copying joint matrices to JointMatrices, pushing
@@ -4022,8 +4028,11 @@ SDL_AppResult Game::iterate()
                 instance.worldTransform = c.worldTransform;
                 instance.paletteBase = static_cast<uint32_t>(bonePalette.size());
                 instance.tint = c.tint;
-                // Flag the killer so the renderer draws its wallhack chams pass.
-                instance.materialId = (killcamActive_ && c.entity == killcamKillerEntity_) ? 1u : 0u;
+                // Flag for the red chams pass: the killcam killer, or — while the
+                // local player's wallhack is active — every other player.
+                const bool chamsKiller = killcamActive_ && c.entity == killcamKillerEntity_;
+                const bool chamsWallhack = localWallhackActive && !c.isLocal;
+                instance.materialId = (chamsKiller || chamsWallhack) ? 1u : 0u;
 
                 bonePalette.insert(bonePalette.end(), skinMatrices.begin(), skinMatrices.end());
                 skinnedInstances.push_back(instance);

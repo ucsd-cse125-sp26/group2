@@ -10,6 +10,7 @@
 #include "ecs/abilities/GrappleAbility.hpp"
 #include "ecs/abilities/GravityAbility.hpp"
 #include "ecs/abilities/RecallAbility.hpp"
+#include "ecs/abilities/WallhackAbility.hpp"
 #include "ecs/components/AbilityState.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/BeamState.hpp"
@@ -158,6 +159,7 @@ bool ServerGame::init(Server& serverRef, int hz, int snapshotHz, bool skipLobby)
     abilityRegistry.registerAbility(std::make_unique<GrappleAbility>());
     abilityRegistry.registerAbility(std::make_unique<GravityAbility>());
     abilityRegistry.registerAbility(std::make_unique<RecallAbility>());
+    abilityRegistry.registerAbility(std::make_unique<WallhackAbility>());
 
     // ── Load map collision ──────────────────────────────────────────────
     // Map filename and load-mode toggles live in ecs/MapConfig.hpp so the
