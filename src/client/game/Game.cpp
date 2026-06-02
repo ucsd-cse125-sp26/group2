@@ -2464,10 +2464,17 @@ SDL_AppResult Game::iterate()
                 snap.yaw = vis.spawnViewYaw;
                 snap.pitch = 0.0f;
             }
+            if (vis.isDead)
+                localEmote_ = -1; // No emoting while dead.
             localWasDead_ = vis.isDead;
         });
 
     if (mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
+
+        // Emote wheel must run before the look samplers so it can divert pointer
+        // motion into sector selection while open (and suppress camera turn).
+        systems::runEmoteWheelKey(userSettings->inputBindings);
+        systems::runGamepadEmoteWheel(activeGamepad_, userSettings->inputBindings, userSettings->gamepadSwapSticks);
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
         if (!inputSyncedWithPhysics)
@@ -2534,6 +2541,13 @@ SDL_AppResult Game::iterate()
             });
             pendingScrollSwitch_ = 0;
         }
+    } else {
+        // Gameplay input is suppressed (paused / chat / menu) — make sure the
+        // emote wheel doesn't get stuck open with no way to release it.
+        systems::emoteWheelOpen = false;
+        systems::emoteWheelSelection = -1;
+        systems::prevEmoteKey = false;
+        systems::prevGamepadEmoteKey = false;
     }
 
     // Network stats: send periodic pings and update bandwidth counters
@@ -2554,6 +2568,7 @@ SDL_AppResult Game::iterate()
     bool throwGrenadeThisFrame = false;
     bool grenadeCycleNextThisFrame = false;
     bool grenadeCyclePrevThisFrame = false;
+    int emoteRequestThisFrame = -1;
 
     if (accumulator >= k_physicsDt) {
         grantAbilityLevelThisFrame = debugUI.pendingAbilityLevelGrant_;
@@ -2561,6 +2576,11 @@ SDL_AppResult Game::iterate()
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
         grenadeCycleNextThisFrame = systems::consumePendingGrenadeCycleNext();
         grenadeCyclePrevThisFrame = systems::consumePendingGrenadeCyclePrev();
+        emoteRequestThisFrame = systems::consumePendingEmote();
+        // Predict the emote locally for instant third-person feedback; the
+        // server confirms it for everyone else via PlayerVisState/AnimSnapshot.
+        if (emoteRequestThisFrame >= 0)
+            localEmote_ = emoteRequestThisFrame;
 
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
@@ -2666,16 +2686,25 @@ SDL_AppResult Game::iterate()
         // ticks are pulled from `Client::inputRing_` (which the
         // sendInputSnapshot path appends to internally).
         registry.view<LocalPlayer, InputSnapshot>().each(
-            [throwGrenadeThisFrame, grenadeCycleNextThisFrame, grenadeCyclePrevThisFrame](InputSnapshot& snap) {
+            [this, throwGrenadeThisFrame, grenadeCycleNextThisFrame, grenadeCyclePrevThisFrame, emoteRequestThisFrame](
+                InputSnapshot& snap) {
                 snap.throwGrenade = throwGrenadeThisFrame;
                 snap.grenadeCycleNext = grenadeCycleNextThisFrame;
                 snap.grenadeCyclePrev = grenadeCyclePrevThisFrame;
+                snap.emoteRequest = static_cast<std::int8_t>(emoteRequestThisFrame);
+                // Local prediction: cancel the emote the moment the player moves
+                // or fights, matching the server's break condition.
+                if (snap.forward || snap.back || snap.left || snap.right || snap.jump || snap.crouch ||
+                    snap.shooting || snap.scoped || snap.reload || snap.throwGrenade || snap.ability1 ||
+                    snap.ability2)
+                    localEmote_ = -1;
             });
         systems::runInputSend(registry, *client);
         registry.view<LocalPlayer, InputSnapshot>().each([](InputSnapshot& snap) {
             snap.throwGrenade = false;
             snap.grenadeCycleNext = false;
             snap.grenadeCyclePrev = false;
+            snap.emoteRequest = -1;
         });
 
         phaseSnap(phaseStats.physicsMs);
@@ -2793,6 +2822,26 @@ SDL_AppResult Game::iterate()
                 targetRoll = pstate.targetCameraTilt + (pstate.gravityFlipped ? 180.0f : 0.0f);
             });
     }
+
+    // Emote third-person camera: while the local player emotes, ease the camera
+    // back and up behind them so they (and everyone watching) see the full-body
+    // emote. The blend makes the swing-out / swing-back smooth.
+    {
+        const float target = (localEmote_ >= 0) ? 1.0f : 0.0f;
+        const float rate = 6.0f; // ~0.17 s to fully swing.
+        emoteCamBlend_ += (target - emoteCamBlend_) * std::min(1.0f, rate * frameTime);
+        if (emoteCamBlend_ < 0.001f)
+            emoteCamBlend_ = 0.0f;
+        if (emoteCamBlend_ > 0.001f) {
+            const float cosPitch = std::cos(renderPitch);
+            const glm::vec3 forward{
+                std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
+            constexpr float k_emoteCamDistance = 260.0f; // units behind the eye.
+            constexpr float k_emoteCamHeight = 70.0f;     // units above the eye.
+            renderEye += emoteCamBlend_ * (-forward * k_emoteCamDistance + glm::vec3{0.0f, k_emoteCamHeight, 0.0f});
+        }
+    }
+
     phaseSnap(phaseStats.cameraResolveMs);
     phaseStats.cameraMs = phaseStats.cameraResolveMs;
 
@@ -3497,6 +3546,12 @@ SDL_AppResult Game::iterate()
                 c.ai.crouching = ps.crouching;
                 c.ai.moveMode = static_cast<int>(ps.moveMode);
                 c.ai.wallRunSide = static_cast<int>(ps.wallRunSide);
+                // Local player's emote is predicted client-side for instant
+                // feedback; remote players render their emote straight from the
+                // server's AnimSnapshot (renderFromServer), so only drive the
+                // override clip here for the local player.
+                if (isLocal && localEmote_ >= 0)
+                    c.ai.emoteClip = static_cast<int>(emoteClipForIndex(localEmote_));
                 // Phase F per-weapon-class procedural multipliers. Pulled from
                 // the equipped weapon's tuning row when one exists; otherwise
                 // we fall through with the default values (full spine bend,
@@ -3522,7 +3577,10 @@ SDL_AppResult Game::iterate()
                 }
 
                 // Skip drawing the local player's own body in first-person.
-                const bool drawBody = !(!animUI_.showLocalBody && isLocal);
+                // Also draw the local body while the emote camera has swung out,
+                // so the player can watch their own emote in third person.
+                const bool emoteShowsLocalBody = isLocal && emoteCamBlend_ > 0.01f;
+                const bool drawBody = !(!animUI_.showLocalBody && isLocal) || emoteShowsLocalBody;
                 if (drawBody && numJoints > 0) {
                     c.drawThisFrame = true;
                     c.slot = drawSlot++;
@@ -4528,6 +4586,9 @@ SDL_AppResult Game::iterate()
     registry.view<LocalPlayer, InputSnapshot>().each([&](const InputSnapshot& input) {
         hideRailgunViewmodelForScope = currentEquippedType_ == WeaponType::RailGun && input.scoped;
     });
+    // Hide the first-person viewmodel once the emote camera has swung to third
+    // person — the third-person body (with its own attached weapon) takes over.
+    const bool hideViewmodelForEmote = emoteCamBlend_ > 0.5f;
 
     const bool currentWeaponRenderable = isRenderableGunType(currentEquippedType_);
 
@@ -4552,7 +4613,8 @@ SDL_AppResult Game::iterate()
     {
         WeaponViewmodel vm;
         const auto localDeadView = registry.view<LocalPlayer, RespawnTimer>();
-        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end() && !hideRailgunViewmodelForScope)
+        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end() &&
+            !hideRailgunViewmodelForScope && !hideViewmodelForEmote)
         {
             vm.modelIndex = currentWeaponModelIdx;
             vm.visible = true;
@@ -5972,9 +6034,12 @@ SDL_AppResult Game::iterate()
             }
         });
 
-        // ── Round timer / buy phase ──
+        // ── Emote wheel (radial selection driven by the input sampler) ──
+        hudState.emoteWheel.open = systems::emoteWheelOpen;
+        hudState.emoteWheel.selectedIndex = systems::emoteWheelSelection;
+
+        // ── Round timer ──
         hudState.roundTimeRemaining = countdownTimer;
-        hudState.isBuyPhase = (currentMatchPhase == MatchPhase::WARMUP || currentMatchPhase == MatchPhase::COUNTDOWN);
         hudState.currentPhase = currentMatchPhase;
         hudState.forceScoreboardOpen = currentMatchPhase == MatchPhase::FINISHED && countdownTimer <= 10.0f;
 

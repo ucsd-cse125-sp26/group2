@@ -4,7 +4,6 @@
 #include "hud/Hud.hpp"
 #include "hud/widgets/AbilitySelectionWidget.hpp"
 #include "hud/widgets/AmmoCounter.hpp"
-#include "hud/widgets/BuyMenu.hpp"
 #include "hud/widgets/ChatWidget.hpp"
 #include "hud/widgets/CrosshairWidget.hpp"
 #include "hud/widgets/DamageAccumWidget.hpp"
@@ -74,8 +73,6 @@ const char* widgetName(const HudWidget* widget)
         return "Ability Selection";
     if (dynamic_cast<const AmmoCounter*>(widget))
         return "Ammo Counter";
-    if (dynamic_cast<const BuyMenu*>(widget))
-        return "Buy Menu";
     if (dynamic_cast<const ChatWidget*>(widget))
         return "Chat";
     if (dynamic_cast<const CrosshairWidget*>(widget))
@@ -209,11 +206,6 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "clipFontSize", ammo->clipFontSize);
         writeFloatParam(out, first, "reserveFontSize", ammo->reserveFontSize);
         writeFloatParam(out, first, "edgePadding", ammo->edgePadding);
-    } else if (const auto* buy = dynamic_cast<const BuyMenu*>(&widget)) {
-        writeFloatParam(out, first, "panelWidth", buy->panelWidth);
-        writeFloatParam(out, first, "panelHeight", buy->panelHeight);
-        writeFloatParam(out, first, "fontSize", buy->fontSize);
-        writeFloatParam(out, first, "itemHeight", buy->itemHeight);
     } else if (const auto* crosshair = dynamic_cast<const CrosshairWidget*>(&widget)) {
         writeFloatParam(out, first, "gap", crosshair->style.gap);
         writeFloatParam(out, first, "length", crosshair->style.length);
@@ -407,11 +399,6 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Clip Font Size", ammo->clipFontSize, 0.5f, 6.0f, 160.0f);
         editFloat("Reserve Font Size", ammo->reserveFontSize, 0.5f, 6.0f, 120.0f);
         editFloat("Edge Padding", ammo->edgePadding, 0.5f, 0.0f, 200.0f);
-    } else if (auto* buy = dynamic_cast<BuyMenu*>(&widget)) {
-        editFloat("Panel Width", buy->panelWidth, 1.0f, 80.0f, 1400.0f);
-        editFloat("Panel Height", buy->panelHeight, 1.0f, 80.0f, 1000.0f);
-        editFloat("Font Size", buy->fontSize, 0.5f, 6.0f, 120.0f);
-        editFloat("Item Height", buy->itemHeight, 0.5f, 8.0f, 160.0f);
     } else if (auto* crosshair = dynamic_cast<CrosshairWidget*>(&widget)) {
         editFloat("Gap", crosshair->style.gap, 0.25f, 0.0f, 200.0f);
         editFloat("Arm Length", crosshair->style.length, 0.25f, 0.0f, 200.0f);

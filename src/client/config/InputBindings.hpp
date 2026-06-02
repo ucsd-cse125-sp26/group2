@@ -34,7 +34,7 @@ enum class Action : uint8_t
     CycleGrenade,      ///< Quick-throw or open the grenade radial menu.
     KillSelf,          ///< Request self-elimination.
     Scoreboard,        ///< Show the scoreboard while held.
-    BuyMenu,           ///< Toggle the buy menu.
+    Emote,             ///< Hold to open the emote wheel; release to play the selected emote.
     PushToTalk,        ///< Hold to transmit voice chat.
     Count              ///< Keep this last, used for iteration and array sizing.
 };
@@ -170,7 +170,7 @@ public:
                 Action::CycleGrenade,
                 Action::KillSelf,
                 Action::Scoreboard,
-                Action::BuyMenu,
+                Action::Emote,
                 Action::PushToTalk};
     }
 

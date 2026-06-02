@@ -339,6 +339,13 @@ private:
     bool cachedGravFlipped_{false}; ///< Local player gravity-flip state, updated each iterate().
     float currentCameraRoll_{0.0f}; ///< Smoothed camera roll angle (radians).
 
+    // Emote state (client-side prediction for the local player). Set when the
+    // emote wheel fires, cleared on local movement/combat input or death. Drives
+    // the local animator override, the third-person emote camera, and showing
+    // the local body. Remote players' emotes are server-driven via AnimSnapshot.
+    int localEmote_{-1};            ///< Active local emote index (EmoteCatalog), or -1.
+    float emoteCamBlend_{0.0f};     ///< 0 = first-person, 1 = third-person emote cam (eased).
+
     // Map collision data — loaded from GLB, owns the vectors that back activeWorld().
     physics::MapCollisionData mapCollision_;
 

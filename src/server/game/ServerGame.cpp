@@ -1362,6 +1362,10 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
             ai.crouching = ps->crouching;
             ai.moveMode = static_cast<int>(ps->moveMode);
             ai.wallRunSide = static_cast<int>(ps->wallRunSide);
+            // Drive the override clip from the replicated emote state so the
+            // captured AnimSnapshot makes every client see this player emote.
+            ai.emoteClip = ps->activeEmote >= 0 ? static_cast<int>(emoteClipForIndex(ps->activeEmote))
+                                                : static_cast<int>(ClipId::_Count);
         }
 
         animator->update(ai, dt);
