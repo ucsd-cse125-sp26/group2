@@ -18,10 +18,11 @@ constexpr float k_dashLift = 180.0f; ///< Buffed (was 90) — more lift keeps th
 constexpr float k_recallCooldown = 12.0f;
 
 // ── Levitate (tier-1 updraft) ───────────────────────────────────────────────
-constexpr float k_levitateMaxDuration = 4.0f; ///< Max seconds of lift per activation (while held).
+// Toggle: press to activate, press again (or let the timer expire) to stop.
+constexpr float k_levitateMaxDuration = 4.0f; ///< Max seconds of lift per activation.
 constexpr float k_levitateCooldown = 6.0f;    ///< Cooldown after a levitate ends.
-constexpr float k_levitateRiseSpeed = 320.0f; ///< Target upward speed (u/s) — gentle, "not too strong".
-constexpr float k_levitateResponse = 6.0f;    ///< How fast vertical velocity eases toward the rise speed.
+constexpr float k_levitateRiseSpeed = 650.0f; ///< Target upward speed (u/s) — strong updraft.
+constexpr float k_levitateResponse = 8.0f;    ///< How fast vertical velocity eases toward the rise speed.
 
 // ── Wallhack (tier-2 see-through-walls) ─────────────────────────────────────
 constexpr float k_wallhackDuration = 5.0f;  ///< Seconds enemies are revealed.

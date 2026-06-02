@@ -2253,23 +2253,21 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                 }
             }
 
-            // 5c. Levitate (tier-1 updraft). While the primary ability key is
-            //     held and the ability is off cooldown, ease vertical velocity
-            //     toward a gentle rise speed for up to k_levitateMaxDuration
-            //     seconds, then start the cooldown. Self-contained here (no
-            //     Ability subclass) so it predicts cleanly on the client.
+            // 5c. Levitate (tier-1 updraft). Toggle on a key press; toggle off on
+            //     a second press, when the timer expires, or if grappling takes
+            //     over. While active, ease vertical velocity toward a strong rise
+            //     speed. Self-contained here (no Ability subclass) so it predicts
+            //     cleanly on the client; only key *presses* (rising edges) matter,
+            //     so holding/releasing the key does nothing on its own.
             if (auto* abil = registry.try_get<AbilityState>(e); abil != nullptr && abil->primary == AbilityType::Levitate)
             {
                 const bool held = input.ability1;
-                const bool risingEdge = held && !state.sim.levitatePrevHeld;
-                if (risingEdge && !state.sim.levitateActive && abil->primaryCooldown <= 0.0f) {
-                    state.sim.levitateActive = true;
-                    state.sim.levitateTimer = 0.0f;
-                }
+                const bool pressed = held && !state.sim.levitatePrevHeld;
 
                 if (state.sim.levitateActive) {
                     const bool expired = state.sim.levitateTimer >= abilities::k_levitateMaxDuration;
-                    if (!held || expired || grapplePulling) {
+                    if (pressed || expired || grapplePulling) {
+                        // Second press / timeout / grapple → stop and start cooldown.
                         state.sim.levitateActive = false;
                         abil->primaryCooldown = abilities::cooldownFor(AbilityType::Levitate);
                     } else {
@@ -2279,6 +2277,10 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
                         state.sim.levitateTimer += dt;
                         state.vis.grounded = false;
                     }
+                } else if (pressed && abil->primaryCooldown <= 0.0f) {
+                    // First press → activate.
+                    state.sim.levitateActive = true;
+                    state.sim.levitateTimer = 0.0f;
                 }
                 state.sim.levitatePrevHeld = held;
             }

@@ -27,14 +27,19 @@ enum class AbilityType : uint8_t
 
 inline constexpr std::size_t kAbilityChoicesPerTier = 2;
 
+// Per-match candidate pools. `ServerGame::selectMatchAbilityPool()` draws
+// `kAbilityChoicesPerTier` (2) from each pool to offer at level-up. With a pool
+// of exactly 2, both are always offered. To test Levitate/Wallhack they're
+// slotted in here alongside one familiar option each; widen a pool past 2 to
+// have the match randomly pick which two are offered.
 inline constexpr std::array<AbilityType, kAbilityChoicesPerTier> primaryAbilityTypes = {
+    AbilityType::Levitate,
     AbilityType::Dash,
-    AbilityType::Grapple,
 };
 
 inline constexpr std::array<AbilityType, kAbilityChoicesPerTier> secondaryAbilityTypes = {
+    AbilityType::Wallhack,
     AbilityType::Gravity,
-    AbilityType::Recall,
 };
 
 inline constexpr const char* abilityName(AbilityType type)
