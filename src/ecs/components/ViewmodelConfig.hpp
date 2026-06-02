@@ -177,11 +177,13 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
-        // RailGun — marksman
-        {.scale = 20.0f,
-         .forward = 48.0f,
-         .right = 30.0f,
-         .down = 27.0f,
+        // RailGun (Apex Kraber) — uses the animated viewmodel path (apex_kraber.glb),
+        // so like the R-301 all offsets are 0 / scale 1 (the rig + propGun bind
+        // place it exactly; no per-weapon tweaking).
+        {.scale = 1.0f,
+         .forward = 0.0f,
+         .right = 0.0f,
+         .down = 0.0f,
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
@@ -255,9 +257,9 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
              {.offset = {7.0f, 4.0f, 22.0f}, .rotation = glm::quat(1, 0, 0, 0)},
              {.offset = {4.0f, 8.0f, 14.0f}, .rotation = glm::quat(1, 0, 0, 0)},
          }}},
-        // RailGun / charge rifle — heavy precision rifle, slower bend than the
-        // assault rifle, similar kick to a rifle since the energy delivery is smooth.
-        {.scale = 7.0f,
+        // RailGun (Apex Kraber) — native-scale model mounted via its own ja_c_propGun
+        // bind (scale 1, like the R-301; the propGun mount ignores this scale anyway).
+        {.scale = 1.0f,
          .spineBendMultiplier = 0.85f,
          .hipLeanMultiplier = 0.08f,
          .recoilKickRad = 0.07f,

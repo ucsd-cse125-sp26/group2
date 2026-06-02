@@ -93,3 +93,38 @@ inline const std::array<AssetDefinition, 3> kEffectAssets{{
     {.name = "glow_sphere_movable", .role = AssetRole::Effect},
     {.name = "glow_cylinder", .role = AssetRole::Effect},
 }};
+
+/// @brief Per-weapon animated viewmodel assets (the unified, R-301-style path).
+///
+/// A weapon with a non-empty `viewmodelGlb` uses the animated viewmodel pipeline:
+/// a textured, skinned gun rig with baked first-person clips (idle/draw/reload),
+/// rendered both in first person (gun + `armsGlb` hands) and — since the same
+/// GLB carries the shared `ja_c_propGun` attach bone — mounted on the
+/// third-person character. A weapon with an empty `viewmodelGlb` gracefully
+/// falls back to the legacy static `kWeaponAssets[type].filename` mesh.
+///
+/// To add a weapon: run `tools/convert_weapon_viewmodel.py` on its Apex `_v`
+/// cast + textures + first-person clips to produce `apex_<weapon>.glb` +
+/// `apex_<weapon>_arms.glb`, then fill in the row here. No code changes, no
+/// per-weapon offset tuning (the propGun bind places it exactly).
+struct WeaponViewmodelAssets
+{
+    const char* viewmodelGlb = ""; ///< Skinned gun GLB (textured, ja_c_propGun, baked clips). 1P + 3P.
+    const char* armsGlb = "";      ///< First-person arms GLB (same baked clips). Empty -> no 1P hands.
+    bool flipUVs = true;           ///< Source UV orientation flip at load.
+};
+
+inline const std::array<WeaponViewmodelAssets, kRenderableWeaponTypeCount> kWeaponViewmodelAssets{{
+    // Rifle (R-301) — fully built.
+    {.viewmodelGlb = "apex_r301.glb", .armsGlb = "apex_r301_arms.glb", .flipUVs = true},
+    // Rocket — static fallback until a viewmodel is authored.
+    {},
+    // RailGun (Kraber) — assets built later via tools/convert_weapon_viewmodel.py
+    // (user re-extracts the Kraber _v model+textures + first-person clips from
+    // Apex). Until apex_kraber.glb exists, load fails -> static fallback.
+    {.viewmodelGlb = "apex_kraber.glb", .armsGlb = "apex_kraber_arms.glb", .flipUVs = false},
+    // EnergyGun — static fallback.
+    {},
+    // Shotgun — static fallback.
+    {},
+}};

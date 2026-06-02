@@ -623,9 +623,10 @@ private:
                                  ///< target so the gun is held in front of the chest instead of hanging at the side.
     int charPropGunIdx_ = -1;    ///< Cached "ja_c_propGun" joint index — the shared Apex weapon-attach bone, posed at
                                  ///< the grip by the rifle-hold clips. Third-person weapon mounts here (gun-agnostic).
-    glm::mat4 weaponPropGunBind_{1.0f}; ///< The held weapon's own "ja_c_propGun" bind matrix (engine frame), captured
-                                        ///< from the viewmodel rig. weaponWorld = charWorld·charPosed[propGun]·bind⁻¹.
-    bool weaponPropGunBindValid_ = false; ///< True once weaponPropGunBind_ has been captured from the loaded weapon.
+    std::array<glm::mat4, kRenderableWeaponTypeCount> weaponPropGunBinds_{}; ///< Each weapon's own "ja_c_propGun" bind
+                                        ///< matrix (engine frame), captured from its viewmodel rig. Third-person mount:
+                                        ///< weaponWorld = charWorld·charPosed[propGun]·bind⁻¹ (gun-agnostic, per-weapon).
+    std::array<bool, kRenderableWeaponTypeCount> weaponPropGunBindValid_{}; ///< Per-weapon: bind captured + usable.
     std::array<WeaponGripPose, kRenderableWeaponTypeCount>
         weaponGripPoses_{};      ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from
                                  ///< assets/weapons/<name>.grip.toml at startup. Joint data is per-joint (pitch, yaw)
@@ -654,13 +655,20 @@ private:
     int gripPoseTuneWeaponIdx_ = 0;        ///< Which weapon's grip pose is being authored in the tweaker UI.
     float aimAssistParityAccumSec_ = 0.0f; ///< Seconds since the last aim-assist parity check log line (Phase F).
     AnimationLibrary animLibrary_;         ///< Collection of ozz clips on the shared rig.
-    WeaponViewmodelAnim weaponVm_;         ///< Animated first-person R-301 viewmodel (gun rig + clips).
-    bool weaponVmLoaded_ = false;          ///< True once apex_r301.glb loaded into weaponVm_.
-    bool weaponVmReloadActive_ = false;    ///< Edge-trigger so the reload clip plays once per reload.
-    bool weaponVmEquipped_ = false;        ///< Edge-trigger so the draw clip plays once on rifle equip.
-    WeaponViewmodelAnim weaponVmArms_;     ///< First-person Wraith arms (hands), same clips as the gun.
-    bool weaponVmArmsLoaded_ = false;
-    int weaponVmArmsModelIdx_ = -1;        ///< Hidden static model of the arms GLB (for its textures).
+    // Per-weapon animated first-person viewmodel (gun rig + arms + baked clips),
+    // indexed by WeaponType (see kWeaponViewmodelAssets). The renderer has a
+    // single viewmodel rig slot, so the active weapon's rig is (re)installed on
+    // equip; `activeViewmodelType_` tracks which is installed. A weapon whose GLB
+    // failed to load keeps weaponVmLoaded_[t]=false and falls back to the legacy
+    // static weapon model + procedural hands.
+    std::array<WeaponViewmodelAnim, kRenderableWeaponTypeCount> weaponVms_;    ///< Skinned gun rig per weapon.
+    std::array<WeaponViewmodelAnim, kRenderableWeaponTypeCount> weaponVmArms_; ///< First-person arms rig per weapon.
+    std::array<bool, kRenderableWeaponTypeCount> weaponVmLoaded_{};
+    std::array<bool, kRenderableWeaponTypeCount> weaponVmArmsLoaded_{};
+    std::array<int, kRenderableWeaponTypeCount> weaponVmArmsModelIdx_{}; ///< Hidden static arms model per weapon (textures).
+    int activeViewmodelType_ = -1;         ///< WeaponType whose rig is installed in the renderer (-1 = none).
+    bool weaponVmReloadActive_ = false;    ///< Edge-trigger so the reload clip plays once per reload (active weapon).
+    bool weaponVmEquipped_ = false;        ///< Edge-trigger so the draw clip plays once on equip (active weapon).
     int weaponVmPrevMagAmmo_ = -1;         ///< Tracks mag ammo to detect a shot fired this frame.
     int shellEjectModelIdx_ = -1;          ///< Spent-casing prop (hidden static; drawn via entity list).
     struct Casing

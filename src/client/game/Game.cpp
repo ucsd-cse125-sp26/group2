@@ -1056,13 +1056,23 @@ bool Game::init(AppContext& ctx)
             if (def.filename) {
                 const int id = addAssetDefinition(assets_, def);
                 weaponAssetIds_[i] = id;
-                weaponModelIndices_[i] =
-                    renderer->loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
-                assets_.setModelIndex(id, weaponModelIndices_[i]);
-                if (weaponModelIndices_[i] >= 0)
-                    renderer->setModelScenePass(weaponModelIndices_[i], false);
+                // Prefer the animated viewmodel GLB (textured, carries ja_c_propGun)
+                // as the THIRD-PERSON held mesh too, so 1P + 3P share one source and
+                // the propGun bind matches the geometry. Fall back to the legacy
+                // static model when the viewmodel asset is absent / fails to load.
+                const WeaponViewmodelAssets& vma = kWeaponViewmodelAssets[i];
+                int idx = -1;
+                if (vma.viewmodelGlb && vma.viewmodelGlb[0] != '\0')
+                    idx = renderer->loadSceneModel(vma.viewmodelGlb, glm::vec3{0.0f}, 1.0f, vma.flipUVs);
+                if (idx < 0)
+                    idx = renderer->loadSceneModel(def.filename, def.loadTranslation, def.loadScale, def.flipUVs);
+                weaponModelIndices_[i] = idx;
+                assets_.setModelIndex(id, idx);
+                if (idx >= 0)
+                    renderer->setModelScenePass(idx, false);
                 else
-                    SDL_Log("[client] WARNING: weapon model '%s' failed to load", def.filename);
+                    SDL_Log("[client] WARNING: weapon model for type %zu ('%s'/'%s') failed to load",
+                            i, vma.viewmodelGlb ? vma.viewmodelGlb : "", def.filename);
             }
         }
 
@@ -1379,51 +1389,47 @@ bool Game::init(AppContext& ctx)
         const char* base = SDL_GetBasePath();
         const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
 
-        // Animated first-person R-301 viewmodel (its own skinned rig + clips).
+        // Animated first-person viewmodels, PER WEAPON (see kWeaponViewmodelAssets).
+        // The renderer has a single viewmodel rig slot, so here we only LOAD each
+        // weapon's gun + arms rig data and capture its `ja_c_propGun` bind (for the
+        // gun-agnostic third-person mount); the active weapon's rig is installed on
+        // equip (installViewmodelForWeapon, below). A weapon whose GLB is missing
+        // keeps weaponVmLoaded_[t]=false and falls back to the static model + hands.
         {
-            const std::string vmPath = std::string(base ? base : "") + "assets/apex_r301.glb";
-            if (weaponVm_.load(vmPath, /*flipUVs=*/true)) {
-                weaponVmLoaded_ = renderer->setViewmodelRig(weaponVm_.buildRigSources(), weaponVm_.numJoints());
-                // Bind the R-301's diffuse texture (from its loaded static model) to the skinned viewmodel.
-                renderer->setViewmodelTexture(weaponModelIndices_[static_cast<std::size_t>(WeaponType::Rifle)]);
-                SDL_Log("[client] R-301 viewmodel: %d joints, installed=%d",
-                        weaponVm_.numJoints(),
-                        static_cast<int>(weaponVmLoaded_));
-                // Capture the R-301's `ja_c_propGun` bind matrix (in the engine's
-                // own coordinate frame) so third-person mounting is computed from
-                // real geometry, not hand-tuned Euler angles. weaponWorld =
-                // charWorld * charPosed[ja_c_propGun] * inverse(thisBind). The
-                // shared prop bone exists on every Apex weapon, so this is
-                // gun-agnostic. Read at rest pose = bind.
-                weaponVm_.playRestPose();
-                weaponVm_.update(0.0f);
-                if (weaponVm_.boneModelMatrix("ja_c_propGun", weaponPropGunBind_)) {
-                    weaponPropGunBindValid_ = true;
-                    SDL_Log("[client] R-301 ja_c_propGun bind captured for third-person mount");
+            weaponVmArmsModelIdx_.fill(-1);
+            for (std::size_t t = 0; t < kWeaponViewmodelAssets.size(); ++t) {
+                const WeaponViewmodelAssets& vma = kWeaponViewmodelAssets[t];
+                if (!vma.viewmodelGlb || vma.viewmodelGlb[0] == '\0')
+                    continue;
+                const std::string vmPath = std::string(base ? base : "") + "assets/" + vma.viewmodelGlb;
+                if (weaponVms_[t].load(vmPath, vma.flipUVs)) {
+                    weaponVmLoaded_[t] = true;
+                    // Capture this weapon's own ja_c_propGun bind (engine frame) at
+                    // rest pose: weaponWorld = charWorld·charPosed[propGun]·bind⁻¹.
+                    weaponVms_[t].playRestPose();
+                    weaponVms_[t].update(0.0f);
+                    weaponPropGunBinds_[t] = glm::mat4(1.0f);
+                    if (weaponVms_[t].boneModelMatrix("ja_c_propGun", weaponPropGunBinds_[t]))
+                        weaponPropGunBindValid_[t] = true;
+                    // First-person arms (same baked clips) + register their textures
+                    // via a hidden static model.
+                    if (vma.armsGlb && vma.armsGlb[0] != '\0') {
+                        const std::string armsPath = std::string(base ? base : "") + "assets/" + vma.armsGlb;
+                        if (weaponVmArms_[t].load(armsPath, vma.flipUVs)) {
+                            weaponVmArmsLoaded_[t] = true;
+                            weaponVmArmsModelIdx_[t] =
+                                renderer->loadSceneModel(vma.armsGlb, glm::vec3{0.0f}, 1.0f, true);
+                            if (weaponVmArmsModelIdx_[t] >= 0)
+                                renderer->setModelScenePass(weaponVmArmsModelIdx_[t], false);
+                        }
+                    }
                 } else {
-                    SDL_Log("[client] WARNING: R-301 ja_c_propGun absent — 3p mount falls back to wrist palm");
+                    SDL_Log("[client] WARNING: viewmodel '%s' failed to load — weapon %zu uses static fallback",
+                            vma.viewmodelGlb, t);
                 }
-            } else {
-                SDL_Log("[client] WARNING: R-301 viewmodel (apex_r301.glb) failed to load");
-            }
-
-            // First-person Wraith arms (hands) — second skinned viewmodel rig,
-            // driven by the SAME clips so the hands hold the animating gun.
-            const std::string armsPath = std::string(base ? base : "") + "assets/apex_r301_arms.glb";
-            if (weaponVmArms_.load(armsPath, /*flipUVs=*/true)) {
-                weaponVmArmsLoaded_ =
-                    renderer->setViewmodelArmsRig(weaponVmArms_.buildRigSources(), weaponVmArms_.numJoints());
-                // Load the arms GLB as a hidden static model purely to register its embedded textures.
-                weaponVmArmsModelIdx_ = renderer->loadSceneModel("apex_r301_arms.glb", glm::vec3{0.0f}, 1.0f, true);
-                if (weaponVmArmsModelIdx_ >= 0) {
-                    renderer->setModelScenePass(weaponVmArmsModelIdx_, false);
-                    renderer->setViewmodelArmsTexture(weaponVmArmsModelIdx_);
-                }
-                SDL_Log("[client] R-301 arms viewmodel: %d joints, installed=%d",
-                        weaponVmArms_.numJoints(),
-                        static_cast<int>(weaponVmArmsLoaded_));
-            } else {
-                SDL_Log("[client] WARNING: R-301 arms (apex_r301_arms.glb) failed to load");
+                SDL_Log("[viewmodel] type=%zu glb='%s' loaded=%d arms=%d propGunBind=%d", t, vma.viewmodelGlb,
+                        static_cast<int>(weaponVmLoaded_[t]), static_cast<int>(weaponVmArmsLoaded_[t]),
+                        static_cast<int>(weaponPropGunBindValid_[t]));
             }
 
             // Spent-casing prop (hidden static model; spawned + drawn via the entity list on fire).
@@ -3366,6 +3372,7 @@ SDL_AppResult Game::iterate()
             // free-matrix weapon entity render path.
             bool hasWeapon = false;
             int weaponModelIdx = -1;
+            WeaponType weaponType = WeaponType::Rifle; ///< Equipped weapon type; picks its propGun bind for the mount.
             glm::mat4 weaponWorld{1.0f};
             // Per-weapon authoring data needed to derive weaponWorld from the right-hand
             // bone matrix (palm offset/rotation in weapon-local frame, weapon scale).
@@ -3710,6 +3717,7 @@ SDL_AppResult Game::iterate()
                             // matrix from the right-hand bone matrix in the writeback loop.
                             c.hasWeapon = true;
                             c.weaponModelIdx = weaponModelIndices_[static_cast<std::size_t>(gun.type)];
+                            c.weaponType = gun.type;
                             c.weaponScale = tp.scale;
                             c.rightPalmAuthored = mounts.rightHand.palm;
                             // Identity fallback. The worker always overwrites this with the
@@ -3827,11 +3835,13 @@ SDL_AppResult Game::iterate()
                         glm::mat3 weaponRot(1.0f);
                         bool haveWeapon = false;
 
-                        if (charPropGunIdx_ >= 0 && weaponPropGunBindValid_
-                            && charPropGunIdx_ < static_cast<int>(joints.size())) {
+                        const std::size_t wt = static_cast<std::size_t>(c.weaponType);
+                        if (charPropGunIdx_ >= 0 && wt < weaponPropGunBindValid_.size()
+                            && weaponPropGunBindValid_[wt] && charPropGunIdx_ < static_cast<int>(joints.size())) {
                             const glm::mat4 propGunWorld =
                                 c.worldTransform * joints[static_cast<size_t>(charPropGunIdx_)];
-                            c.weaponWorld = propGunWorld * glm::inverse(weaponPropGunBind_);
+                            // Mount via THIS weapon's own ja_c_propGun bind (gun-agnostic, exact).
+                            c.weaponWorld = propGunWorld * glm::inverse(weaponPropGunBinds_[wt]);
                             weaponOrigin = glm::vec3(c.weaponWorld[3]);
                             weaponRot = glm::mat3(glm::normalize(glm::vec3(c.weaponWorld[0])),
                                                   glm::normalize(glm::vec3(c.weaponWorld[1])),
@@ -4667,6 +4677,27 @@ SDL_AppResult Game::iterate()
         viewmodelDefaultsApplied_ = true;
     }
 
+    // Unified per-weapon viewmodel: install the active weapon's gun + arms rig
+    // (and its textures) into the renderer's single viewmodel slot when the
+    // equipped weapon changes. Weapons without a loaded viewmodel leave the slot
+    // alone and render via the static fallback path below.
+    if (currentWeaponRenderable) {
+        const std::size_t t = static_cast<std::size_t>(currentEquippedType_);
+        if (weaponVmLoaded_[t] && static_cast<int>(t) != activeViewmodelType_) {
+            renderer->setViewmodelRig(weaponVms_[t].buildRigSources(), weaponVms_[t].numJoints());
+            renderer->setViewmodelTexture(weaponModelIndices_[t]);
+            if (weaponVmArmsLoaded_[t]) {
+                renderer->setViewmodelArmsRig(weaponVmArms_[t].buildRigSources(), weaponVmArms_[t].numJoints());
+                if (weaponVmArmsModelIdx_[t] >= 0)
+                    renderer->setViewmodelArmsTexture(weaponVmArmsModelIdx_[t]);
+            }
+            activeViewmodelType_ = static_cast<int>(t);
+            weaponVmEquipped_ = false;    // replay the draw clip for the newly-equipped weapon
+            weaponVmReloadActive_ = false;
+            weaponVmPrevMagAmmo_ = -1;
+        }
+    }
+
     const int currentWeaponModelIdx =
         currentWeaponRenderable ? weaponModelIndices_[static_cast<std::size_t>(currentEquippedType_)] : -1;
 
@@ -4936,9 +4967,9 @@ SDL_AppResult Game::iterate()
                     }
                 });
 
-                // The R-301 plays a real reload animation, so suppress the
-                // legacy "weapon-down" drop for it.
-                if (weaponVmLoaded_ && currentEquippedType_ == WeaponType::Rifle)
+                // Animated-viewmodel weapons play a real reload clip, so suppress
+                // the legacy "weapon-down" drop for any weapon whose viewmodel loaded.
+                if (currentWeaponRenderable && weaponVmLoaded_[static_cast<std::size_t>(currentEquippedType_)])
                     reloadOffset = 0.0f;
                 reloadDownwardOffset_ = reloadOffset;
             }
@@ -5121,7 +5152,11 @@ SDL_AppResult Game::iterate()
         }
         // --- Animated R-301 first-person viewmodel (skinned, replaces the
         // static gun model + the weapon-down reload with the real Apex clips) ---
-        if (weaponVmLoaded_ && currentEquippedType_ == WeaponType::Rifle && vm.visible) {
+        const std::size_t vmType = currentWeaponRenderable ? static_cast<std::size_t>(currentEquippedType_) : 0;
+        if (currentWeaponRenderable && weaponVmLoaded_[vmType] && vm.visible) {
+            WeaponViewmodelAnim& vmGun = weaponVms_[vmType];
+            WeaponViewmodelAnim& vmArms = weaponVmArms_[vmType];
+            const bool hasArms = weaponVmArmsLoaded_[vmType];
             bool reloading = false;
             float reloadTotal = 0.0f;
             int magAmmo = -1;
@@ -5134,8 +5169,11 @@ SDL_AppResult Game::iterate()
             });
             // A shot drops mag ammo this frame (reload raises it, so no false trigger) -> kick bolt + eject casing.
             if (weaponVmPrevMagAmmo_ >= 0 && magAmmo >= 0 && magAmmo < weaponVmPrevMagAmmo_) {
-                weaponVm_.triggerFire();
-                if (shellEjectModelIdx_ >= 0 && casings_.size() < 64) {
+                vmGun.triggerFire();
+                // Casing eject requires the chamber bone; weapons without def_c_bolt
+                // (boneModelPos returns ~origin) skip it gracefully.
+                const glm::vec3 boltLocal = vmGun.boneModelPos("def_c_bolt");
+                if (shellEjectModelIdx_ >= 0 && casings_.size() < 64 && glm::length(boltLocal) > 1e-5f) {
                     const float cp = std::cos(renderPitch);
                     const glm::vec3 fwd{std::sin(renderYaw) * cp, -std::sin(renderPitch), std::cos(renderYaw) * cp};
                     const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3{0.0f, 1.0f, 0.0f}));
@@ -5144,10 +5182,9 @@ SDL_AppResult Game::iterate()
                     Casing cs;
                     // Eject from the real chamber (def_c_bolt) and orient parallel to the barrel
                     // (def_c_bolt -> muzzle_flash), both taken from the rig and transformed to world.
-                    const glm::vec3 chamberWorld =
-                        glm::vec3(vm.transform * glm::vec4(weaponVm_.boneModelPos("def_c_bolt"), 1.0f));
+                    const glm::vec3 chamberWorld = glm::vec3(vm.transform * glm::vec4(boltLocal, 1.0f));
                     const glm::vec3 muzzleWorld =
-                        glm::vec3(vm.transform * glm::vec4(weaponVm_.boneModelPos("muzzle_flash"), 1.0f));
+                        glm::vec3(vm.transform * glm::vec4(vmGun.boneModelPos("muzzle_flash"), 1.0f));
                     glm::vec3 barrelDir = muzzleWorld - chamberWorld;
                     barrelDir = (glm::length(barrelDir) > 1e-4f) ? glm::normalize(barrelDir) : fwd;
                     // Casing long axis (local X) points opposite the muzzle (it was spawning 180-degrees backwards).
@@ -5171,39 +5208,43 @@ SDL_AppResult Game::iterate()
             // the skeleton bind pose as idle — it is ~13u off from the animated
             // poses and makes reload appear to jump/vanish out of frame.)
             if (!weaponVmEquipped_) {
-                weaponVm_.playClip("draw", /*loop=*/false, 1.0f);
-                if (weaponVmArmsLoaded_)
-                    weaponVmArms_.playClip("draw", /*loop=*/false, 1.0f);
+                vmGun.playClip("draw", /*loop=*/false, 1.0f);
+                if (hasArms)
+                    vmArms.playClip("draw", /*loop=*/false, 1.0f);
                 weaponVmEquipped_ = true;
                 weaponVmReloadActive_ = false;
             }
             if (reloading && !weaponVmReloadActive_) {
-                const float clipDur = weaponVm_.clipDuration("reload");
+                const float clipDur = vmGun.clipDuration("reload");
                 const float speed = (reloadTotal > 0.05f && clipDur > 0.05f) ? (clipDur / reloadTotal) : 1.0f;
-                weaponVm_.playClip("reload", /*loop=*/false, speed);
-                if (weaponVmArmsLoaded_)
-                    weaponVmArms_.playClip("reload", /*loop=*/false, speed);
+                vmGun.playClip("reload", /*loop=*/false, speed);
+                if (hasArms)
+                    vmArms.playClip("reload", /*loop=*/false, speed);
                 weaponVmReloadActive_ = true;
             } else if (!reloading && weaponVmReloadActive_) {
                 // Reload ends back at the ready pose, so just hold its last frame.
                 weaponVmReloadActive_ = false;
             }
-            weaponVm_.update(frameTime);
+            vmGun.update(frameTime);
 
-            // Drive the muzzle origin (tracers/bullets/beams read cachedMuzzleWorld_) from the
-            // rig's muzzle_flash bone, since the R-301 static model has no muzzle mount point.
-            cachedMuzzleWorld_ = glm::vec3(vm.transform * glm::vec4(weaponVm_.boneModelPos("muzzle_flash"), 1.0f));
-            cachedMuzzleValid_ = true;
+            // Drive the muzzle origin (tracers/bullets/beams read cachedMuzzleWorld_)
+            // from the rig's muzzle_flash bone. Weapons lacking it leave the muzzle
+            // invalid so the shooter code falls back to the camera-forward origin.
+            const glm::vec3 muzLocal = vmGun.boneModelPos("muzzle_flash");
+            if (glm::length(muzLocal) > 1e-5f) {
+                cachedMuzzleWorld_ = glm::vec3(vm.transform * glm::vec4(muzLocal, 1.0f));
+                cachedMuzzleValid_ = true;
+            }
 
             SkinnedInstance inst;
             inst.worldTransform = vm.transform;
             inst.paletteBase = 0;
-            renderer->setViewmodelFrame(weaponVm_.skinMatrices(), {inst});
+            renderer->setViewmodelFrame(vmGun.skinMatrices(), {inst});
 
             // Hands ride the same clip + the same viewmodel transform as the gun.
-            if (weaponVmArmsLoaded_) {
-                weaponVmArms_.update(frameTime);
-                renderer->setViewmodelArmsFrame(weaponVmArms_.skinMatrices(), {inst});
+            if (hasArms) {
+                vmArms.update(frameTime);
+                renderer->setViewmodelArmsFrame(vmArms.skinMatrices(), {inst});
             }
 
             // The animated skinned gun + hands replace the static gun + viewmodel hands.
@@ -5211,7 +5252,7 @@ SDL_AppResult Game::iterate()
             vm.hands.right.visible = false;
             vm.hands.left.visible = false;
         } else {
-            weaponVmEquipped_ = false; // re-draw next time the rifle is equipped
+            weaponVmEquipped_ = false; // re-draw next time an animated-viewmodel weapon is equipped
             renderer->setViewmodelFrame({}, {});
             renderer->setViewmodelArmsFrame({}, {});
         }

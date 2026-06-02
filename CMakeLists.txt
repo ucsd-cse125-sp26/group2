@@ -350,6 +350,14 @@ set(ASSIMP_BUILD_MINIZIP                 ON  CACHE BOOL "" FORCE)
 # Don't let Assimp turn its own -Wall warnings into -Werror; newer Clang
 # emits -Wnontrivial-memcall on Assimp internals that we cannot patch.
 set(ASSIMP_WARNINGS_AS_ERRORS            OFF CACHE BOOL "" FORCE)
+# Assimp installs ccache via `set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE
+# ccache)`, which wraps EVERY compile in its scope — including the Windows .rc
+# resource step (assimp.rc) that CMake compiles through cmcldeps.exe. When CLion
+# lives at a spaced path ("…/CLion 2026.1.2/…/cmcldeps.exe"), ccache splits the
+# program path on the space and dies with "execute_noreturn of …/CLion: No such
+# file or directory". Our own C/CXX caching (CMAKE_C/CXX_COMPILER_LAUNCHER, set
+# above) routes through cl.exe and is unaffected, so just disable assimp's.
+set(ASSIMP_BUILD_USE_CCACHE              OFF CACHE BOOL "" FORCE)
 block()
     set(BUILD_SHARED_LIBS OFF)
     group2_dependency_git(assimp ASSIMP_REPOSITORY ASSIMP_TAG)
