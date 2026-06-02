@@ -119,10 +119,12 @@ inline const std::array<WeaponViewmodelAssets, kRenderableWeaponTypeCount> kWeap
     {.viewmodelGlb = "apex_r301.glb", .armsGlb = "apex_r301_arms.glb", .flipUVs = true},
     // Rocket — static fallback until a viewmodel is authored.
     {},
-    // RailGun (Kraber) — assets built later via tools/convert_weapon_viewmodel.py
-    // (user re-extracts the Kraber _v model+textures + first-person clips from
-    // Apex). Until apex_kraber.glb exists, load fails -> static fallback.
-    {.viewmodelGlb = "apex_kraber.glb", .armsGlb = "apex_kraber_arms.glb", .flipUVs = false},
+    // RailGun — the Apex Charge Rifle ("defender" codename). Built via
+    // tools/convert_weapon_viewmodel.py from its ptpov_defender _v model + the
+    // real camera-space ptpov_defender clips (draw/reload), so it animates in
+    // first-person like the R-301. (Replaces the Kraber, which had no first-person
+    // viewmodel clips in the Apex data — only a 3rd-person pilot reload.)
+    {.viewmodelGlb = "apex_chargerifle.glb", .armsGlb = "apex_chargerifle_arms.glb", .flipUVs = false},
     // EnergyGun — static fallback.
     {},
     // Shotgun — static fallback.

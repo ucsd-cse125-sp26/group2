@@ -5167,6 +5167,9 @@ SDL_AppResult Game::iterate()
                 reloadTotal = cfg.reloadTime;
                 magAmmo = gun.currentMagAmmo;
             });
+            // Crouch state drives the lowered/tilted viewmodel hold (Apex "gun feel").
+            bool crouching = false;
+            registry.view<LocalPlayer, PlayerVisState>().each([&](const PlayerVisState& pvs) { crouching = pvs.crouching; });
             // A shot drops mag ammo this frame (reload raises it, so no false trigger) -> kick bolt + eject casing.
             if (weaponVmPrevMagAmmo_ >= 0 && magAmmo >= 0 && magAmmo < weaponVmPrevMagAmmo_) {
                 vmGun.triggerFire();
@@ -5213,6 +5216,7 @@ SDL_AppResult Game::iterate()
                     vmArms.playClip("draw", /*loop=*/false, 1.0f);
                 weaponVmEquipped_ = true;
                 weaponVmReloadActive_ = false;
+                weaponVmCrouched_ = false; // draw ends at the standing ready pose
             }
             if (reloading && !weaponVmReloadActive_) {
                 const float clipDur = vmGun.clipDuration("reload");
@@ -5222,8 +5226,26 @@ SDL_AppResult Game::iterate()
                     vmArms.playClip("reload", /*loop=*/false, speed);
                 weaponVmReloadActive_ = true;
             } else if (!reloading && weaponVmReloadActive_) {
-                // Reload ends back at the ready pose, so just hold its last frame.
+                // Reload ends back at the standing ready pose, so just hold its last
+                // frame — and force a crouch re-evaluation so a reload finished while
+                // crouched re-lowers the weapon.
                 weaponVmReloadActive_ = false;
+                weaponVmCrouched_ = false;
+            }
+            // Crouch lower/raise: play Apex's authored transition clip once per toggle.
+            // Each transition ENDS at the crouch (or standing) idle pose and holds it,
+            // so no crossfade is needed. Gated so it never interrupts an in-progress
+            // draw or reload (those own the pose until they finish). Weapons without
+            // the clips (e.g. R-301 until rebuilt) simply skip this — no crouch hold.
+            const bool hasCrouchPose = vmGun.hasClip("idle_to_crouch") && vmGun.hasClip("crouch_to_idle");
+            const std::string& vmClip = vmGun.currentClip();
+            const bool poseBusy = (vmClip == "draw" || vmClip == "reload") && !vmGun.clipFinished();
+            if (hasCrouchPose && weaponVmEquipped_ && !reloading && !poseBusy && crouching != weaponVmCrouched_) {
+                const char* t = crouching ? "idle_to_crouch" : "crouch_to_idle";
+                vmGun.playClip(t, /*loop=*/false, 1.0f);
+                if (hasArms)
+                    vmArms.playClip(t, /*loop=*/false, 1.0f);
+                weaponVmCrouched_ = crouching;
             }
             vmGun.update(frameTime);
 

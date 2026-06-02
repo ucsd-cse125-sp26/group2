@@ -45,19 +45,36 @@ OUT_DIR = r"C:\Users\user99\CLionProjects\group2\assets"
 BLEND_DIR = r"C:\Users\user99\CLionProjects\group2\assets\blender_sources"
 
 CONFIG = {
-    "weapon_name": "kraber",
-    # First-person ("_v") gun model + the directory holding its material textures.
-    "gun_cast":   RSX + r"\bulk\mdl\kraber_lgnd_v24_proyoung_v\kraber_lgnd_v24_proyoung_v_LOD0.cast",
-    "gun_texdir": RSX + r"\exported_files\mdl\kraber_lgnd_v24_proyoung_v\kraber_lgnd_v24_proyoung_v",
+    "weapon_name": "chargerifle",
+    # First-person model = the Charge Rifle's ptpov ("defender" is Apex's codename for
+    # the Charge Rifle). Exported via the RSX GUI to defender_gui_export/. Rig: 139
+    # bones incl. ja_c_propGun + muzzle_flash + character spine — a real viewmodel rig.
+    "gun_cast":   RSX + r"\defender_gui_export\mdl\ptpov_defender\ptpov_defender_LOD0.cast",
+    # Body textures (chargerifle_base_*) were NOT in the ptpov_defender export — drop
+    # them here named `chargerifle_base_main_col.png` etc. when the full pak dump lands.
+    "gun_texdir": RSX + r"\defender_gui_export\mdl\ptpov_defender",
     # Shared pilot arms + their textures (same for every light-legend weapon).
     "arms_cast":   RSX + r"\extract_test\mdl\pov_pilot_light_wraith\pov_pilot_light_wraith_LOD0.cast",
     "arms_texdir": RSX + r"\extract_test\mdl\pov_pilot_light_wraith\pov_pilot_light_wraith",
-    # First-person clip dir + {cast-basename (no .cast): engine action name}.
-    "clip_dir": RSX + r"\bulk_anims\animseq\weapons\kraber\ptpov_kraber",
-    "clips": {"idle_0": "idle", "draw_0": "draw", "reload_0": "reload", "fire_0": "fire"},
-    # Optional: keep only meshes whose name contains one of these (drop optics/
-    # suppressors). Empty list => keep every mesh.
-    "keep_mesh_substr": [],
+    # First-person clip dir + {cast-basename (no .cast, may include subdir): action}.
+    # These are the Charge Rifle's REAL camera-space viewmodel clips (ptpov_defender),
+    # so the gun + pilot arms animate correctly in first-person (unlike the Kraber,
+    # which had only a 3rd-person pilot reload). The engine plays "draw" on equip and
+    # "reload" on reload; idle/fire are kept for completeness.
+    "clip_dir": RSX + r"\defender_gui_export\animseq",
+    "clips": {
+        "draw/draw_0": "draw",
+        "reload/reload_0": "reload",
+        "idle/idle_0": "idle",
+        "fire/fire_0": "fire",
+        # Crouch lower/raise transitions (Apex "gun feel"): each ends at the crouch
+        # / standing idle pose; the engine plays one per crouch toggle and holds it.
+        "idle_to_crouch/idle_to_crouch_0": "idle_to_crouch",
+        "crouch_to_idle/crouch_to_idle_0": "crouch_to_idle",
+    },
+    # Keep only the gun body (main + charge coils + reloader + front sight); drop every
+    # scope/sight/suppressor/laser attachment mesh.
+    "keep_mesh_substr": ["chargerifle_base"],
 }
 
 
@@ -152,16 +169,22 @@ def _bake_clips(rig, clip_dir, clips):
     return loaded
 
 
-def _export_glb(out_path):
+def _export_glb(out_path, active):
     # +Y up, all ACTIONS, skins, NO transform bake (export_apply=False) — the bake
     # was the bug in the old kraber export that flattened the rig and dropped textures.
-    bpy.ops.export_scene.gltf(
-        filepath=out_path, export_format="GLB",
-        export_yup=True, export_apply=False,
-        export_animation_mode="ACTIONS", export_anim_single_armature=True,
-        export_skins=True, export_normals=True, export_tangents=True,
-        export_texcoords=True, export_materials="EXPORT",
-    )
+    # Wrap in a VIEW_3D + active/selected override: the glTF exporter reads
+    # bpy.context.active_object, which is absent in a headless/MCP exec context.
+    w, s, a, r = _fv3d()
+    sel = [o for o in bpy.data.objects if o.type in ("ARMATURE", "MESH")]
+    with bpy.context.temp_override(window=w, screen=s, area=a, region=r,
+                                   active_object=active, selected_objects=sel):
+        bpy.ops.export_scene.gltf(
+            filepath=out_path, export_format="GLB",
+            export_yup=True, export_apply=False,
+            export_animation_mode="ACTIONS", export_anim_single_armature=True,
+            export_skins=True, export_normals=True, export_tangents=True,
+            export_texcoords=True, export_materials="EXPORT",
+        )
 
 
 def _build(cast, texdir, clip_dir, clips, out_glb, blend_out, keep_substr):
@@ -180,7 +203,7 @@ def _build(cast, texdir, clip_dir, clips, out_glb, blend_out, keep_substr):
     for o in bpy.data.objects:
         o.select_set(o.type in ("ARMATURE", "MESH"))
     bpy.context.view_layer.objects.active = rig
-    _export_glb(out_glb)
+    _export_glb(out_glb, rig)
     try:
         bpy.ops.wm.save_as_mainfile(filepath=blend_out, copy=True)
     except Exception:

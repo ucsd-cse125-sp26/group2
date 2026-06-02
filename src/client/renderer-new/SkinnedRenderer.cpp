@@ -92,8 +92,22 @@ bool SkinnedRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJo
         return false;
     }
     if (rigInstalled_) {
-        SDL_Log("SkinnedRenderer::setRig: rig already installed; ignoring repeat call");
-        return false;
+        // Replacing the installed rig (per-weapon viewmodel swap on equip). Wait
+        // for the GPU to finish any in-flight use of the old buffers, then release
+        // them before rebuilding — otherwise the new weapon's skin matrices get
+        // applied to the previous weapon's mesh (wrong gun + T-posed arms).
+        SDL_WaitForGPUIdle(device_);
+        for (auto& sm : skinnedMeshes_) {
+            if (sm.vb)
+                SDL_ReleaseGPUBuffer(device_, sm.vb);
+            if (sm.boneVb)
+                SDL_ReleaseGPUBuffer(device_, sm.boneVb);
+            if (sm.ib)
+                SDL_ReleaseGPUBuffer(device_, sm.ib);
+        }
+        skinnedMeshes_.clear();
+        perMeshDiffuse_.clear();
+        rigInstalled_ = false;
     }
     if (meshes.empty() || numJoints <= 0) {
         SDL_Log("SkinnedRenderer::setRig: empty meshes or numJoints<=0 (%zu, %d)", meshes.size(), numJoints);
