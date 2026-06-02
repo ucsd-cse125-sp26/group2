@@ -245,16 +245,14 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
     framePalette_.clear();
     frameInstances_.clear();
     visibleInstanceCount_ = 0;
-    chamsInstanceIndex_ = -1;
+    chamsIndices_.clear();
 
-    // Record the index of the killcam-flagged instance (materialId == 1) so the
-    // chams pass can draw just that one. Scans only the colour-visible slice.
+    // Record every chams-flagged instance (materialId == 1) so the chams pass
+    // can draw them. Scans only the colour-visible slice.
     const auto recordChams = [&]() {
         for (Uint32 i = 0; i < visibleInstanceCount_ && i < frameInstances_.size(); ++i) {
-            if (frameInstances_[i].materialId == 1) {
-                chamsInstanceIndex_ = static_cast<int>(i);
-                break;
-            }
+            if (frameInstances_[i].materialId == 1)
+                chamsIndices_.push_back(i);
         }
     };
 
@@ -480,13 +478,11 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
 
 void SkinnedRenderer::drawChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* /*cmd*/)
 {
-    if (!rigInstalled_ || !chamsPipeline_ || chamsInstanceIndex_ < 0 || !palettesSsboInfo_.ssbo_ ||
+    if (!rigInstalled_ || !chamsPipeline_ || chamsIndices_.empty() || !palettesSsboInfo_.ssbo_ ||
         !instancesSsboInfo_.ssbo_)
     {
         return;
     }
-    if (static_cast<size_t>(chamsInstanceIndex_) >= frameInstances_.size())
-        return;
 
     SDL_BindGPUGraphicsPipeline(renderPass, chamsPipeline_);
 
@@ -505,9 +501,11 @@ void SkinnedRenderer::drawChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuf
         SDL_GPUBufferBinding indexBufferBinding{.buffer = sm.ib, .offset = 0};
         SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-        // Draw just the flagged killer instance (gl_InstanceIndex = first_instance).
-        SDL_DrawGPUIndexedPrimitives(
-            renderPass, sm.indexCount, 1, 0, 0, static_cast<Uint32>(chamsInstanceIndex_));
+        // One draw per flagged instance (gl_InstanceIndex = first_instance).
+        for (Uint32 idx : chamsIndices_) {
+            if (idx < frameInstances_.size())
+                SDL_DrawGPUIndexedPrimitives(renderPass, sm.indexCount, 1, 0, 0, idx);
+        }
     }
 }
 

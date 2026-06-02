@@ -223,9 +223,10 @@ private:
     SDL_GPUTextureFormat colorFormat_{};
     SDL_GPUShaderFormat shaderFormat_{};
 
-    /// @brief Index into `frameInstances_` of the chams-flagged killer this
-    /// frame (materialId == 1), or -1 if none.
-    int chamsInstanceIndex_ = -1;
+    /// @brief Indices into `frameInstances_` of every chams-flagged instance
+    /// this frame (materialId == 1): the killcam killer and/or wallhack-revealed
+    /// enemies. Empty when nothing is flagged.
+    std::vector<Uint32> chamsIndices_;
 
     // ─── Owned: rig (set once via setRig) ────────────────────────────────────
     bool rigInstalled_ = false;

@@ -1066,6 +1066,8 @@ add_executable(group2
         src/ecs/abilities/GravityAbility.hpp
         src/ecs/abilities/RecallAbility.cpp
         src/ecs/abilities/RecallAbility.hpp
+        src/ecs/abilities/WallhackAbility.cpp
+        src/ecs/abilities/WallhackAbility.hpp
         src/client/app/AppContext.hpp
         src/client/app/App.hpp
         src/client/app/App.cpp
@@ -1417,6 +1419,8 @@ add_executable(server
         src/ecs/abilities/GravityAbility.hpp
         src/ecs/abilities/RecallAbility.cpp
         src/ecs/abilities/RecallAbility.hpp
+        src/ecs/abilities/WallhackAbility.cpp
+        src/ecs/abilities/WallhackAbility.hpp
         src/server/lobby/LobbyManager.hpp
         src/server/lobby/LobbyManager.cpp
         src/ecs/components/PowerupSpawner.hpp
@@ -1725,6 +1729,8 @@ add_executable(clientbot
         src/ecs/abilities/GravityAbility.hpp
         src/ecs/abilities/RecallAbility.cpp
         src/ecs/abilities/RecallAbility.hpp
+        src/ecs/abilities/WallhackAbility.cpp
+        src/ecs/abilities/WallhackAbility.hpp
         src/ecs/components/PowerupSpawner.hpp
         src/ecs/components/PowerupState.hpp
         src/ecs/systems/PowerupSpawnerSystem.cpp

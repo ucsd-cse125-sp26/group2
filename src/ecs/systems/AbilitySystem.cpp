@@ -108,6 +108,7 @@ void runAbility(Registry& registry, AbilityRegistry& abilityRegistry, float dt)
         [&registry, &abilityRegistry, dt](entt::entity e, InputSnapshot& snap, AbilityState& state) {
             tickCooldown(state.primaryCooldown, dt);
             tickCooldown(state.secondaryCooldown, dt);
+            tickCooldown(state.wallhackTimer, dt); // Wallhack reveal window counts down.
 
             if (snap.debugGrantAbilityLevel) {
                 grantAbilityLevel(state);
