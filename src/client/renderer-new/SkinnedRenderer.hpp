@@ -228,7 +228,16 @@ private:
     Uint32 instanceXferCapacityBytes_ = 0;
 
     // ─── CPU staging (filled by setFrame, drained by uploadFrame) ────────────
+    //
+    // `frameInstances_` holds EVERY submitted character, partitioned so the
+    // on-screen ones come first:
+    //   [0, visibleInstanceCount_)        → inside the camera frustum
+    //   [visibleInstanceCount_, size())   → off-screen, but still shadow casters
+    // The colour pass (`draw`) renders only the front slice; the shadow/depth
+    // pass (`drawDepth`) renders the whole buffer so off-screen players keep
+    // casting shadows.  `framePalette_` is compacted in the same order.
     std::vector<glm::mat4> framePalette_;
     std::vector<SkinnedInstance> frameInstances_;
+    Uint32 visibleInstanceCount_ = 0;
     bool frameDirty_ = false;
 };
