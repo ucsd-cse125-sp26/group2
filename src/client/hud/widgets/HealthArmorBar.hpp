@@ -7,11 +7,13 @@
 
 struct HealthArmorBar : HudWidget
 {
-    float panelWidth = 500.f;     ///< Total bar width.
-    float barHeight = 44.f;       ///< Total bar height.
-    float chamferSize = 33.f;     ///< Left and right slant depth.
-    float cornerCutSize = 12.f;   ///< Small top-corner cuts that soften the side points.
-    float outlineThickness = 4.f; ///< Hairline thickness around the full silhouette.
+    float panelWidth = 500.f; ///< Base SVG frame width.
+    float barHeight = 44.f;   ///< Base SVG frame height.
+    float svgScale = 1.f;     ///< Extra scale applied to both SVG frame layers.
+    float svgOffsetX = 0.f;   ///< SVG frame X adjustment.
+    float svgOffsetY = 0.f;   ///< SVG frame Y adjustment.
+    float svgStretchX = 1.f;  ///< Horizontal SVG stretch multiplier.
+    float svgStretchY = 1.f;  ///< Vertical SVG stretch multiplier.
 
     HealthArmorBar();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
