@@ -163,7 +163,12 @@ bool NewRenderer::init(SDL_Window* window)
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
     staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
-    movingLightShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_MOVING_POINT_LIGHTS);
+
+    Uint32 movingShadowSize = shadowSize;
+#ifdef HAVE_MSL_SHADERS
+    movingShadowSize = macShadowSize;
+#endif
+    movingLightShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, macShadowSize, macShadowSize, true, MAX_MOVING_POINT_LIGHTS);
 
     cubeFaceTargets_[0] = glm::vec3(1, 0, 0);
     cubeFaceTargets_[1] = glm::vec3(-1, 0, 0);
@@ -459,8 +464,13 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     }
 
     // setSampleStaticPointLights();
-    drawToShadowMap(cmd, dynamicShadowMaps_,2, false, true, true,STATIC);
-    drawToShadowMap(cmd, movingLightShadowMaps_,2, true, true, true,MOVING);
+    drawToShadowMap(cmd, dynamicShadowMaps_,1, false, true, true,STATIC);
+
+    Uint8 movingRes = 1;
+#ifdef HAVE_MSL_SHADERS
+    movingRes = 2
+#endif
+    drawToShadowMap(cmd, movingLightShadowMaps_,movingRes, true, true, true,MOVING);
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
@@ -592,7 +602,7 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
 
 void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
 {
-    drawToShadowMap(cmd, staticShadowMaps_,2, true, false, false,STATIC);
+    drawToShadowMap(cmd, staticShadowMaps_,0, true, false, false,STATIC);
 }
 
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
