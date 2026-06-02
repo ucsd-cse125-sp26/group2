@@ -1,49 +1,29 @@
 /// @file Minimap.cpp
-/// @brief Voidfall circular radar with clipped grid + amber player chevron.
+/// @brief Voidfall radar SVG with yaw-relative enemy dots.
 
 #include "Minimap.hpp"
 
 #include "hud/HudContext.hpp"
-#include "hud/HudIcons.hpp"
 #include "hud/VoidfallStyle.hpp"
-
-#include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <cmath>
 
 namespace
 {
+
 void drawCircleOutline(HudContext& ctx, float cx, float cy, float radius, float thickness, HudColor color)
 {
-    constexpr int kSegments = 64;
+    constexpr int kSegments = 96;
     float points[(kSegments + 1) * 2]{};
     for (int i = 0; i <= kSegments; ++i) {
-        const float a = (static_cast<float>(i) / kSegments) * 2.f * 3.14159265f;
+        const float a = (static_cast<float>(i) / static_cast<float>(kSegments)) * 2.f * 3.14159265f;
         points[i * 2 + 0] = cx + std::cos(a) * radius;
         points[i * 2 + 1] = cy + std::sin(a) * radius;
     }
     ctx.polyline(points, kSegments + 1, thickness, color);
 }
 
-void drawClockwiseRingArc(
-    HudContext& ctx, float cx, float cy, float radius, float progress, float thickness, HudColor color)
-{
-    const float clampedProgress = std::clamp(progress, 0.f, 1.f);
-    if (clampedProgress <= 0.f)
-        return;
-
-    constexpr int kMaxSegments = 96;
-    const int segments = std::max(2, static_cast<int>(std::ceil(kMaxSegments * clampedProgress)));
-    float points[(kMaxSegments + 1) * 2]{};
-    for (int i = 0; i <= segments; ++i) {
-        const float t = (static_cast<float>(i) / static_cast<float>(segments)) * clampedProgress;
-        const float a = -0.5f * 3.14159265f + t * 2.f * 3.14159265f;
-        points[i * 2 + 0] = cx + std::cos(a) * radius;
-        points[i * 2 + 1] = cy + std::sin(a) * radius;
-    }
-    ctx.polyline(points, segments + 1, thickness, color);
-}
 } // namespace
 
 Minimap::Minimap()
@@ -54,27 +34,18 @@ Minimap::Minimap()
     width = 200.f;
     height = 200.f;
     mapSize = 200.f;
-    dotSize = 6.f;
-    borderThickness = 1.f;
+    dotSize = 12.f;
+    dotZoneRadius = 76.f;
+    dotZoneOffsetX = -0.5f;
+    dotZoneOffsetY = 3.f;
 }
 
-void Minimap::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)
+void Minimap::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
 {
     localX_ = state.localPlayerX;
     localZ_ = state.localPlayerZ;
     localYaw_ = state.localPlayerYaw;
     worldRange_ = state.minimapWorldRange;
-
-    const float targetLevel = std::clamp(state.abilityLevelProgress, 0.f, 1.f);
-    const float liveLerp = std::clamp(dt * 12.f, 0.f, 1.f);
-    liveLevel_ += (targetLevel - liveLevel_) * liveLerp;
-    trailLevel_ = std::max(trailLevel_, targetLevel);
-    if (trailLevel_ > liveLevel_) {
-        const float drainSpeed = 1.f / std::max(0.05f, levelRingDrainSeconds);
-        trailLevel_ = std::max(liveLevel_, trailLevel_ - drainSpeed * dt);
-    } else {
-        trailLevel_ = liveLevel_;
-    }
 
     enemies_.clear();
     for (const auto& d : state.enemyDots)
@@ -89,49 +60,25 @@ void Minimap::draw(HudContext& ctx, float x, float y)
     const float ms = mapSize * s;
     const float cx = x + ms * 0.5f;
     const float cy = y + ms * 0.5f;
-    const float radius = ms * 0.5f;
-    const float ringT = std::max(0.f, levelRingThickness * s);
-    const float ringRadius = radius + levelRingGap * s + ringT * 0.5f;
+    const float zoneCx = cx + dotZoneOffsetX * s;
+    const float zoneCy = cy + dotZoneOffsetY * s;
+    const float zoneRadius = std::max(0.f, dotZoneRadius * s);
 
-    // Frame.
-    if (ringT > 0.f) {
-        drawCircleOutline(ctx, cx, cy, ringRadius, ringT, withAlpha(k_lineDim, 0.55f));
-        if (trailLevel_ > liveLevel_)
-            drawClockwiseRingArc(ctx, cx, cy, ringRadius, trailLevel_, ringT, withAlpha(k_amberDim, 0.65f));
-        drawClockwiseRingArc(ctx, cx, cy, ringRadius, liveLevel_, ringT, k_amber);
-    }
+    ctx.svg(HudIcon::Radar, x, y, ms, ms);
 
-    ctx.roundedRect(x, y, ms, ms, radius, withAlpha(k_quaternary, 0.85f));
-    const float borderT = std::max(0.f, borderThickness * s);
-    if (borderT > 0.f)
-        drawCircleOutline(ctx, cx, cy, std::max(0.f, radius - borderT * 0.5f), borderT, k_line);
-
-    // Grid clipped to circular chords.
-    const HudColor grid = withAlpha(k_secondary, 0.45f);
-    const int divisions = 10;
-    const float lineT = std::max(1.f, 1.f * s);
-    const float gridRadius = std::max(0.f, radius - borderT - lineT * 0.5f);
-    for (int i = 1; i < divisions; ++i) {
-        const float offset = -radius + (static_cast<float>(i) / divisions) * ms;
-        const float halfChord = std::sqrt(std::max(0.f, gridRadius * gridRadius - offset * offset));
-        if (halfChord <= 0.f)
-            continue;
-        ctx.rect(cx + offset - lineT * 0.5f, cy - halfChord, lineT, halfChord * 2.f, grid);
-        ctx.rect(cx - halfChord, cy + offset - lineT * 0.5f, halfChord * 2.f, lineT, grid);
-    }
-
-    // Local player chevron — shared notched-arrow glyph from the icon module.
-    icons::playerArrow(ctx, std::round(cx), std::round(cy), 14.f * s, k_amber);
+    if (showDotZoneDebug && zoneRadius > 0.f)
+        drawCircleOutline(ctx, zoneCx, zoneCy, zoneRadius, std::max(1.f, 1.5f * s), withAlpha(k_amber, 0.9f));
 
     // Enemy dots (red), rotated by yaw so player-forward is up. Dots beyond
-    // the radar's range are clamped radially to the circular edge
+    // the radar's range are clamped radially to the configured circular zone
     // so the player still gets a directional cue instead of a hard cull.
-    const float worldToPixel = ms / (worldRange_ * 2.f);
+    const float safeRange = std::max(1.f, worldRange_);
+    const float worldToPixel = ms / (safeRange * 2.f);
     const float sinYaw = std::sin(localYaw_);
     const float cosYaw = std::cos(localYaw_);
     const float dotPx = dotSize * s;
     const float edgeMargin = (dotPx * 0.5f) + 1.f;
-    const float maxDist = std::max(0.f, radius - edgeMargin);
+    const float maxDist = std::max(0.f, zoneRadius - edgeMargin);
     for (const auto& e : enemies_) {
         const float wdx = (e.worldX - localX_) * worldToPixel;
         const float wdz = (e.worldZ - localZ_) * worldToPixel;
@@ -143,9 +90,8 @@ void Minimap::draw(HudContext& ctx, float x, float y)
             dx *= scale;
             dz *= scale;
         }
-        const float ex = cx - dx;
-        const float ey = cy - dz;
-        // Square dot for the mil-spec feel (rotated 45° = diamond).
-        ctx.rotatedRect(ex, ey, dotPx, dotPx, 45.f, k_red);
+        const float ex = zoneCx - dx;
+        const float ey = zoneCy - dz;
+        ctx.roundedRect(ex - dotPx * 0.5f, ey - dotPx * 0.5f, dotPx, dotPx, dotPx * 0.5f, k_red);
     }
 }
