@@ -238,13 +238,14 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
 {
     framePalette_.clear();
     frameInstances_.clear();
+    visibleInstanceCount_ = 0;
 
     // Without an installed rig / a valid bounding sphere we have nothing to
-    // size the cull with — submit everything untouched and let the (likely
-    // empty) draw path sort it out.
+    // size the cull with — submit everything untouched and treat it as visible.
     if (!rigInstalled_ || numJoints_ <= 0 || rigBoundingRadius_ <= 0.0f) {
         framePalette_ = palette;
         frameInstances_ = instances;
+        visibleInstanceCount_ = static_cast<Uint32>(instances.size());
         frameDirty_ = !instances.empty();
         return;
     }
@@ -252,33 +253,46 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
     framePalette_.reserve(palette.size());
     frameInstances_.reserve(instances.size());
 
-    for (const SkinnedInstance& inst : instances) {
-        // Bounding sphere of THIS instance: rig-local sphere pushed through the
-        // instance world transform.  Centre tracks the actual rendered mesh
-        // (which is vertically offset from the sim position), and the radius is
-        // scaled by the transform's largest axis so the test is conservative
-        // for any (uniform or not) scale.
+    // Bounding sphere of an instance: the rig-local sphere pushed through the
+    // instance world transform.  Centre tracks the actual rendered mesh (which
+    // is vertically offset from the sim position), and the radius is scaled by
+    // the transform's largest axis so the test stays conservative for any
+    // (uniform or not) scale.
+    const auto onScreen = [&](const SkinnedInstance& inst) {
         const glm::vec3 center = glm::vec3(inst.worldTransform * glm::vec4(rigBoundingCenter_, 1.0f));
         const float sx = glm::length(glm::vec3(inst.worldTransform[0]));
         const float sy = glm::length(glm::vec3(inst.worldTransform[1]));
         const float sz = glm::length(glm::vec3(inst.worldTransform[2]));
         const float radius = rigBoundingRadius_ * std::max({sx, sy, sz});
+        return sphereInFrustum(center, radius, frustum);
+    };
 
-        if (!sphereInFrustum(center, radius, frustum))
-            continue;
-
-        // Guard the palette slice so a malformed instance can never read past
-        // the source palette while we compact it.
+    // Copy one source instance into the frame buffers, compacting its palette
+    // slice.  Returns false (and copies nothing) if the slice is out of range.
+    const auto append = [&](const SkinnedInstance& inst) {
         const size_t base = inst.paletteBase;
         if (base + static_cast<size_t>(numJoints_) > palette.size())
-            continue;
-
-        SkinnedInstance visible = inst;
-        visible.paletteBase = static_cast<uint32_t>(framePalette_.size());
+            return false;
+        SkinnedInstance copy = inst;
+        copy.paletteBase = static_cast<uint32_t>(framePalette_.size());
         framePalette_.insert(framePalette_.end(),
                              palette.begin() + static_cast<std::ptrdiff_t>(base),
                              palette.begin() + static_cast<std::ptrdiff_t>(base) + numJoints_);
-        frameInstances_.push_back(visible);
+        frameInstances_.push_back(copy);
+        return true;
+    };
+
+    // Pass 1: on-screen instances fill the front of the buffer (colour pass
+    // draws exactly this slice).  Pass 2: off-screen instances follow them so
+    // the shadow pass — which draws the whole buffer — still sees them and they
+    // keep casting shadows even when the player is off the edge of the screen.
+    for (const SkinnedInstance& inst : instances) {
+        if (onScreen(inst) && append(inst))
+            ++visibleInstanceCount_;
+    }
+    for (const SkinnedInstance& inst : instances) {
+        if (!onScreen(inst))
+            append(inst);
     }
 
     frameDirty_ = !frameInstances_.empty();
@@ -371,7 +385,10 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
     // TODO(graphics): instanced GPU skinning draw call.  See `setFrame`
     // doc-block for the data layout and shader pseudocode.  Sketch:
     //
-    if (!rigInstalled_ || !pipeline_ || frameInstances_.empty() || !palettesSsboInfo_.ssbo_ ||
+    // Colour pass renders only the on-screen instances (the front slice of the
+    // buffer).  Off-screen instances live past visibleInstanceCount_ and are
+    // drawn solely by drawDepth() so they still cast shadows.
+    if (!rigInstalled_ || !pipeline_ || visibleInstanceCount_ == 0 || !palettesSsboInfo_.ssbo_ ||
         !instancesSsboInfo_.ssbo_)
     {
         return;
@@ -412,7 +429,7 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
 
         SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-        SDL_DrawGPUIndexedPrimitives(renderPass, sm.indexCount, frameInstances_.size(), 0, 0, 0);
+        SDL_DrawGPUIndexedPrimitives(renderPass, sm.indexCount, visibleInstanceCount_, 0, 0, 0);
     }
 
     //
@@ -453,6 +470,10 @@ void SkinnedRenderer::drawDepth(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuf
 
     // The caller (NewRenderer::drawGeometryDepthPass) already pushed the
     // shadow view-projection at vertex UBO slot 0.
+    //
+    // Unlike the colour pass, the shadow pass draws the ENTIRE instance buffer
+    // (frameInstances_.size(), not just visibleInstanceCount_) so that players
+    // off the edge of the screen still cast shadows into the view.
 
     SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
