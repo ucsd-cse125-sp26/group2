@@ -3,6 +3,7 @@
 
 #include "HudRenderer.hpp"
 
+#include "HudSvgAtlas.hpp"
 #include "particles/sdf/SdfAtlas.hpp"
 #include "renderer-new/ShaderUtils.hpp"
 
@@ -16,6 +17,7 @@
 bool HudRenderer::init(SDL_GPUDevice* device,
                        SDL_GPUShaderFormat shaderFormat,
                        const SdfAtlas& sdfAtlas,
+                       const HudSvgAtlas* svgAtlas,
                        uint32_t screenW,
                        uint32_t screenH)
 {
@@ -23,6 +25,7 @@ bool HudRenderer::init(SDL_GPUDevice* device,
     shaderFormat_ = shaderFormat;
     sdfAtlasTex_ = sdfAtlas.gpuTexture();
     sdfAtlasSamp_ = sdfAtlas.gpuSampler();
+    svgAtlas_ = svgAtlas;
 
     if (!createOffscreenTarget(screenW, screenH))
         return false;
@@ -103,6 +106,7 @@ void HudRenderer::quit()
     offscreenTarget_ = nullptr;
     iconAtlasTex_ = nullptr;
     iconAtlasSamp_ = nullptr;
+    svgAtlas_ = nullptr;
     vertexBuffer_ = nullptr;
     transferBuffer_ = nullptr;
     device_ = nullptr;
@@ -191,9 +195,11 @@ void HudRenderer::render(std::span<const HudVertex> vertices, std::span<const st
     SDL_PushGPUVertexUniformData(cmd, 0, &su, sizeof(su));
 
     // Bind fragment samplers (set 2: sdfAtlas + iconAtlas).
+    SDL_GPUTexture* iconTexture = (svgAtlas_ && svgAtlas_->texture()) ? svgAtlas_->texture() : iconAtlasTex_;
+    SDL_GPUSampler* iconSampler = (svgAtlas_ && svgAtlas_->sampler()) ? svgAtlas_->sampler() : iconAtlasSamp_;
     SDL_GPUTextureSamplerBinding samplers[2] = {
         {.texture = sdfAtlasTex_, .sampler = sdfAtlasSamp_},
-        {.texture = iconAtlasTex_, .sampler = iconAtlasSamp_},
+        {.texture = iconTexture, .sampler = iconSampler},
     };
     SDL_BindGPUFragmentSamplers(pass, 0, samplers, 2);
 

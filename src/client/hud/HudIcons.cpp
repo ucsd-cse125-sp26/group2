@@ -108,6 +108,9 @@ void strokedCircle(HudContext& ctx, float cx, float cy, float r, float thickness
 
 void hp(HudContext& ctx, float x, float y, float size, HudColor color)
 {
+    if (ctx.icon(HudIcon::Hp, x, y, size, color))
+        return;
+
     // Medical cross: a + shape, filled.  Two rectangles forming a plus.
     const float u = size / 14.f;
     // Vertical bar.
@@ -118,6 +121,9 @@ void hp(HudContext& ctx, float x, float y, float size, HudColor color)
 
 void shield(HudContext& ctx, float x, float y, float size, HudColor color)
 {
+    if (ctx.icon(HudIcon::Shield, x, y, size, color))
+        return;
+
     // Heater-shield silhouette: 6-vertex polygon stroked at 1.4 px.
     // Approximates `M7 1 L12 3 V7 C12 10 9.5 12 7 13 C4.5 12 2 10 2 7 V3 Z`
     // by sampling the curve into linear segments — the eye won't tell at 14 px.
@@ -140,6 +146,9 @@ void shield(HudContext& ctx, float x, float y, float size, HudColor color)
 
 void skull(HudContext& ctx, float x, float y, float size, HudColor color)
 {
+    if (ctx.icon(HudIcon::Skull, x, y, size, color))
+        return;
+
     // Simple stylised skull — round top, flat bottom with two notches.
     const float u = size / 12.f;
     // Cranium: filled circle approximation.
@@ -154,6 +163,9 @@ void skull(HudContext& ctx, float x, float y, float size, HudColor color)
 
 void headshot(HudContext& ctx, float x, float y, float size, HudColor color)
 {
+    if (ctx.icon(HudIcon::Headshot, x, y, size, color))
+        return;
+
     // Reticle: circle outline + center pip + tick below.
     const float u = size / 12.f;
     const float cx = x + 6.f * u;
@@ -194,6 +206,9 @@ void gravityArrow(HudContext& ctx, float x, float y, float size, int direction, 
 
 void fall(HudContext& ctx, float x, float y, float size, HudColor color)
 {
+    if (ctx.icon(HudIcon::Fall, x, y, size, color))
+        return;
+
     const float u = size / 12.f;
     const float pts[] = {
         x + 6.f * u,
@@ -208,6 +223,9 @@ void fall(HudContext& ctx, float x, float y, float size, HudColor color)
 
 void grenade(HudContext& ctx, float x, float y, float size, HudColor color)
 {
+    if (ctx.icon(HudIcon::Grenade, x, y, size, color))
+        return;
+
     const float u = size / 14.f;
     // Round body.
     filledCircle(ctx, x + 7.f * u, y + 9.f * u, 4.f * u, 18, color);
@@ -221,6 +239,9 @@ void grenade(HudContext& ctx, float x, float y, float size, HudColor color)
 
 void grapple(HudContext& ctx, float x, float y, float size, HudColor color)
 {
+    if (ctx.icon(HudIcon::Grapple, x, y, size, color))
+        return;
+
     // Three strokes: rope (diagonal), hook crossbar, hook shaft + prongs.
     const float u = size / 14.f;
     const float t = 1.4f * u;
@@ -271,6 +292,9 @@ void grapple(HudContext& ctx, float x, float y, float size, HudColor color)
 
 void tactical(HudContext& ctx, float x, float y, float size, HudColor color)
 {
+    if (ctx.icon(HudIcon::Tactical, x, y, size, color))
+        return;
+
     const float u = size / 14.f;
     const float cx = x + 7.f * u;
     const float cy = y + 7.f * u;
@@ -280,6 +304,9 @@ void tactical(HudContext& ctx, float x, float y, float size, HudColor color)
 
 void playerArrow(HudContext& ctx, float cx, float cy, float size, HudColor color)
 {
+    if (ctx.icon(HudIcon::PlayerArrow, cx - size * 0.5f, cy - size * 0.5f, size, color))
+        return;
+
     // Filled chevron with a notch — matches design's `M0,-8 L6,6 L0,3 L-6,6 Z`.
     const float h = size * 0.5f;
     const float halfW = size * 0.4f;
@@ -292,6 +319,9 @@ void playerArrow(HudContext& ctx, float cx, float cy, float size, HudColor color
 
 void enemyDiamond(HudContext& ctx, float cx, float cy, float size, HudColor color)
 {
+    if (ctx.icon(HudIcon::EnemyDiamond, cx - size * 0.5f, cy - size * 0.5f, size, color))
+        return;
+
     const float h = size * 0.5f;
     ctx.triangle(cx, cy - h, cx + h, cy, cx, cy + h, color);
     ctx.triangle(cx, cy - h, cx, cy + h, cx - h, cy, color);

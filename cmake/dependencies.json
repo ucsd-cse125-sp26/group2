@@ -42,6 +42,10 @@
     "repository": "https://github.com/nothings/stb.git",
     "tag": "master"
   },
+  "lunasvg": {
+    "repository": "https://github.com/sammycage/lunasvg.git",
+    "tag": "v3.5.0"
+  },
   "minimp3": {
     "repository": "https://github.com/lieff/minimp3.git",
     "tag": "master"

@@ -1,6 +1,6 @@
 /// @file hud.frag
 /// @brief HUD fragment shader — branches on texMode for solid, SDF text,
-///        sprite, SDF rounded rect, vignette, or scope mask.
+///        sprite, alpha-mask sprite, SDF rounded rect, vignette, or scope mask.
 ///
 /// Output is **premultiplied alpha**: the pipeline's blend state is set up
 /// to expect (rgb·a, a) here, so we always emit `vec4(rgb*alpha, alpha)`.
@@ -105,6 +105,11 @@ void main()
         // Sprite / icon — texture is RGBA straight-alpha; tint and convert.
         vec4 texel = texture(iconAtlas, vUV) * vColor;
         outColor = premul(texel.rgb, texel.a);
+
+    } else if (mode == 7) {
+        // SVG alpha mask — use texture coverage only, with caller-provided RGB.
+        float alpha = texture(iconAtlas, vUV).a * vColor.a;
+        outColor = premul(vColor.rgb, alpha);
 
     } else if (mode == 3) {
         // SDF rounded rectangle (analytic distance, no atlas needed).
