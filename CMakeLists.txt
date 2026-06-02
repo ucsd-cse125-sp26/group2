@@ -631,6 +631,17 @@ if(SHADER_BUILD_MSL)
 endif()
 message(STATUS "Shader targets: ${_shader_targets}")
 
+# Moving-light array size, injected into shaders as a preprocessor define.
+# macOS/Metal must stay at 56; every other backend uses 64. Keep this in
+# lockstep with MAX_MOVING_POINT_LIGHTS in src/client/renderer-new/Boilerplate.hpp.
+if(APPLE)
+    set(MAX_MOVING_POINT_LIGHTS 56)
+else()
+    set(MAX_MOVING_POINT_LIGHTS 64)
+endif()
+set(SHADER_DEFINE_FLAGS "-DMAX_MOVING_POINT_LIGHTS=${MAX_MOVING_POINT_LIGHTS}")
+message(STATUS "Shader MAX_MOVING_POINT_LIGHTS: ${MAX_MOVING_POINT_LIGHTS}")
+
 # Helper: emit a SPIR-V → <target> transpile rule via the shadercross CLI.
 # `shadercross` infers the output format from the file extension (.dxil/.msl).
 function(_add_transpile_rule SPV_OUT OUT_FILE OUT_LIST_VAR)
@@ -690,7 +701,7 @@ foreach(SHADER_SRC ${SHADER_SOURCES})
     set(SPV_OUT "${SHADER_OUT_DIR}/${SHADER_SRC}.spv")
     add_custom_command(
         OUTPUT  "${SPV_OUT}"
-        COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS}
+        COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS} ${SHADER_DEFINE_FLAGS}
                 -o "${SPV_OUT}" "${SHADER_SRC_DIR}/${SHADER_SRC}"
         DEPENDS "${SHADER_SRC_DIR}/${SHADER_SRC}" ${SHADER_COMPILE_DEPS}
         COMMENT "Compiling shader ${SHADER_SRC} → SPIR-V"
@@ -733,7 +744,7 @@ foreach(SHADER_SRC ${SHADER_NEW_SOURCES})
     set(SPV_OUT "${SHADER_NEW_OUT_DIR}/${SHADER_SRC}.spv")
     add_custom_command(
         OUTPUT  "${SPV_OUT}"
-        COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS}
+        COMMAND ${SHADER_COMPILE_TOOL} ${SHADER_COMPILE_FLAGS} ${SHADER_DEFINE_FLAGS}
                 -o "${SPV_OUT}" "${SHADER_NEW_SRC_DIR}/${SHADER_SRC}"
         DEPENDS "${SHADER_NEW_SRC_DIR}/${SHADER_SRC}" ${SHADER_COMPILE_DEPS}
         COMMENT "Compiling new-renderer shader ${SHADER_SRC} → SPIR-V"

@@ -11,7 +11,15 @@
 #include <vector>
 
 #define MAX_POINT_LIGHTS 8
+// macOS (Metal) caps the usable bindless/sampler+UBO budget lower than other
+// backends, so the moving-light array must stay at 56 there. Everywhere else
+// uses 64. Keep this in lockstep with the shader-side value, which is injected
+// at build time via -DMAX_MOVING_POINT_LIGHTS in CMakeLists.txt.
+#if defined(__APPLE__)
 #define MAX_MOVING_POINT_LIGHTS 56
+#else
+#define MAX_MOVING_POINT_LIGHTS 64
+#endif
 #define MAX_SHADOW_COUNT MAX_POINT_LIGHTS
 
 namespace Boilerplate

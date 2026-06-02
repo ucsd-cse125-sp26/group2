@@ -3,7 +3,12 @@
 #define SHADOW_BIAS 5.0
 //#define MAX_SPOT_LIGHTS 0
 #define MAX_POINT_LIGHTS 8
-#define MAX_MOVING_POINT_LIGHTS 56
+// Injected at build time via -DMAX_MOVING_POINT_LIGHTS from CMakeLists.txt
+// (56 on macOS/Metal, 64 elsewhere). Must match Boilerplate.hpp. The default
+// below is only a fallback for editor/standalone compiles.
+#ifndef MAX_MOVING_POINT_LIGHTS
+#define MAX_MOVING_POINT_LIGHTS 64
+#endif
 
 struct PointLight {
     vec3 pos;
