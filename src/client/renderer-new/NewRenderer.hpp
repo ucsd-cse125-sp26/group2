@@ -438,7 +438,7 @@ private:
     // constexpr uint32_t shadowSize = 2048;
     //  constexpr uint32_t shadowSize = 512;
     static const uint32_t shadowSize = 1024;
-    static const uint32_t staticShadowSize = 4096;
+    static const uint32_t staticShadowSize = 2048;
     SDL_GPUTexture* dynamicShadowMaps_ = nullptr;
     SDL_GPUTexture* staticShadowMaps_ = nullptr;
     SDL_GPUSampler* staticDepthSampler_ = nullptr;
