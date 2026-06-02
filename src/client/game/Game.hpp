@@ -669,7 +669,7 @@ private:
     int activeViewmodelType_ = -1;         ///< WeaponType whose rig is installed in the renderer (-1 = none).
     bool weaponVmReloadActive_ = false;    ///< Edge-trigger so the reload clip plays once per reload (active weapon).
     bool weaponVmEquipped_ = false;        ///< Edge-trigger so the draw clip plays once on equip (active weapon).
-    bool weaponVmCrouched_ = false;        ///< Applied crouch viewmodel pose; the lower/raise transition plays once per toggle.
+    float weaponVmCrouchBlend_ = 0.0f;     ///< Smoothed 0..1 weight of the additive crouch lower/tilt layer (active weapon).
     int weaponVmPrevMagAmmo_ = -1;         ///< Tracks mag ammo to detect a shot fired this frame.
     int shellEjectModelIdx_ = -1;          ///< Spent-casing prop (hidden static; drawn via entity list).
     struct Casing

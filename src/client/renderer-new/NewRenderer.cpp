@@ -114,6 +114,13 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
+    // Neutral fallback diffuse for untextured viewmodel weapons (prevents the
+    // previous weapon's texture bleeding onto an untextured gun on switch).
+    {
+        const unsigned char neutral[4] = {160, 160, 162, 255};
+        viewmodelFallbackTex_ = Boilerplate::createTextureRGBA8(device_, 1, 1, neutral);
+    }
+
     hudSampler_ = Boilerplate::createLinearRepeatSampler(device_);
     if (!hudSampler_) {
         SDL_Log("NewRenderer: failed to create hud sampler: %s", SDL_GetError());
@@ -852,6 +859,10 @@ void NewRenderer::quit()
             SDL_ReleaseGPUTexture(device_, depthTarget_.texture);
         if (sceneColor_)
             SDL_ReleaseGPUTexture(device_, sceneColor_);
+        if (viewmodelFallbackTex_) {
+            SDL_ReleaseGPUTexture(device_, viewmodelFallbackTex_);
+            viewmodelFallbackTex_ = nullptr;
+        }
 
         for (auto& meshPair : Asset::meshes_) {
             Asset::Mesh& mesh = meshPair.second;
@@ -1144,21 +1155,24 @@ void NewRenderer::setViewmodelFrame(const std::vector<glm::mat4>& palette, const
 
 void NewRenderer::setViewmodelTexture(int modelInstanceIndex)
 {
-    if (modelInstanceIndex < 0 || static_cast<size_t>(modelInstanceIndex) >= Asset::modelInstances_.size())
-        return;
-    const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
-    if (!Asset::models_.contains(modelId))
-        return;
-    Asset::Model& model = Asset::models_.at(modelId);
-    for (auto& element : model.modelElements_) {
-        if (!Asset::materials_.contains(element.materialId_))
-            continue;
-        const Asset::Material& mat = Asset::materials_.at(element.materialId_);
-        if (Asset::textures_.contains(mat.diffuseTexture)) {
-            viewmodelSkinned_.setDiffuseTexture(Asset::textures_.at(mat.diffuseTexture).tex, sampler_);
-            return;
+    if (modelInstanceIndex >= 0 && static_cast<size_t>(modelInstanceIndex) < Asset::modelInstances_.size()) {
+        const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
+        if (Asset::models_.contains(modelId)) {
+            Asset::Model& model = Asset::models_.at(modelId);
+            for (auto& element : model.modelElements_) {
+                if (!Asset::materials_.contains(element.materialId_))
+                    continue;
+                const Asset::Material& mat = Asset::materials_.at(element.materialId_);
+                if (Asset::textures_.contains(mat.diffuseTexture)) {
+                    viewmodelSkinned_.setDiffuseTexture(Asset::textures_.at(mat.diffuseTexture).tex, sampler_);
+                    return;
+                }
+            }
         }
     }
+    // Weapon has no diffuse texture (e.g. untextured Charge Rifle body): bind the
+    // neutral fallback so the previously equipped weapon's texture doesn't persist.
+    viewmodelSkinned_.setDiffuseTexture(viewmodelFallbackTex_, sampler_);
 }
 
 void NewRenderer::setPlayerBodyTextures(int modelInstanceIndex)

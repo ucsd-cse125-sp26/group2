@@ -488,6 +488,10 @@ private:
     SkinnedRenderer viewmodelSkinned_;
     // First-person arms (hands) — second skinned viewmodel rig, same clips.
     SkinnedRenderer viewmodelArmsSkinned_;
+    // Neutral 1x1 fallback bound when a viewmodel weapon has no diffuse texture
+    // (e.g. the untextured Charge Rifle body) so the previously equipped weapon's
+    // texture doesn't bleed onto it on weapon switch.
+    SDL_GPUTexture* viewmodelFallbackTex_ = nullptr;
 
     // Telemetry counters (filled by drawFrame) ────────────────────────────────
     float lastAcquireMs_ = 0.0f;

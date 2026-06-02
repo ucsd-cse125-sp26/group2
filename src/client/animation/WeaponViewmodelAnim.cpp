@@ -23,13 +23,17 @@
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
 #endif
+#include <ozz/animation/offline/additive_animation_builder.h>
 #include <ozz/animation/offline/animation_builder.h>
 #include <ozz/animation/offline/raw_animation.h>
 #include <ozz/animation/runtime/animation.h>
+#include <ozz/animation/runtime/blending_job.h>
 #include <ozz/animation/runtime/local_to_model_job.h>
 #include <ozz/animation/runtime/sampling_job.h>
 #include <ozz/animation/runtime/skeleton.h>
+#include <ozz/base/maths/simd_math.h>
 #include <ozz/base/maths/soa_transform.h>
+#include <ozz/base/maths/transform.h>
 #include <ozz/base/span.h>
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
@@ -44,11 +48,22 @@ struct WeaponViewmodelAnim::Impl
 {
     CharacterRig rig;
     std::unordered_map<std::string, ozz::unique_ptr<ozz::animation::Animation>> clips;
+    /// Per-clip additive (delta) animations, taken relative to each clip's first
+    /// frame. Layered on the base clip via BlendingJob for Apex-style state offsets
+    /// (crouch lower, sprint sway, ...).
+    std::unordered_map<std::string, ozz::unique_ptr<ozz::animation::Animation>> additiveClips;
 
     ozz::animation::SamplingJob::Context context;
-    std::vector<ozz::math::SoaTransform> locals; // num_soa_joints
+    ozz::animation::SamplingJob::Context additiveContext;
+    std::vector<ozz::math::SoaTransform> locals;     // blended result, num_soa_joints
+    std::vector<ozz::math::SoaTransform> baseLocals;  // base clip sample
+    std::vector<ozz::math::SoaTransform> addLocals;   // additive layer sample
     std::vector<ozz::math::Float4x4> models;      // num_joints
     std::vector<glm::mat4> skinMats;              // num_joints
+
+    std::string additiveName;   ///< Active additive layer clip ("" = none).
+    float additiveWeight = 0.0f; ///< 0..1 blend weight of the additive offset.
+    float additiveRatio = 1.0f;  ///< 0..1 sample point in the additive clip (1 = end pose).
 
     std::string curClip;
     float time = 0.0f;
@@ -143,11 +158,11 @@ std::vector<RigMeshSource> WeaponViewmodelAnim::buildRigSources() const
 
 namespace
 {
-// Build one ozz Animation from an aiAnimation over the rig's skeleton, holding
-// joints without a channel at their rest pose.  No root-motion stripping (the
-// viewmodel is posed exactly as authored).
-ozz::unique_ptr<ozz::animation::Animation>
-buildClip(const CharacterRig& rig, const aiAnimation* anim)
+// Build a RawAnimation from an aiAnimation over the rig's skeleton, holding joints
+// without a channel at their rest pose.  No root-motion stripping (the viewmodel is
+// posed exactly as authored).
+ozz::animation::offline::RawAnimation
+buildRaw(const CharacterRig& rig, const aiAnimation* anim)
 {
     const double ticksPerSec = (anim->mTicksPerSecond > 0.0) ? anim->mTicksPerSecond : 60.0;
     const float durationSec = static_cast<float>(anim->mDuration / ticksPerSec);
@@ -206,10 +221,59 @@ buildClip(const CharacterRig& rig, const aiAnimation* anim)
         }
     }
 
+    return raw;
+}
+
+// Compile a RawAnimation to a runtime Animation.
+ozz::unique_ptr<ozz::animation::Animation> buildClip(const ozz::animation::offline::RawAnimation& raw)
+{
     if (!raw.Validate())
         return nullptr;
     ozz::animation::offline::AnimationBuilder builder;
     return builder(raw);
+}
+
+// Build a runtime *additive* (delta) Animation from a RawAnimation, taken relative
+// to the skeleton REST pose (passed in as `ref`, one Transform per joint).
+//
+// Apex additive clips are authored as a delta relative to the neutral/rest pose and
+// are typically CONSTANT over the clip (a held offset — the game ramps the additive
+// WEIGHT over time, not the pose).  So referencing the clip's own first frame (the
+// default) yields a zero delta.  Referencing the rest pose recovers the real per-
+// joint offset (the cast importer stores additive rotations raw == relative to rest,
+// so `delta = clip · rest⁻¹` is exactly the authored additive value).
+ozz::unique_ptr<ozz::animation::Animation>
+buildAdditiveClip(const ozz::animation::offline::RawAnimation& raw, ozz::span<const ozz::math::Transform> ref)
+{
+    if (!raw.Validate())
+        return nullptr;
+    ozz::animation::offline::RawAnimation deltaRaw;
+    ozz::animation::offline::AdditiveAnimationBuilder addBuilder;
+    if (!addBuilder(raw, ref, &deltaRaw) || !deltaRaw.Validate())
+        return nullptr;
+    ozz::animation::offline::AnimationBuilder builder;
+    return builder(deltaRaw);
+}
+
+// Unpack one joint (lane 0..3) of a SoaTransform into an AoS ozz::math::Transform.
+ozz::math::Transform soaJointToTransform(const ozz::math::SoaTransform& st, int lane)
+{
+    float tx[4], ty[4], tz[4], rx[4], ry[4], rz[4], rw[4], sx[4], sy[4], sz[4];
+    ozz::math::StorePtrU(st.translation.x, tx);
+    ozz::math::StorePtrU(st.translation.y, ty);
+    ozz::math::StorePtrU(st.translation.z, tz);
+    ozz::math::StorePtrU(st.rotation.x, rx);
+    ozz::math::StorePtrU(st.rotation.y, ry);
+    ozz::math::StorePtrU(st.rotation.z, rz);
+    ozz::math::StorePtrU(st.rotation.w, rw);
+    ozz::math::StorePtrU(st.scale.x, sx);
+    ozz::math::StorePtrU(st.scale.y, sy);
+    ozz::math::StorePtrU(st.scale.z, sz);
+    ozz::math::Transform t;
+    t.translation = ozz::math::Float3(tx[lane], ty[lane], tz[lane]);
+    t.rotation = ozz::math::Quaternion(rx[lane], ry[lane], rz[lane], rw[lane]);
+    t.scale = ozz::math::Float3(sx[lane], sy[lane], sz[lane]);
+    return t;
 }
 } // namespace
 
@@ -222,7 +286,11 @@ bool WeaponViewmodelAnim::load(const std::string& glbPath, bool flipUVs)
 
     const int numJoints = impl_->rig.numJoints();
     impl_->context.Resize(numJoints);
-    impl_->locals.resize(static_cast<size_t>(impl_->rig.skeleton()->num_soa_joints()));
+    impl_->additiveContext.Resize(numJoints);
+    const auto numSoa = static_cast<size_t>(impl_->rig.skeleton()->num_soa_joints());
+    impl_->locals.resize(numSoa);
+    impl_->baseLocals.resize(numSoa);
+    impl_->addLocals.resize(numSoa);
     impl_->models.resize(static_cast<size_t>(numJoints));
     impl_->skinMats.assign(static_cast<size_t>(numJoints), glm::mat4(1.0f));
 
@@ -244,10 +312,34 @@ bool WeaponViewmodelAnim::load(const std::string& glbPath, bool flipUVs)
             impl_->boltSlideAxis = glm::normalize(d);
     }
 
+    // Rest pose (AoS, one Transform per joint) — the reference for building additive
+    // (delta) clips. Apex additive offsets are authored relative to the rest pose.
+    std::vector<ozz::math::Transform> restRef(static_cast<size_t>(numJoints));
+    {
+        const auto jn = impl_->rig.skeleton()->joint_names();
+        const auto& rp = impl_->rig.restPoses();
+        for (int j = 0; j < numJoints; ++j) {
+            ozz::math::Transform t;
+            t.translation = ozz::math::Float3(0.f, 0.f, 0.f);
+            t.rotation = ozz::math::Quaternion::identity();
+            t.scale = ozz::math::Float3(1.f, 1.f, 1.f);
+            auto rit = rp.find(std::string(jn[static_cast<size_t>(j)]));
+            if (rit != rp.end()) {
+                t.translation = rit->second.translation;
+                t.rotation = rit->second.rotation;
+                t.scale = rit->second.scale;
+            }
+            restRef[static_cast<size_t>(j)] = t;
+        }
+    }
+
     Assimp::Importer importer;
     const auto flags =
         static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_LimitBoneWeights);
     const aiScene* scene = importer.ReadFile(glbPath, flags);
+    // Keep each clip's RawAnimation so the additive (delta) versions can be built in a
+    // second pass, AFTER we know the neutral standing pose to reference against.
+    std::vector<std::pair<std::string, ozz::animation::offline::RawAnimation>> rawClips;
     if (scene) {
         for (unsigned i = 0; i < scene->mNumAnimations; ++i) {
             const aiAnimation* anim = scene->mAnimations[i];
@@ -256,12 +348,41 @@ bool WeaponViewmodelAnim::load(const std::string& glbPath, bool flipUVs)
             auto bar = name.rfind('|');
             if (bar != std::string::npos)
                 name = name.substr(bar + 1);
-            ozz::unique_ptr<ozz::animation::Animation> compiled = buildClip(impl_->rig, anim);
+            ozz::animation::offline::RawAnimation raw = buildRaw(impl_->rig, anim);
+            ozz::unique_ptr<ozz::animation::Animation> compiled = buildClip(raw);
             if (compiled) {
                 SDL_Log("WeaponViewmodelAnim: clip '%s' dur=%.2fs", name.c_str(), static_cast<double>(compiled->duration()));
                 impl_->clips[name] = std::move(compiled);
+                rawClips.emplace_back(name, std::move(raw));
             }
         }
+    }
+
+    // Additive reference = the neutral STANDING viewmodel pose, taken from the end of
+    // the absolute "draw" clip (the aim-ready pose all the additive offsets layer onto).
+    // Referencing the bind/rest pose instead would bake the root's bind→aim rotation
+    // into every additive delta and roll the whole rig about its root on crouch.
+    // Fall back to rest if "draw" is absent.
+    std::vector<ozz::math::Transform> additiveRef = restRef;
+    if (impl_->clips.count("draw") > 0) {
+        std::vector<ozz::math::SoaTransform> tmp(static_cast<size_t>(impl_->rig.skeleton()->num_soa_joints()));
+        ozz::animation::SamplingJob sj;
+        sj.animation = impl_->clips["draw"].get();
+        sj.context = &impl_->additiveContext;
+        sj.ratio = 1.0f; // draw end = standing ready
+        sj.output = ozz::make_span(tmp);
+        if (sj.Run()) {
+            for (int j = 0; j < numJoints; ++j)
+                additiveRef[static_cast<size_t>(j)] = soaJointToTransform(tmp[static_cast<size_t>(j) / 4], j % 4);
+        }
+    }
+
+    // Second pass: build the additive (delta) clips relative to the standing reference,
+    // so any clip can be layered as an Apex-style offset (crouch/sprint/...) on top of
+    // the base pose without disturbing the root.
+    for (auto& [name, raw] : rawClips) {
+        if (ozz::unique_ptr<ozz::animation::Animation> add = buildAdditiveClip(raw, ozz::make_span(additiveRef)))
+            impl_->additiveClips[name] = std::move(add);
     }
     SDL_Log("WeaponViewmodelAnim: loaded '%s' — %d joints, %zu clips",
             glbPath.c_str(),
@@ -292,6 +413,19 @@ void WeaponViewmodelAnim::playRestPose()
     impl_->finished = false;
     if (impl_->rig.isLoaded())
         impl_->setRestPose();
+}
+
+void WeaponViewmodelAnim::setAdditiveLayer(const std::string& name, float weight, float sampleRatio)
+{
+    impl_->additiveName = (impl_->additiveClips.count(name) > 0) ? name : std::string();
+    impl_->additiveWeight = std::clamp(weight, 0.0f, 1.0f);
+    impl_->additiveRatio = std::clamp(sampleRatio, 0.0f, 1.0f);
+}
+
+void WeaponViewmodelAnim::clearAdditiveLayer()
+{
+    impl_->additiveName.clear();
+    impl_->additiveWeight = 0.0f;
 }
 
 void WeaponViewmodelAnim::triggerFire()
@@ -343,12 +477,43 @@ void WeaponViewmodelAnim::update(float dtSec)
                 impl_->finished = true;
             }
 
+            // Base clip -> baseLocals.
             ozz::animation::SamplingJob job;
             job.animation = clip;
             job.context = &impl_->context;
             job.ratio = ratio;
-            job.output = ozz::make_span(impl_->locals);
+            job.output = ozz::make_span(impl_->baseLocals);
             if (job.Run()) {
+                // Optionally layer an additive (delta) clip on top — Apex-style state
+                // offsets (crouch lower, sprint sway). The delta is applied per-joint
+                // and scaled by weight, so weight 0 == pure base, weight 1 == full
+                // offset; ramping weight gives a smooth transition.
+                auto addIt = (!impl_->additiveName.empty() && impl_->additiveWeight > 1e-3f)
+                                 ? impl_->additiveClips.find(impl_->additiveName)
+                                 : impl_->additiveClips.end();
+                if (addIt != impl_->additiveClips.end() && addIt->second) {
+                    ozz::animation::SamplingJob ajob;
+                    ajob.animation = addIt->second.get();
+                    ajob.context = &impl_->additiveContext;
+                    ajob.ratio = impl_->additiveRatio;
+                    ajob.output = ozz::make_span(impl_->addLocals);
+                    ozz::animation::BlendingJob::Layer baseLayer;
+                    baseLayer.transform = ozz::make_span(impl_->baseLocals);
+                    baseLayer.weight = 1.0f;
+                    ozz::animation::BlendingJob::Layer addLayer;
+                    addLayer.transform = ozz::make_span(impl_->addLocals);
+                    addLayer.weight = impl_->additiveWeight;
+                    ozz::animation::BlendingJob bj;
+                    bj.threshold = 0.1f;
+                    bj.rest_pose = impl_->rig.skeleton()->joint_rest_poses();
+                    bj.layers = ozz::span<const ozz::animation::BlendingJob::Layer>(&baseLayer, 1);
+                    bj.additive_layers = ozz::span<const ozz::animation::BlendingJob::Layer>(&addLayer, 1);
+                    bj.output = ozz::make_span(impl_->locals);
+                    if (!(ajob.Run() && bj.Run()))
+                        impl_->locals = impl_->baseLocals; // fall back to base on failure
+                } else {
+                    impl_->locals = impl_->baseLocals;
+                }
                 impl_->composeFromLocals();
                 posed = true;
             }

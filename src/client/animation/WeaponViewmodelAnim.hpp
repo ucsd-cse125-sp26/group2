@@ -53,6 +53,20 @@ public:
     /// @brief Stop any active clip and hold the skeleton rest pose.
     void playRestPose();
 
+    /// @brief Layer an Apex *additive* clip (a delta pose, e.g. the crouch lower or
+    /// sprint sway) on top of whatever base clip is playing — the authentic Apex
+    /// model where state modifiers stack onto the base aim pose.  `weight` (0..1)
+    /// scales the offset, so ramping it gives a smooth transition; `sampleRatio`
+    /// (0..1) picks where in the additive clip to sample (1 = its end pose, e.g. the
+    /// fully-crouched offset).  The delta is taken relative to the clip's own first
+    /// frame, so it adds zero at weight 0 and the full offset at weight 1.  Call with
+    /// weight 0 (or clearAdditiveLayer) to disable.  No-op if `name` isn't an
+    /// additive-capable clip.
+    void setAdditiveLayer(const std::string& name, float weight, float sampleRatio = 1.0f);
+
+    /// @brief Remove any active additive layer (pose = base clip only).
+    void clearAdditiveLayer();
+
     /// @brief Currently-playing clip name ("" if rest pose).
     [[nodiscard]] const std::string& currentClip() const;
 
