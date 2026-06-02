@@ -256,9 +256,11 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
     } else if (const auto* health = dynamic_cast<const HealthArmorBar*>(&widget)) {
         writeFloatParam(out, first, "panelWidth", health->panelWidth);
         writeFloatParam(out, first, "barHeight", health->barHeight);
-        writeFloatParam(out, first, "chamferSize", health->chamferSize);
-        writeFloatParam(out, first, "cornerCutSize", health->cornerCutSize);
-        writeFloatParam(out, first, "outlineThickness", health->outlineThickness);
+        writeFloatParam(out, first, "svgScale", health->svgScale);
+        writeFloatParam(out, first, "svgOffsetX", health->svgOffsetX);
+        writeFloatParam(out, first, "svgOffsetY", health->svgOffsetY);
+        writeFloatParam(out, first, "svgStretchX", health->svgStretchX);
+        writeFloatParam(out, first, "svgStretchY", health->svgStretchY);
     } else if (const auto* hit = dynamic_cast<const HitMarkerWidget*>(&widget)) {
         writeFloatParam(out, first, "armLength", hit->armLength);
         writeFloatParam(out, first, "armThickness", hit->armThickness);
@@ -454,9 +456,11 @@ void editWidgetSpecific(HudWidget& widget)
     } else if (auto* health = dynamic_cast<HealthArmorBar*>(&widget)) {
         editFloat("Panel Width", health->panelWidth, 1.0f, 80.0f, 1200.0f);
         editFloat("Bar Height", health->barHeight, 0.5f, 4.0f, 200.0f);
-        editFloat("Chamfer Size", health->chamferSize, 0.5f, 0.0f, 120.0f);
-        editFloat("Corner Cut Size", health->cornerCutSize, 0.25f, 0.0f, 80.0f);
-        editFloat("Outline Thickness", health->outlineThickness, 0.25f, 0.0f, 40.0f);
+        editFloat("SVG Scale", health->svgScale, 0.01f, 0.01f, 8.0f);
+        editFloat("SVG Offset X", health->svgOffsetX, 0.5f, -2000.0f, 2000.0f);
+        editFloat("SVG Offset Y", health->svgOffsetY, 0.5f, -2000.0f, 2000.0f);
+        editFloat("SVG Stretch X", health->svgStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("SVG Stretch Y", health->svgStretchY, 0.01f, 0.01f, 8.0f);
     } else if (auto* hit = dynamic_cast<HitMarkerWidget*>(&widget)) {
         editFloat("Arm Length", hit->armLength, 0.25f, 0.0f, 120.0f);
         editFloat("Arm Thickness", hit->armThickness, 0.1f, 0.0f, 40.0f);
