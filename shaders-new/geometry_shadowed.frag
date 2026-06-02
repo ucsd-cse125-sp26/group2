@@ -3,7 +3,7 @@
 #define SHADOW_BIAS 5.0
 //#define MAX_SPOT_LIGHTS 0
 #define MAX_POINT_LIGHTS 8
-#define MAX_MOVING_POINT_LIGHTS 64
+#define MAX_MOVING_POINT_LIGHTS 56
 
 struct PointLight {
     vec3 pos;
