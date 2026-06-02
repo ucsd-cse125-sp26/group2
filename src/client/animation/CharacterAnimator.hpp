@@ -34,6 +34,11 @@ struct AnimationInputs
     bool crouching = false; ///< Crouch currently held (phase 1: note-only).
     int moveMode = 0;       ///< MoveMode value: 0=OnFoot, 1=Sliding, 2=WallRunning.
     int wallRunSide = 0;    ///< WallSide value: 0=None, 1=Left, 2=Right.
+    /// @brief Full-body emote clip to force this frame, as the integer value of a
+    /// `ClipId`. Values < `ClipId::_Count` select an emote that overrides
+    /// locomotion (played at full weight through the override slot); the default
+    /// `_Count` means "no emote".
+    int emoteClip = static_cast<int>(ClipId::_Count);
 };
 
 /// Number of sampler slots available for the per-frame blend.

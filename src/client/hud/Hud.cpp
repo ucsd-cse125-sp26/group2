@@ -12,6 +12,7 @@
 #include "widgets/DamageAccumWidget.hpp"
 #include "widgets/DamageIndicator.hpp"
 #include "widgets/DamageNumberWidget.hpp"
+#include "widgets/EmoteWheelWidget.hpp"
 #include "widgets/EnemyWorldHealthBar.hpp"
 #include "widgets/EquipmentSlots.hpp"
 #include "widgets/GrenadeSlotsWidget.hpp"
@@ -193,6 +194,7 @@ void Hud::createWidgets()
     // Directional damage arcs around the reticle.
     widgets_.push_back(std::make_unique<DamageIndicator>());
     widgets_.push_back(std::make_unique<AbilitySelectionWidget>());
+    widgets_.push_back(std::make_unique<EmoteWheelWidget>()); // Center radial emote menu (hold-B).
 
     // Top right: killfeed.
     widgets_.push_back(std::make_unique<KillFeed>());

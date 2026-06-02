@@ -2044,6 +2044,21 @@ void runMovement(Registry& registry, float dt, const physics::WorldGeometry& wor
         auto& shape = registry.get<CollisionShape>(e);
         const auto& input = registry.get<InputSnapshot>(e);
         sim.pendingKccCorrection = glm::vec3{0.0f};
+
+        // Cosmetic emote bookkeeping (server-authoritative). A queued request
+        // starts the emote; any movement/combat input cancels it so the player
+        // can break out instantly. The active index is replicated via
+        // PlayerVisState and consumed by the server animator to drive the
+        // override clip seen by every client.
+        if (input.emoteRequest >= 0) {
+            vis.activeEmote = input.emoteRequest;
+        } else if (vis.activeEmote >= 0) {
+            const bool brokeEmote = input.forward || input.back || input.left || input.right || input.jump ||
+                                    input.crouch || input.shooting || input.scoped || input.reload ||
+                                    input.throwGrenade || input.ability1 || input.ability2;
+            if (brokeEmote)
+                vis.activeEmote = -1;
+        }
         {
             // Bundle the two halves into a single ref so the helper functions
             // below don't need a "(vis, sim)" pair on every call.

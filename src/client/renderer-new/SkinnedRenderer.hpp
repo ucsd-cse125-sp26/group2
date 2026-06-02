@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "Camera.hpp"       // FrustumPlanes
 #include "RendererTypes.hpp" // BoneInfluence, SkinnedInstance, RigMeshSource
 
 #include <SDL3/SDL.h>
@@ -72,26 +73,40 @@ public:
     /// rig FBX loads.  See `RigMeshSource` in RendererTypes.hpp for the layout.
     bool setRig(const std::vector<RigMeshSource>& meshes, int numJoints);
 
-    /// @brief Push this frame's per-character bone palette + per-instance data.
+    /// @brief Push this frame's per-character bone palette + per-instance data
+    /// and frustum-cull it down to the on-screen subset.
     /// @param palette    Flat array, sized `numInstances * numJoints` (mat4 each).
-    /// @param instances  One entry per visible character.  `paletteBase` of entry
-    ///                   `i` MUST equal `i * numJoints` so the shader's index math works.
+    /// @param instances  One entry per character (ALL of them — visible or not).
+    ///                   `paletteBase` of entry `i` MUST equal `i * numJoints` so
+    ///                   the palette slice for that instance can be located.
+    /// @param frustum    Camera view-projection frustum planes (Gribb-Hartmann).
+    ///                   Each instance is bounding-sphere tested against these and
+    ///                   dropped if fully outside the view.
     ///
     /// IMPLEMENTATION (real, wired):
-    ///   - Copies both vectors into CPU-side staging (`framePalette_`, `frameInstances_`).
+    ///   - Sphere-culls `instances` against `frustum`: the bounding sphere is the
+    ///     rig's bind-pose bounds (computed in `setRig`) transformed by the
+    ///     instance `worldTransform`, so the test tracks the actual rendered mesh
+    ///     (which is vertically offset from the sim position) rather than a bare
+    ///     point — this is what fixes characters popping out at the screen edge.
+    ///   - Copies the surviving instances (and their palette slices, compacted so
+    ///     no off-screen palettes are uploaded) into CPU-side staging
+    ///     (`framePalette_`, `frameInstances_`).
     ///   - The actual GPU upload happens later via `uploadFrame()` (called by
     ///     `NewRenderer::drawFrame` before the render pass starts).
     ///
     /// DATA SOURCE: Game.cpp's per-frame animation block walks the ECS view
     /// `<AnimatedCharacter, Position, Velocity, PlayerVisState, InputSnapshot>`:
-    ///   1. For each visible character compute `worldTransform = T(pos) * R(yaw) * S(scale)`.
+    ///   1. For each character compute `worldTransform = T(pos) * R(yaw) * S(scale)`.
     ///   2. `palette[slot * numJoints .. (slot+1) * numJoints] = animator.skinMatrices()`.
     ///   3. `instances[slot] = {worldTransform, paletteBase=slot*numJoints, tint}`.
     ///
-    /// CONSUMER: the (not-yet-written) skinned vertex shader reads:
+    /// CONSUMER: the skinned vertex shader reads:
     ///   `instances[gl_InstanceIndex]`           → worldTransform + paletteBase
     ///   `palette[paletteBase + boneIndices.k]`  → bone matrix k (k = 0..3)
-    void setFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
+    void setFrame(const std::vector<glm::mat4>& palette,
+                  const std::vector<SkinnedInstance>& instances,
+                  const FrustumPlanes& frustum);
 
     /// @brief Upload this frame's palette + instance buffers to the GPU.
     /// @param cmd       Frame command buffer.
@@ -163,6 +178,13 @@ private:
     /// @brief Grow palette/instance SSBOs (and their transfer buffers) to at least these byte sizes.
     bool ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes);
 
+    /// @brief Test whether a world-space bounding sphere intersects (or lies
+    /// inside) the view frustum.  Uses the Gribb-Hartmann plane convention of
+    /// `FrustumPlanes` (a point is inside a plane when `dot(plane.xyz, p) +
+    /// plane.w >= 0`).  Returns false only when the sphere is fully outside at
+    /// least one plane.
+    static bool sphereInFrustum(const glm::vec3& center, float radius, const FrustumPlanes& planes);
+
     bool createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat);
 
     bool createSkinnedDepthPipeline(const SDL_GPUShaderFormat& shaderFormat);
@@ -186,6 +208,12 @@ private:
     int numJoints_ = 0;
     std::vector<SkinnedMesh> skinnedMeshes_;
 
+    // Bind-pose bounding sphere (rig-local space), computed in `setRig` and used
+    // by `setFrame` to frustum-cull instances.  The radius carries an animation
+    // margin so limbs swung out past the bind pose are not clipped early.
+    glm::vec3 rigBoundingCenter_{0.0f};
+    float rigBoundingRadius_ = 0.0f;
+
     // ─── Owned: per-frame GPU resources (grow on demand) ─────────────────────
     // SDL_GPUBuffer* palettesSsbo_ = nullptr;  ///< STORAGE_READ, mat4[numInstances * numJoints].
     // SDL_GPUBuffer* instancesSsbo_ = nullptr; ///< STORAGE_READ, SkinnedInstance[numInstances].
@@ -200,7 +228,16 @@ private:
     Uint32 instanceXferCapacityBytes_ = 0;
 
     // ─── CPU staging (filled by setFrame, drained by uploadFrame) ────────────
+    //
+    // `frameInstances_` holds EVERY submitted character, partitioned so the
+    // on-screen ones come first:
+    //   [0, visibleInstanceCount_)        → inside the camera frustum
+    //   [visibleInstanceCount_, size())   → off-screen, but still shadow casters
+    // The colour pass (`draw`) renders only the front slice; the shadow/depth
+    // pass (`drawDepth`) renders the whole buffer so off-screen players keep
+    // casting shadows.  `framePalette_` is compacted in the same order.
     std::vector<glm::mat4> framePalette_;
     std::vector<SkinnedInstance> frameInstances_;
+    Uint32 visibleInstanceCount_ = 0;
     bool frameDirty_ = false;
 };

@@ -339,6 +339,13 @@ private:
     bool cachedGravFlipped_{false}; ///< Local player gravity-flip state, updated each iterate().
     float currentCameraRoll_{0.0f}; ///< Smoothed camera roll angle (radians).
 
+    // Emote state (client-side prediction for the local player). Set when the
+    // emote wheel fires, cleared on local movement/combat input or death. Drives
+    // the local animator override, the third-person emote camera, and showing
+    // the local body. Remote players' emotes are server-driven via AnimSnapshot.
+    int localEmote_{-1};            ///< Active local emote index (EmoteCatalog), or -1.
+    float emoteCamBlend_{0.0f};     ///< 0 = first-person, 1 = third-person emote cam (eased).
+
     // Map collision data — loaded from GLB, owns the vectors that back activeWorld().
     physics::MapCollisionData mapCollision_;
 
@@ -527,7 +534,9 @@ private:
     //      while firing we measure the player's counter-mouse and subtract it
     //      from the recovery debt — so the engine refunds only the un-paid
     //      portion. Avoids the "double-compensation" crosshair-drop bug.
-    bool useRecoilCompensation_ = true;     ///< false = Approach A; true = Approach B.
+    bool useRecoilCompensation_ = false;    ///< false = Approach A (no restore — aim keeps the
+                                            ///< view angles the recoil walked it to; player
+                                            ///< compensates manually); true = Approach B.
     float lastSnapPitchAfterCommit_ = 0.0f; ///< snap.pitch saved at end of last spring tick — diff against
     float lastSnapYawAfterCommit_ = 0.0f;   ///< current to recover the player's mouse delta this frame.
     bool haveLastSnap_ = false;             ///< Becomes true after the first frame the local player exists.
