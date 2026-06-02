@@ -346,6 +346,17 @@ private:
     int localEmote_{-1};            ///< Active local emote index (EmoteCatalog), or -1.
     float emoteCamBlend_{0.0f};     ///< 0 = first-person, 1 = third-person emote cam (eased).
 
+    // Killcam: while dead and awaiting respawn, hold the camera at the death
+    // position and rotate it to keep the killer centered on screen.
+    bool killcamActive_{false};            ///< True this frame while the killcam is driving the camera.
+    glm::vec3 killcamEye_{0.0f};           ///< Eye position locked at the moment of death.
+    float killcamYaw_{0.0f};               ///< Smoothed killcam yaw (radians).
+    float killcamPitch_{0.0f};             ///< Smoothed killcam pitch (radians).
+    glm::vec3 killcamKillerCenter_{0.0f};  ///< Killer AABB center (world) for the HUD label.
+    glm::vec3 killcamKillerHalf_{0.0f};    ///< Killer AABB half-extents (world) for the HUD label.
+    entt::entity killcamKillerEntity_{entt::null}; ///< Killer entity (drives the chams pass), or null.
+    std::string killcamKillerName_;        ///< Killer's display nickname (for the HUD label).
+
     // Map collision data — loaded from GLB, owns the vectors that back activeWorld().
     physics::MapCollisionData mapCollision_;
 

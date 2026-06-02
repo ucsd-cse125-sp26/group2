@@ -18,6 +18,7 @@
 #include "widgets/GrenadeSlotsWidget.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
+#include "widgets/KillcamBoxWidget.hpp"
 #include "widgets/KillFeed.hpp"
 #include "widgets/Minimap.hpp"
 #include "widgets/PickupNotification.hpp"
@@ -183,6 +184,7 @@ void Hud::createWidgets()
     // World-space markers — drawn on top of the scene but before screen-space
     // chrome so the chrome can occlude them at edges.
     widgets_.push_back(std::make_unique<EnemyWorldHealthBar>());
+    widgets_.push_back(std::make_unique<KillcamBoxWidget>()); // Red killer box on the death screen.
     widgets_.push_back(std::make_unique<DamageNumberWidget>());
 
     // Center reticle + hit-confirm + accumulated-damage stack.

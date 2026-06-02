@@ -692,7 +692,7 @@ file(MAKE_DIRECTORY "${SHADER_NEW_OUT_DIR}")
 
 set(SHADER_NEW_SOURCES
         geometry_depth.vert emtpy.frag
-        skinned_geometry.vert skinned_geometry_depth.vert debug.frag
+        skinned_geometry.vert skinned_geometry_depth.vert debug.frag chams.frag
         geometry.vert geometry.frag
         geometry_shadowed.frag
         debug_depth.vert debug_depth.frag
@@ -859,6 +859,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EmoteWheelWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EmoteWheelWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillcamBoxWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillcamBoxWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/VignetteWidget.cpp"
