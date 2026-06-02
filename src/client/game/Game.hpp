@@ -527,7 +527,9 @@ private:
     //      while firing we measure the player's counter-mouse and subtract it
     //      from the recovery debt — so the engine refunds only the un-paid
     //      portion. Avoids the "double-compensation" crosshair-drop bug.
-    bool useRecoilCompensation_ = true;     ///< false = Approach A; true = Approach B.
+    bool useRecoilCompensation_ = false;    ///< false = Approach A (no restore — aim keeps the
+                                            ///< view angles the recoil walked it to; player
+                                            ///< compensates manually); true = Approach B.
     float lastSnapPitchAfterCommit_ = 0.0f; ///< snap.pitch saved at end of last spring tick — diff against
     float lastSnapYawAfterCommit_ = 0.0f;   ///< current to recover the player's mouse delta this frame.
     bool haveLastSnap_ = false;             ///< Becomes true after the first frame the local player exists.
