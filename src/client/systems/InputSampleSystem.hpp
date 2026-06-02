@@ -6,6 +6,7 @@
 #include "config/InputBindings.hpp"
 #include "config/UserSettings.hpp"
 #include "ecs/components/Controllable.hpp"
+#include "ecs/components/EmoteCatalog.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/RespawnTimer.hpp"
@@ -52,6 +53,27 @@ inline bool prevAbilitySelectRight = false;
 inline bool prevGamepadAbilitySelectLeft = false;
 /// @brief Tracks previous-frame gamepad right ability-select chord for edge detection.
 inline bool prevGamepadAbilitySelectRight = false;
+
+// ─── Emote wheel state ───────────────────────────────────────────────────────
+//
+// The emote wheel mirrors the radial-selection feel of a grenade wheel: hold the
+// Emote binding to open the wheel, point (mouse delta on KBM, right stick on a
+// pad) at one of the `emotes::kEmoteCount` sectors to highlight it, and release
+// to play the highlighted emote. The highlighted sector and a latched
+// "play this emote" request are read by the game loop and the HUD widget.
+
+/// @brief True while the emote wheel is open (Emote binding held on any device).
+inline bool emoteWheelOpen = false;
+/// @brief Currently highlighted emote sector while the wheel is open, or -1 (none).
+inline int emoteWheelSelection = -1;
+/// @brief Accumulated pointing direction used to resolve the highlighted sector.
+inline float emoteWheelDirX = 0.0f;
+inline float emoteWheelDirY = 0.0f;
+/// @brief Latched emote to play on wheel release; consumed once by the game loop.
+inline int pendingEmoteRequest = -1;
+/// @brief Previous-frame Emote-binding state for open/close edge detection.
+inline bool prevEmoteKey = false;
+inline bool prevGamepadEmoteKey = false;
 
 /// @brief Gamepad axis mapping configuration for look and move axes, used to support stick swapping in user settings.
 struct JoystickAxis
@@ -108,6 +130,82 @@ inline bool consumePendingGrenadeCyclePrev()
     return requested;
 }
 
+/// @brief Consume and clear the latched emote-play request (-1 = none).
+inline int consumePendingEmote()
+{
+    const int emote = pendingEmoteRequest;
+    pendingEmoteRequest = -1;
+    return emote;
+}
+
+/// @brief Resolve `emoteWheelSelection` from a pointing input.
+///
+/// @param dx,dy      Pointing delta in screen convention (dx right, dy down).
+/// @param accumulate True for mouse deltas (integrated into a virtual stick),
+///                   false for an absolute stick direction.
+///
+/// The wheel lays emote 0 at the top and proceeds clockwise. A small deadzone
+/// keeps the selection empty until the player points clearly in a direction.
+inline void emoteWheelApplyPointing(float dx, float dy, bool accumulate)
+{
+    if (accumulate) {
+        emoteWheelDirX += dx;
+        emoteWheelDirY += dy;
+    } else {
+        emoteWheelDirX = dx;
+        emoteWheelDirY = dy;
+    }
+
+    // Clamp magnitude so accumulated mouse motion can't grow without bound.
+    constexpr float k_maxMag = 400.0f;
+    const float mag2 = emoteWheelDirX * emoteWheelDirX + emoteWheelDirY * emoteWheelDirY;
+    if (mag2 > k_maxMag * k_maxMag) {
+        const float m = std::sqrt(mag2);
+        emoteWheelDirX *= k_maxMag / m;
+        emoteWheelDirY *= k_maxMag / m;
+    }
+
+    constexpr float k_deadzone = 28.0f;
+    if (mag2 < k_deadzone * k_deadzone) {
+        emoteWheelSelection = -1;
+        return;
+    }
+
+    // atan2(dx, -dy): 0 at top (pointing up), increasing clockwise.
+    float angle = std::atan2(emoteWheelDirX, -emoteWheelDirY);
+    if (angle < 0.0f)
+        angle += glm::two_pi<float>();
+    const float sectorSize = glm::two_pi<float>() / static_cast<float>(emotes::kEmoteCount);
+    emoteWheelSelection = static_cast<int>(std::lround(angle / sectorSize)) % emotes::kEmoteCount;
+}
+
+/// @brief Track the Emote binding (keyboard/mouse) to open/close the wheel.
+///
+/// Must run every iterate() before runMouseLook so the look sampler can divert
+/// mouse motion into the wheel. On release, the highlighted sector is latched
+/// as the emote to play.
+inline void runEmoteWheelKey(const InputBindings& bindings)
+{
+    const bool* const kKeys = SDL_GetKeyboardState(nullptr);
+    const SDL_MouseButtonFlags mouse = SDL_GetMouseState(nullptr, nullptr);
+    const bool keyNow = bindings.pressed(Action::Emote, kKeys, mouse);
+
+    if (keyNow && !prevEmoteKey) {
+        // Opening: clear any stale pointing/selection.
+        emoteWheelDirX = 0.0f;
+        emoteWheelDirY = 0.0f;
+        emoteWheelSelection = -1;
+    } else if (!keyNow && prevEmoteKey) {
+        // Releasing: fire the highlighted emote (if any).
+        if (emoteWheelSelection >= 0)
+            pendingEmoteRequest = emoteWheelSelection;
+        emoteWheelSelection = -1;
+    }
+
+    emoteWheelOpen = keyNow;
+    prevEmoteKey = keyNow;
+}
+
 /// @brief Sample mouse delta and accumulate into yaw / pitch.
 ///
 /// Must be called **every iterate() call** regardless of whether a physics
@@ -133,6 +231,13 @@ inline void runMouseLook(Registry& registry, float mouseSensitivity, bool gravit
     if (gravityFlipped) {
         mdx = -mdx;
         mdy = -mdy;
+    }
+
+    // While the emote wheel is open, mouse motion picks a sector instead of
+    // turning the camera (standard radial-menu feel).
+    if (emoteWheelOpen) {
+        emoteWheelApplyPointing(mdx, mdy, /*accumulate=*/true);
+        return;
     }
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
@@ -268,8 +373,8 @@ inline void runWeaponKeys(Registry& registry, const InputBindings& bindings)
 
     // Suppress fire/aim while the grenade modifier is held — Shoot/Scope are
     // repurposed for cycling, exactly as AbilityMenu repurposes them for ability
-    // selection.
-    const bool fireSuppressed = abilityMenuHeld || grenadeKeyNow;
+    // selection. Also suppress while the emote wheel is open.
+    const bool fireSuppressed = abilityMenuHeld || grenadeKeyNow || emoteWheelOpen;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.shooting = shootDown && !fireSuppressed;
@@ -374,6 +479,11 @@ inline void runGamepadLook(Registry& registry,
     if (!gamepadConnected(gamepad))
         return;
 
+    // While the emote wheel is open the right stick selects a sector, so don't
+    // also turn the camera with it.
+    if (emoteWheelOpen)
+        return;
+
     JoystickAxis lookAxis = getLookJoystickAxes(swapSticks);
 
     float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.x), deadzone);
@@ -398,6 +508,40 @@ inline void runGamepadLook(Registry& registry,
         // mouse mdy — so adding directly matches mouse-down = pitch+ behaviour.
         snap.pitch = std::clamp(snap.pitch + ry * pitchSensitivity * dt, -glm::radians(89.0f), glm::radians(89.0f));
     });
+}
+
+/// @brief Track the Emote binding (controller) to open/close the wheel and pick
+///        a sector from the right stick.
+///
+/// Mirrors runEmoteWheelKey; runs every iterate() before runGamepadLook. ORs
+/// into the shared wheel state so a player can use either device. On release the
+/// highlighted sector is latched as the emote to play.
+inline void runGamepadEmoteWheel(SDL_Gamepad* gamepad, const InputBindings& bindings, bool swapSticks = false)
+{
+    if (!gamepadConnected(gamepad))
+        return;
+
+    const bool padNow = bindings.controllerPressed(Action::Emote, gamepad);
+    if (padNow && !prevGamepadEmoteKey) {
+        emoteWheelDirX = 0.0f;
+        emoteWheelDirY = 0.0f;
+        emoteWheelSelection = -1;
+    } else if (!padNow && prevGamepadEmoteKey) {
+        if (emoteWheelSelection >= 0)
+            pendingEmoteRequest = emoteWheelSelection;
+        emoteWheelSelection = -1;
+    }
+    prevGamepadEmoteKey = padNow;
+
+    if (padNow) {
+        emoteWheelOpen = true;
+        // Right stick gives an absolute direction; scale into the pixel-space
+        // units emoteWheelApplyPointing expects so the deadzone lines up.
+        const JoystickAxis lookAxis = getLookJoystickAxes(swapSticks);
+        const float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.x));
+        const float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.y));
+        emoteWheelApplyPointing(rx * 200.0f, ry * 200.0f, /*accumulate=*/false);
+    }
 }
 
 /// @brief Sample gamepad buttons / left stick into the movement flags.

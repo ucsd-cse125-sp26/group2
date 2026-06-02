@@ -48,6 +48,12 @@ enum class ClipId : uint8_t
     StopRight,
     PivotLeft,
     PivotRight,
+    // Full-body emotes (one-shot/looping dances played via the override slot).
+    EmoteFlair,
+    EmoteMaraschino,
+    EmoteGangnam,
+    EmoteHipHop,
+    EmoteNorthernSoul,
     _Count, ///< Sentinel; also used as "no clip / no override".
 };
 
@@ -56,6 +62,10 @@ const char* clipName(ClipId id);
 
 /// @brief Filename (relative to assets/animations/) for a clip.
 const char* clipFile(ClipId id);
+
+/// @brief Map an emote wheel index (0..emotes::kEmoteCount-1) to its ClipId.
+/// Returns `ClipId::_Count` for out-of-range indices (treated as "no emote").
+ClipId emoteClipForIndex(int index);
 
 /// @brief Collection of animation clips loaded on top of a shared skeleton.
 ///

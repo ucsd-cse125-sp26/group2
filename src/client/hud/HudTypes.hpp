@@ -209,6 +209,16 @@ struct HudGrenadeRadialState
     std::array<HudGrenadeRadialItem, kHudGrenadeSlots> items;
 };
 
+/// @brief Emote wheel state — drives the radial emote selection menu.
+/// Item labels come from the neutral emote catalog (EmoteCatalog.hpp); the
+/// widget only needs to know whether the wheel is open and which sector is
+/// currently highlighted.
+struct HudEmoteWheelState
+{
+    bool open = false;       ///< True while the Emote binding is held.
+    int selectedIndex = -1;  ///< Highlighted emote sector, or -1 (none).
+};
+
 struct HudAbilityChoice
 {
     std::string name;
@@ -316,7 +326,6 @@ struct HudGameState
     float railgunChargeTime = 0.f; ///< Current GunInstance::chargeTime for the equipped railgun.
     float roundTimeRemaining = 0.f;
     bool isAlive = true;
-    bool isBuyPhase = false;
     MatchPhase currentPhase = MatchPhase::IN_PROGRESS; ///< Current server match phase.
     bool matchWon = false;                             ///< True if the local player won the finished match.
     bool forceScoreboardOpen = false;                  ///< True when match flow should show scoreboard automatically.
@@ -361,6 +370,7 @@ struct HudGameState
     std::span<const HudWorldEnemy> worldEnemies;                ///< Enemies whose HP bars float above them in-world.
     HudEquipmentState equipment;                                ///< Grapple / grenade / tactical state.
     HudGrenadeRadialState grenadeRadial;                        ///< Held-G grenade selection radial.
+    HudEmoteWheelState emoteWheel;                              ///< Held-B emote selection wheel.
     HudAbilitySelectionState abilitySelection;                  ///< Pending level-up ability choice.
     std::span<const HudPickupNotification> pickupNotifications; ///< Slide-in pickup messages this frame.
     std::span<const HudPopupMessage> popupMessages;             ///< Generic popup messages this frame.

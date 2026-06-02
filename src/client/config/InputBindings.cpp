@@ -316,7 +316,7 @@ InputBindings InputBindings::defaults()
     b.rebind(Action::CycleGrenade, Binding::bindKeyboard(SDL_SCANCODE_G));
     b.rebind(Action::KillSelf, Binding::bindKeyboard(SDL_SCANCODE_K));
     b.rebind(Action::Scoreboard, Binding::bindKeyboard(SDL_SCANCODE_TAB));
-    b.rebind(Action::BuyMenu, Binding::bindKeyboard(SDL_SCANCODE_B));
+    b.rebind(Action::Emote, Binding::bindKeyboard(SDL_SCANCODE_B));
     b.rebind(Action::PushToTalk, Binding::bindKeyboard(SDL_SCANCODE_V));
 
     // Controller — standard twin-stick console-FPS layout. Triggers fire/aim,
@@ -338,7 +338,7 @@ InputBindings InputBindings::defaults()
     b.rebind(Action::CycleGrenade, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_LEFT), BindingDevice::Controller);
     b.rebind(Action::AbilityMenu, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_RIGHT), BindingDevice::Controller);
     b.rebind(Action::Scoreboard, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_BACK), BindingDevice::Controller);
-    b.rebind(Action::BuyMenu, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_STICK), BindingDevice::Controller);
+    b.rebind(Action::Emote, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_STICK), BindingDevice::Controller);
     b.rebind(Action::PushToTalk, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_LEFT_STICK), BindingDevice::Controller);
 
     return b;
@@ -387,8 +387,8 @@ std::string_view InputBindings::actionLabel(Action a)
         return "Kill Self";
     case Action::Scoreboard:
         return "Scoreboard";
-    case Action::BuyMenu:
-        return "Buy Menu";
+    case Action::Emote:
+        return "Emote Wheel";
     case Action::PushToTalk:
         return "Push to Talk";
     case Action::Count:
@@ -440,8 +440,8 @@ std::string_view InputBindings::configKey(Action a)
         return "kill-self";
     case Action::Scoreboard:
         return "scoreboard";
-    case Action::BuyMenu:
-        return "buy-menu";
+    case Action::Emote:
+        return "emote";
     case Action::PushToTalk:
         return "push-to-talk";
     case Action::Count:

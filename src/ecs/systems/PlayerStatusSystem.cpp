@@ -307,7 +307,9 @@ inline void handleDeath(entt::entity& player,
         spawnRagdoll(registry, player);
 
         // Update death
-        registry.get_or_emplace<PlayerVisState>(player).isDead = true;
+        auto& deadVis = registry.get_or_emplace<PlayerVisState>(player);
+        deadVis.isDead = true;
+        deadVis.activeEmote = -1; // Cancel any emote so it doesn't resume on respawn.
         registry.get_or_emplace<Velocity>(player) = Velocity{};
         registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = false; });
         registry.remove<HitboxInstance>(player);

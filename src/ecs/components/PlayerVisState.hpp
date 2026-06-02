@@ -28,6 +28,7 @@
 
 #include "PlayerStateEnums.hpp"
 
+#include <cstdint>
 #include <glm/vec3.hpp>
 
 /// @brief Replicated subset of player locomotion state.
@@ -57,6 +58,12 @@ struct PlayerVisState
     // Spatial state needed by client renderer/animator.
     glm::vec3 groundNormal{0.0f, 1.0f, 0.0f}; ///< Normal of the floor surface for foot orientation.
     glm::vec3 grapplePoint{0.0f};             ///< World-space anchor; renderer draws the cable to here.
+
+    // Cosmetic emote (full-body dance/taunt). Server-authoritative: set from
+    // InputSnapshot::emoteRequest, cleared on movement/combat input or death.
+    // Drives the server animator's override clip so the resulting AnimSnapshot
+    // makes every remote client see the emote. -1 = not emoting.
+    std::int8_t activeEmote{-1}; ///< Active emote index (EmoteCatalog), or -1.
 
     // Camera effects (read by renderer).
     float targetCameraTilt{0.0f}; ///< Target camera roll for wallrun lean (degrees).

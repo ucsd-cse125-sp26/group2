@@ -100,6 +100,16 @@ const char* clipName(ClipId id)
         return "Pivot Left";
     case ClipId::PivotRight:
         return "Pivot Right";
+    case ClipId::EmoteFlair:
+        return "Emote: Flair";
+    case ClipId::EmoteMaraschino:
+        return "Emote: Maraschino";
+    case ClipId::EmoteGangnam:
+        return "Emote: Gangnam";
+    case ClipId::EmoteHipHop:
+        return "Emote: Hip Hop";
+    case ClipId::EmoteNorthernSoul:
+        return "Emote: Northern Soul";
     case ClipId::_Count:
         return "(none)";
     }
@@ -167,10 +177,40 @@ const char* clipFile(ClipId id)
         return "loco/pivot_left.fbx";
     case ClipId::PivotRight:
         return "loco/pivot_right.fbx";
+    // Emotes live under assets/emotes/; clip paths are relative to
+    // assets/animations/, so step up one directory.
+    case ClipId::EmoteFlair:
+        return "../emotes/Flair.fbx";
+    case ClipId::EmoteMaraschino:
+        return "../emotes/Dancing Maraschino Step.fbx";
+    case ClipId::EmoteGangnam:
+        return "../emotes/Gangnam Style.fbx";
+    case ClipId::EmoteHipHop:
+        return "../emotes/Hip Hop Dancing.fbx";
+    case ClipId::EmoteNorthernSoul:
+        return "../emotes/Northern Soul Floor Combo.fbx";
     case ClipId::_Count:
         return "";
     }
     return "";
+}
+
+ClipId emoteClipForIndex(int index)
+{
+    switch (index) {
+    case 0:
+        return ClipId::EmoteFlair;
+    case 1:
+        return ClipId::EmoteMaraschino;
+    case 2:
+        return ClipId::EmoteGangnam;
+    case 3:
+        return ClipId::EmoteHipHop;
+    case 4:
+        return ClipId::EmoteNorthernSoul;
+    default:
+        return ClipId::_Count;
+    }
 }
 
 namespace

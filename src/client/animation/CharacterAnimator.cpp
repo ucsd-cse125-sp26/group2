@@ -65,6 +65,7 @@ enum class Mode : uint8_t
     WallRun,
     HoldPose,
     DebugOverride,
+    Emote, ///< Full-body emote (dance/taunt) forced via AnimationInputs::emoteClip.
 };
 
 /// @brief Values of `MoveMode` as stored in AnimationInputs::moveMode.
@@ -402,6 +403,10 @@ struct CharacterAnimator::Impl
     // Debug override.
     ClipId debugOverrideId = ClipId::_Count;
     float debugPlaybackSpeedMul = 1.0f;
+
+    // Active full-body emote clip (driven by AnimationInputs::emoteClip each
+    // update); `_Count` means no emote.
+    ClipId emoteClipId = ClipId::_Count;
 
     // Freeze playback flag (3P Weapon Tweaker uses this so world-space anchor
     // sliders don't drift from the idle bob). When true, update() and
@@ -1042,9 +1047,16 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
     }
 
     // --- 2. Determine target mode. ---
+    // Resolve the requested emote clip (if any) from the per-frame input.
+    impl_->emoteClipId = (inputs.emoteClip >= 0 && inputs.emoteClip < static_cast<int>(ClipId::_Count))
+                             ? static_cast<ClipId>(inputs.emoteClip)
+                             : ClipId::_Count;
+
     Mode targetMode = Mode::Locomotion;
     if (impl_->debugOverrideId != ClipId::_Count) {
         targetMode = Mode::DebugOverride;
+    } else if (impl_->emoteClipId != ClipId::_Count) {
+        targetMode = Mode::Emote;
     } else {
         switch (inputs.moveMode) {
         case MoveModeSliding:
@@ -1071,7 +1083,7 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
         impl_->modeBlendT = 0.0f;
 
         if (targetMode == Mode::Slide || targetMode == Mode::WallRun || targetMode == Mode::Airborne ||
-            targetMode == Mode::DebugOverride)
+            targetMode == Mode::DebugOverride || targetMode == Mode::Emote)
             impl_->overrideTime = 0.0f;
     }
     if (impl_->modeBlendT < 1.0f) {
@@ -1080,8 +1092,10 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
     const float tBlend = impl_->modeBlendT;
 
     const auto overrideWeightFor = [](Mode m) -> float {
-        return (m == Mode::Slide || m == Mode::WallRun || m == Mode::Airborne || m == Mode::DebugOverride) ? 1.0f
-                                                                                                           : 0.0f;
+        return (m == Mode::Slide || m == Mode::WallRun || m == Mode::Airborne || m == Mode::DebugOverride ||
+                m == Mode::Emote)
+                   ? 1.0f
+                   : 0.0f;
     };
     const float prevOverride = overrideWeightFor(impl_->previousMode);
     const float targetOverride = overrideWeightFor(impl_->currentMode);
@@ -1228,6 +1242,9 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
         overrideClip = impl_->debugOverrideId;
         overrideSpeedMul = impl_->debugPlaybackSpeedMul;
         break;
+    case Mode::Emote:
+        overrideClip = impl_->emoteClipId;
+        break;
     default:
         break;
     }
@@ -1245,6 +1262,9 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
             break;
         case Mode::DebugOverride:
             overrideClip = impl_->debugOverrideId;
+            break;
+        case Mode::Emote:
+            overrideClip = impl_->emoteClipId;
             break;
         default:
             break;

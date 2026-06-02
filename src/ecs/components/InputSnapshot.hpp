@@ -39,6 +39,10 @@ struct InputSnapshot
     std::int8_t debugSetSecondaryWeapon{-1};
     bool killSelf{false};               ///< Debug: kill self (rising-edge only).
     bool skipRespawn{false};            ///< Skip respawn timer (space while dead).
+    /// @brief Emote wheel selection to trigger this tick (index into the emote
+    /// catalog, see EmoteCatalog.hpp). -1 = no request. Edge-pulsed once on
+    /// wheel release; the server starts the emote and the client mirrors it.
+    std::int8_t emoteRequest{-1};
     bool throwGrenade{false};           ///< Tap-G (no cycle): throw the selected grenade. Edge-pulsed once.
     bool grenadeCycleNext{false};       ///< Hold-G + Shoot: select next grenade type. Edge-pulsed once.
     bool grenadeCyclePrev{false};       ///< Hold-G + Scope: select previous grenade type. Edge-pulsed once.
