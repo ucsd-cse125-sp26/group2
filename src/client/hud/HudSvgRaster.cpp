@@ -32,6 +32,7 @@ constexpr HudSvgName kHudSvgNames[] = {
     {HudIcon::LetterButton, "LetterButton.svg"},
     {HudIcon::LevelBarBack, "LevelBarBack.svg"},
     {HudIcon::LevelBarFront, "LevelBarFront.svg"},
+    {HudIcon::NoIcon, "no-icon.svg"},
     {HudIcon::Radar, "Radar.svg"},
     {HudIcon::Scoreboard, "Scoreboard.svg"},
     {HudIcon::EnemyDiamond, "enemy_diamond.svg"},
@@ -124,4 +125,3 @@ HudSvgBitmap rasterizeHudSvg(const std::filesystem::path& path, int width, int h
 
     return out;
 }
-

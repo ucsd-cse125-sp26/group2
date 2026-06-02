@@ -190,6 +190,62 @@ void writeColorParam(std::ostream& out, bool& first, std::string_view name, HudC
     writeColorValue(out, color);
 }
 
+void writeEquipmentSvgTuningParam(std::ostream& out,
+                                  bool& first,
+                                  std::string_view prefix,
+                                  const EquipmentSlots::SvgComponentTuning& tuning)
+{
+    const std::string name(prefix);
+    writeFloatParam(out, first, name + "Scale", tuning.scale);
+    writeFloatParam(out, first, name + "OffsetX", tuning.offsetX);
+    writeFloatParam(out, first, name + "OffsetY", tuning.offsetY);
+    writeFloatParam(out, first, name + "StretchX", tuning.stretchX);
+    writeFloatParam(out, first, name + "StretchY", tuning.stretchY);
+}
+
+void writeEquipmentElementParams(std::ostream& out,
+                                 bool& first,
+                                 std::string_view prefix,
+                                 const EquipmentSlots::AbilityElementTuning& element)
+{
+    const std::string name(prefix);
+    writeEquipmentSvgTuningParam(out, first, name + "IconFrame", element.iconFrame);
+    writeEquipmentSvgTuningParam(out, first, name + "Icon", element.icon);
+    writeEquipmentSvgTuningParam(out, first, name + "Bar", element.bar);
+    writeBoolParam(out, first, name + "IconFlipX", element.flipIconX);
+    writeBoolParam(out, first, name + "IconFlipY", element.flipIconY);
+    writeBoolParam(out, first, name + "BarFlipX", element.flipBarX);
+    writeBoolParam(out, first, name + "BarFlipY", element.flipBarY);
+}
+
+void editEquipmentSvgTuning(const char* label, EquipmentSlots::SvgComponentTuning& tuning)
+{
+    if (!ImGui::TreeNode(label))
+        return;
+
+    editFloat("Scale", tuning.scale, 0.01f, 0.01f, 8.0f);
+    editFloat("Offset X", tuning.offsetX, 0.5f, -2000.0f, 2000.0f);
+    editFloat("Offset Y", tuning.offsetY, 0.5f, -2000.0f, 2000.0f);
+    editFloat("Stretch X", tuning.stretchX, 0.01f, 0.01f, 8.0f);
+    editFloat("Stretch Y", tuning.stretchY, 0.01f, 0.01f, 8.0f);
+    ImGui::TreePop();
+}
+
+void editEquipmentElement(const char* label, EquipmentSlots::AbilityElementTuning& element)
+{
+    if (!ImGui::TreeNode(label))
+        return;
+
+    editEquipmentSvgTuning("Icon Frame SVG", element.iconFrame);
+    editEquipmentSvgTuning("Ability Icon SVG", element.icon);
+    ImGui::Checkbox("Flip Icon X", &element.flipIconX);
+    ImGui::Checkbox("Flip Icon Y", &element.flipIconY);
+    editEquipmentSvgTuning("Cooldown Bar SVG", element.bar);
+    ImGui::Checkbox("Flip Bar X", &element.flipBarX);
+    ImGui::Checkbox("Flip Bar Y", &element.flipBarY);
+    ImGui::TreePop();
+}
+
 void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
 {
     bool first = true;
@@ -234,12 +290,15 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "showAfterDamageSecs", enemy->showAfterDamageSecs);
         writeFloatParam(out, first, "fadeOutSecs", enemy->fadeOutSecs);
     } else if (const auto* equipment = dynamic_cast<const EquipmentSlots*>(&widget)) {
-        writeFloatParam(out, first, "slotSize", equipment->slotSize);
-        writeFloatParam(out, first, "slotGap", equipment->slotGap);
-        writeFloatParam(out, first, "iconSize", equipment->iconSize);
-        writeFloatParam(out, first, "keyFontSize", equipment->keyFontSize);
-        writeFloatParam(out, first, "keyPadX", equipment->keyPadX);
-        writeFloatParam(out, first, "keyPadY", equipment->keyPadY);
+        writeFloatParam(out, first, "iconFrameWidth", equipment->iconFrameWidth);
+        writeFloatParam(out, first, "iconFrameHeight", equipment->iconFrameHeight);
+        writeFloatParam(out, first, "abilityIconSize", equipment->abilityIconSize);
+        writeFloatParam(out, first, "barWidth", equipment->barWidth);
+        writeFloatParam(out, first, "barHeight", equipment->barHeight);
+        writeFloatParam(out, first, "iconBarGap", equipment->iconBarGap);
+        writeFloatParam(out, first, "centerGap", equipment->centerGap);
+        writeEquipmentElementParams(out, first, "left", equipment->abilityElements[0]);
+        writeEquipmentElementParams(out, first, "right", equipment->abilityElements[1]);
     } else if (const auto* gravity = dynamic_cast<const GravityIndicator*>(&widget)) {
         writeFloatParam(out, first, "diskSize", gravity->diskSize);
     } else if (const auto* grenades = dynamic_cast<const GrenadeSlotsWidget*>(&widget)) {
@@ -434,12 +493,15 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Show After Damage Secs", enemy->showAfterDamageSecs, 0.1f, 0.0f, 30.0f);
         editFloat("Fade Out Secs", enemy->fadeOutSecs, 0.05f, 0.0f, 10.0f);
     } else if (auto* equipment = dynamic_cast<EquipmentSlots*>(&widget)) {
-        editFloat("Slot Size", equipment->slotSize, 1.0f, 8.0f, 240.0f);
-        editFloat("Slot Gap", equipment->slotGap, 0.5f, 0.0f, 80.0f);
-        editFloat("Icon Size", equipment->iconSize, 0.5f, 4.0f, 160.0f);
-        editFloat("Key Font Size", equipment->keyFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Key Pad X", equipment->keyPadX, 0.25f, 0.0f, 40.0f);
-        editFloat("Key Pad Y", equipment->keyPadY, 0.25f, 0.0f, 40.0f);
+        editFloat("Icon Frame Width", equipment->iconFrameWidth, 1.0f, 8.0f, 400.0f);
+        editFloat("Icon Frame Height", equipment->iconFrameHeight, 1.0f, 8.0f, 400.0f);
+        editFloat("Ability Icon Size", equipment->abilityIconSize, 0.5f, 4.0f, 300.0f);
+        editFloat("Bar Width", equipment->barWidth, 1.0f, 8.0f, 800.0f);
+        editFloat("Bar Height", equipment->barHeight, 1.0f, 8.0f, 400.0f);
+        editFloat("Icon-Bar Gap", equipment->iconBarGap, 0.5f, 0.0f, 200.0f);
+        editFloat("Center Gap", equipment->centerGap, 0.5f, 0.0f, 200.0f);
+        editEquipmentElement("Left Ability SVGs", equipment->abilityElements[0]);
+        editEquipmentElement("Right Ability SVGs", equipment->abilityElements[1]);
     } else if (auto* gravity = dynamic_cast<GravityIndicator*>(&widget)) {
         editFloat("Disk Size", gravity->diskSize, 1.0f, 4.0f, 240.0f);
     } else if (auto* grenades = dynamic_cast<GrenadeSlotsWidget*>(&widget)) {
