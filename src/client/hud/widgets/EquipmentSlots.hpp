@@ -1,31 +1,43 @@
 /// @file EquipmentSlots.hpp
-/// @brief Bottom-center equipment row — grapple / grenade / tactical.
-///
-/// Three 64×64 mil-spec slots:
-///   ┌──┐  ┌──┐  ┌──┐
-///   │🪝│  │💣│  │⚡│
-///   │ E│  │ G│  │ Q│
-///   └──┘  └──┘  └──┘
-/// - Each slot's icon goes amber when ready, dimmed when on cooldown.
-/// - Cooldown overlay is a black band that drains from top to bottom
-///   (covers (1 - charge) × height of the slot).
-/// - Slots with a count show the integer; slots without (grapple) show
-///   "RDY" or remaining seconds.
+/// @brief Bottom-center two-ability SVG cooldown widget.
 
 #pragma once
 
 #include "hud/HudWidget.hpp"
 
-#include <string>
+#include <array>
 
 struct EquipmentSlots : HudWidget
 {
-    float slotSize = 120.f;
-    float slotGap = 50.f;
-    float iconSize = 60.f;
-    float keyFontSize = 26.f;
-    float keyPadX = 10.f;
-    float keyPadY = 3.5f;
+    struct SvgComponentTuning
+    {
+        float scale = 1.f;
+        float offsetX = 0.f;
+        float offsetY = 0.f;
+        float stretchX = 1.f;
+        float stretchY = 1.f;
+    };
+
+    struct AbilityElementTuning
+    {
+        SvgComponentTuning iconFrame;
+        SvgComponentTuning icon;
+        SvgComponentTuning bar;
+        bool flipIconX = false;
+        bool flipIconY = false;
+        bool flipBarX = false;
+        bool flipBarY = false;
+    };
+
+    float iconFrameWidth = 92.f;
+    float iconFrameHeight = 87.f;
+    float abilityIconSize = 54.f;
+    float barWidth = 235.f;
+    float barHeight = 87.f;
+    float iconBarGap = 10.f;
+    float centerGap = 12.f;
+
+    std::array<AbilityElementTuning, 2> abilityElements{};
 
     EquipmentSlots();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;
@@ -33,6 +45,4 @@ struct EquipmentSlots : HudWidget
 
 private:
     HudEquipmentState state_;
-    std::string primaryAbilityLabel_ = "Left Shift";
-    std::string secondaryAbilityLabel_ = "E";
 };

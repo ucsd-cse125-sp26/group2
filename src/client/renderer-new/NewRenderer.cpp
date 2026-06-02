@@ -162,13 +162,28 @@ bool NewRenderer::init(SDL_Window* window)
     skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
+    if (!dynamicShadowMaps_) {
+        SDL_Log("NewRenderer: failed to create dynamic point-light shadow map array");
+        return false;
+    }
+
     staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
+    if (!staticShadowMaps_) {
+        SDL_Log("NewRenderer: failed to create static point-light shadow map array");
+        return false;
+    }
 
     Uint32 movingShadowSize = shadowSize;
 #ifdef HAVE_MSL_SHADERS
     movingShadowSize = macShadowSize;
 #endif
-    movingLightShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, macShadowSize, macShadowSize, true, MAX_MOVING_POINT_LIGHTS);
+    movingLightShadowMaps_ =
+        Boilerplate::createEmptyTextureD32F(device_, movingShadowSize, movingShadowSize, true, MAX_MOVING_POINT_LIGHTS);
+    if (!movingLightShadowMaps_) {
+        SDL_Log("NewRenderer: failed to create moving point-light shadow map array for %u lights",
+                static_cast<unsigned>(MAX_MOVING_POINT_LIGHTS));
+        return false;
+    }
 
     cubeFaceTargets_[0] = glm::vec3(1, 0, 0);
     cubeFaceTargets_[1] = glm::vec3(-1, 0, 0);

@@ -9,6 +9,7 @@
 #include <vector>
 
 class SdfAtlas;
+class HudSvgAtlas;
 
 /// @brief Accumulates HUD geometry during a frame for batch rendering.
 ///
@@ -18,7 +19,7 @@ class HudContext
 {
 public:
     /// @brief Bind the SDF atlas for text layout (glyph metrics).
-    void init(const SdfAtlas* atlas);
+    void init(const SdfAtlas* atlas, HudSvgAtlas* svgAtlas = nullptr);
 
     /// @brief Clear all geometry for a new frame.
     void beginFrame();
@@ -79,7 +80,11 @@ public:
 
     // ── Icons ───────────────────────────────────────────────────────────
 
-    void icon(HudIcon id, float x, float y, float size, HudColor tint = HudColor::white());
+    bool icon(HudIcon id, float x, float y, float size, HudColor tint = HudColor::white());
+    bool svg(HudIcon id, float x, float y, float w, float h, HudColor tint = HudColor::white());
+    bool svgFlipped(HudIcon id, float x, float y, float w, float h, bool flipX, bool flipY, HudColor tint = HudColor::white());
+    bool svgMask(HudIcon id, float x, float y, float w, float h, HudColor color);
+    bool svgMaskFlipped(HudIcon id, float x, float y, float w, float h, bool flipX, bool flipY, HudColor color);
 
     // ── Crosshair ───────────────────────────────────────────────────────
 
@@ -122,6 +127,7 @@ public:
 
 private:
     const SdfAtlas* sdfAtlas_ = nullptr;
+    HudSvgAtlas* svgAtlas_ = nullptr;
     std::vector<HudVertex> vertices_;
     std::vector<std::array<float, 6>> clipSpans_;
 

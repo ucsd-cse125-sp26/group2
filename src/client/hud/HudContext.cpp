@@ -3,6 +3,7 @@
 
 #include "HudContext.hpp"
 
+#include "HudSvgAtlas.hpp"
 #include "particles/sdf/SdfAtlas.hpp"
 #include "particles/sdf/SdfFont.hpp"
 
@@ -10,9 +11,10 @@
 #include <cmath>
 #include <cstring>
 
-void HudContext::init(const SdfAtlas* atlas)
+void HudContext::init(const SdfAtlas* atlas, HudSvgAtlas* svgAtlas)
 {
     sdfAtlas_ = atlas;
+    svgAtlas_ = svgAtlas;
 }
 
 void HudContext::beginFrame()
@@ -37,6 +39,9 @@ void HudContext::tintVertices(std::size_t startVertex, HudColor tint)
         return;
 
     for (std::size_t i = startVertex; i < vertices_.size(); ++i) {
+        const int texMode = static_cast<int>(vertices_[i].texMode + 0.5f);
+        if (texMode == 2 || texMode == 7)
+            continue;
         vertices_[i].color[0] *= tint.r;
         vertices_[i].color[1] *= tint.g;
         vertices_[i].color[2] *= tint.b;
@@ -374,10 +379,57 @@ float HudContext::measureText(const char* str, float size) const
 
 // ── Icons ───────────────────────────────────────────────────────────────────
 
-void HudContext::icon(HudIcon /*id*/, float x, float y, float size, HudColor tint)
+bool HudContext::icon(HudIcon id, float x, float y, float size, HudColor tint)
 {
-    // TODO: look up icon UV rect from atlas by id.  For now, full 1x1 fallback.
-    emitQuad(x, y, size, size, 0.f, 0.f, 1.f, 1.f, tint, 2.f);
+    return svg(id, x, y, size, size, tint);
+}
+
+bool HudContext::svg(HudIcon id, float x, float y, float w, float h, HudColor tint)
+{
+    return svgFlipped(id, x, y, w, h, false, false, tint);
+}
+
+bool HudContext::svgFlipped(HudIcon id, float x, float y, float w, float h, bool flipX, bool flipY, HudColor tint)
+{
+    if (!svgAtlas_ || w <= 0.f || h <= 0.f)
+        return false;
+
+    const int rasterW = std::max(1, static_cast<int>(std::ceil(w)));
+    const int rasterH = std::max(1, static_cast<int>(std::ceil(h)));
+    const auto sprite = svgAtlas_->sprite(id, rasterW, rasterH);
+    if (!sprite)
+        return false;
+
+    const float u0 = flipX ? sprite->u1 : sprite->u0;
+    const float u1 = flipX ? sprite->u0 : sprite->u1;
+    const float v0 = flipY ? sprite->v1 : sprite->v0;
+    const float v1 = flipY ? sprite->v0 : sprite->v1;
+    emitQuad(x, y, w, h, u0, v0, u1, v1, tint, 2.f);
+    return true;
+}
+
+bool HudContext::svgMask(HudIcon id, float x, float y, float w, float h, HudColor color)
+{
+    return svgMaskFlipped(id, x, y, w, h, false, false, color);
+}
+
+bool HudContext::svgMaskFlipped(HudIcon id, float x, float y, float w, float h, bool flipX, bool flipY, HudColor color)
+{
+    if (!svgAtlas_ || w <= 0.f || h <= 0.f)
+        return false;
+
+    const int rasterW = std::max(1, static_cast<int>(std::ceil(w)));
+    const int rasterH = std::max(1, static_cast<int>(std::ceil(h)));
+    const auto sprite = svgAtlas_->sprite(id, rasterW, rasterH);
+    if (!sprite)
+        return false;
+
+    const float u0 = flipX ? sprite->u1 : sprite->u0;
+    const float u1 = flipX ? sprite->u0 : sprite->u1;
+    const float v0 = flipY ? sprite->v1 : sprite->v0;
+    const float v1 = flipY ? sprite->v0 : sprite->v1;
+    emitQuad(x, y, w, h, u0, v0, u1, v1, color, 7.f);
+    return true;
 }
 
 // ── Crosshair ───────────────────────────────────────────────────────────────
