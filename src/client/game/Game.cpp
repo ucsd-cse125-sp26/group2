@@ -2120,7 +2120,7 @@ void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
     // scene's static point lights (shader attenuation is pure 1/r²), so it
     // needs to be large to noticeably light nearby surfaces.
     flash.color = glm::vec3(1.0f, 0.65f, 0.30f);
-    flash.intensity = 90000.0f;
+    flash.intensity = 9000.0f;
     flash.age = 0.0f;
     flash.lifetime = 0.06f;
     muzzleFlashLights_.push_back(flash);
@@ -3073,6 +3073,12 @@ SDL_AppResult Game::iterate()
                 const float hipHitDist = glm::length(hipToHit);
                 const glm::vec3 hipDir = (hipHitDist > 0.1f) ? hipToHit / hipHitDist : cachedCamFwd_;
                 particleSystem.spawnBulletTracer(hip, hipDir, hipHitDist);
+
+                // Muzzle-flash point light for the local player's own shot.
+                // Spawned here (not in onRawParticleEvent) because the server
+                // echo of our own non-charge fire is skipped for instant local
+                // feedback — see the early return in onRawParticleEvent.
+                spawnMuzzleFlashLight(hip);
 
                 // Visual recoil kick (viewmodel-only).
                 // Third-person recoil happens via the WeaponFiredEvent
