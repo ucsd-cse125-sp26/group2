@@ -19,6 +19,9 @@ constexpr float k_minGamepadMoveDeadzone = 0.0f;
 constexpr float k_maxGamepadMoveDeadzone = 0.5f;
 constexpr float k_minAimAssistStrength = 0.0f;
 constexpr float k_maxAimAssistStrength = 1.0f;
+constexpr float k_settingsWindowBaseWidth = 740.0f;
+constexpr float k_settingsWindowBaseHeight = 860.0f;
+constexpr float k_viewportWindowMargin = 0.94f;
 
 MouseButton mouseButtonFromSdl(uint8_t button)
 {
@@ -238,14 +241,23 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
     ImGui::SetNextWindowPos({display.x * 0.5f, display.y * 0.5f}, ImGuiCond_Always, {0.5f, 0.5f});
 
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
+    float settingsUiScale = 1.0f;
     if (settingsOpen) {
         flags |= ImGuiWindowFlags_NoResize;
-        ImGui::SetNextWindowSize(ImVec2{740.0f, 760.0f}, ImGuiCond_Always);
+        const float scaled = std::min(menu_theme::scaleFor(display), 1.0f);
+        ImVec2 settingsSize{k_settingsWindowBaseWidth * scaled, k_settingsWindowBaseHeight * scaled};
+        settingsSize.x = std::min(settingsSize.x, k_settingsWindowBaseWidth);
+        settingsSize.x = std::min(settingsSize.x, display.x * k_viewportWindowMargin);
+        settingsSize.y = std::min(settingsSize.y, display.y * k_viewportWindowMargin);
+        settingsUiScale = std::clamp(settingsSize.x / k_settingsWindowBaseWidth, 0.5f, 1.0f);
+        ImGui::SetNextWindowSize(settingsSize, ImGuiCond_Always);
     } else {
         // Auto-fit the compact pause page so it always fits its buttons and never scrolls.
         flags |= ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
     }
     if (ImGui::Begin("Paused", nullptr, flags)) {
+        ImGui::SetWindowFontScale(settingsOpen ? settingsUiScale : 1.0f);
+
         const float buttonWidth = settingsOpen ? ImGui::GetContentRegionAvail().x : 360.0f;
         if (!settingsOpen) {
             if (menu_theme::accentButton("Resume", {buttonWidth, 36.0f})) {
@@ -385,8 +397,8 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
                 draftShowControllerBindings ? BindingDevice::Controller : BindingDevice::KeyboardMouse;
             if (ImGui::BeginTable("bindings", 3, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg)) {
                 ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
-                ImGui::TableSetupColumn("Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f);
-                ImGui::TableSetupColumn("Alt Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f);
+                ImGui::TableSetupColumn("Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f * settingsUiScale);
+                ImGui::TableSetupColumn("Alt Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f * settingsUiScale);
                 ImGui::TableHeadersRow();
 
                 for (Action action : InputBindings::actions()) {
@@ -424,7 +436,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             }
 
             ImGui::Spacing();
-            if (ImGui::Button("Reset to Defaults", {buttonWidth, 30.0f})) {
+            if (ImGui::Button("Reset to Defaults", {buttonWidth, 30.0f * settingsUiScale})) {
                 const UserSettings defaults;
                 draftBindings = defaults.inputBindings;
                 draftMouseSensitivity = defaults.mouseSensitivity;
@@ -443,7 +455,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             }
 
             const float halfWidth = (buttonWidth - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-            if (menu_theme::accentButton("Apply", {halfWidth, 34.0f})) {
+            if (menu_theme::accentButton("Apply", {halfWidth, 34.0f * settingsUiScale})) {
                 settings.inputBindings = draftBindings;
                 settings.mouseSensitivity = draftMouseSensitivity;
                 settings.horizontalFovDegrees = draftHorizontalFovDegrees;
@@ -462,7 +474,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
                 result.settingsApplied = true;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Cancel", {halfWidth, 34.0f})) {
+            if (ImGui::Button("Cancel", {halfWidth, 34.0f * settingsUiScale})) {
                 if (dirty) {
                     requestDiscardSettingsConfirm();
                 } else {

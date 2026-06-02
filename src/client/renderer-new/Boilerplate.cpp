@@ -198,7 +198,7 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device, Pipe
     pipelineInfo.rasterizer_state.enable_depth_bias = true;
     pipelineInfo.rasterizer_state.depth_bias_constant_factor = 500.0f;
     pipelineInfo.rasterizer_state.depth_bias_slope_factor = 1.0f;
-    pipelineInfo.rasterizer_state.depth_bias_clamp = 0.005f;
+    pipelineInfo.rasterizer_state.depth_bias_clamp = 0.05f;
 
     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
     // SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);

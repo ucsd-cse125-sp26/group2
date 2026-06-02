@@ -66,6 +66,7 @@
 #include "ecs/systems/PickupGeometry.hpp"
 #include "hud/VoidfallStyle.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
+#include "menus/MenuTheme.hpp"
 #include "network/EntityInterpolation.hpp"
 #include "network/RosterEvent.hpp"
 #include "network/ShotEvent.hpp"
@@ -5081,6 +5082,7 @@ SDL_AppResult Game::iterate()
         // Unified debug menu — one window with toggles for every debug panel.
         debugUI.buildDebugMenu({
             {"HUD Tweaker", &showHudDebug_},
+            {"Menu Theme Tweaker", &showMenuThemeUI_},
             {"Viewmodel Tweaker", &showViewmodelUI},
             {"3P Weapon Tweaker", &showTPWeaponUI_},
             {"Hand Mount Tweaker", &showHandMountUI_},
@@ -5181,6 +5183,7 @@ SDL_AppResult Game::iterate()
             debugUI.buildShotDebugUI(hbVP, winWf, winHf);
         }
         HudDebugPanel::build(hud_, &showHudDebug_);
+        menu_theme::buildTweaker(&showMenuThemeUI_);
     }
 
     // Viewmodel Tweaker — live-adjust weapon position, rotation, scale.
