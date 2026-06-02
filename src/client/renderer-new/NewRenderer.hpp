@@ -44,13 +44,24 @@ struct Vertex
     glm::vec4 tangent;
 };
 
+enum class PointLightType : std::uint8_t
+{
+    STATIC,
+    MOVING,
+    TEMPORARY,
+    NON_SHADOW,
+};
+
 struct LightUBO
 {
     uint32_t numPointLights = 0;
+    uint32_t numMovingPointLights = 0;
     uint32_t numSpotLights = 0;
     float pointLightFarPlane = 7500.0f;
     float pointLightNearPlane = 100.0f;
+    uint32_t _pad0[3];
     PointLight pointLights[MAX_POINT_LIGHTS];
+    PointLight movingPointLights[MAX_MOVING_POINT_LIGHTS];
 };
 /// @brief Graphics-team's work-in-progress SDL3 GPU renderer.
 ///
@@ -169,6 +180,8 @@ public:
     /// DATA SOURCE: built in Game.cpp from ECS each frame (glow-emitting
     /// projectiles, muzzle flashes, etc).
     void setPointLights(std::vector<PointLight> pointLights);
+    void setSampleStaticPointLights();
+    void setStaticPointLights(std::vector<PointLight>&& pointLights);
 
     /// @brief Set the first-person weapon viewmodel for this frame.
     /// @param vm  Model handle + viewmodel-space transform + visibility.
@@ -353,7 +366,10 @@ private:
     // ─── Existing internal helpers ───────────────────────────────────────────
 
     bool createGeometryPipeline();
-    bool createDepthPipeline();
+    SDL_GPUGraphicsPipeline* createDepthPipeline(const SDL_GPURasterizerState& rasterizer_state) const;
+    bool createDepthRes0Pipeline();
+    bool createDepthRes1Pipeline();
+    bool createDepthRes2Pipeline();
     bool createHudPipeline();
     bool createFxaaPipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
@@ -362,6 +378,7 @@ private:
     void setMainCamera(glm::vec3 eye, float yaw, float pitch, float roll, Uint32 width, Uint32 height, float fov);
 
     void drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
+                               Uint8 res,
                                Uint8 layer,
                                SDL_GPUCommandBuffer* cmd,
                                const glm::mat4& shadowViewProjection,
@@ -370,9 +387,11 @@ private:
                                bool skinnedGeometry);
     void drawToShadowMap(SDL_GPUCommandBuffer* cmd,
                          SDL_GPUTexture* shadowMapTexture,
+                         Uint8 res,
                          bool staticGeometry,
                          bool entityGeometry,
-                         bool skinnedGeometry);
+                         bool skinnedGeometry,
+                         PointLightType lightType);
 
     void onFirstFrame(SDL_GPUCommandBuffer* cmd);
 
@@ -417,7 +436,9 @@ private:
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* fxaaPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
-    SDL_GPUGraphicsPipeline* depthPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* depthRes0Pipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* depthRes1Pipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* depthRes2Pipeline_ = nullptr;
 
     SDL_GPUTextureFormat colorTarget_ = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUTexture* sceneColor_ = nullptr;
@@ -438,11 +459,15 @@ private:
     // constexpr uint32_t shadowSize = 2048;
     //  constexpr uint32_t shadowSize = 512;
     static const uint32_t shadowSize = 1024;
+    static const uint32_t macShadowSize = 512;
     static const uint32_t staticShadowSize = 2048;
     SDL_GPUTexture* dynamicShadowMaps_ = nullptr;
     SDL_GPUTexture* staticShadowMaps_ = nullptr;
     SDL_GPUSampler* staticDepthSampler_ = nullptr;
     SDL_GPUSampler* dynamicDepthSampler_ = nullptr;
+
+
+    SDL_GPUTexture* movingLightShadowMaps_ = nullptr;
 
     glm::vec3 cubeFaceTargets_[NUM_CUBE_FACES];
     glm::vec3 cubeFaceUps_[NUM_CUBE_FACES];

@@ -192,16 +192,9 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device, Pipe
     pipelineInfo.depth_stencil_state.enable_depth_test = pipelineDesc.depthTest;
     pipelineInfo.depth_stencil_state.enable_depth_write = pipelineDesc.depthWrite;
 
-    pipelineInfo.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    pipelineInfo.rasterizer_state.cull_mode = pipelineDesc.cullMode;
-
-    pipelineInfo.rasterizer_state.enable_depth_bias = true;
-    pipelineInfo.rasterizer_state.depth_bias_constant_factor = 500.0f;
-    pipelineInfo.rasterizer_state.depth_bias_slope_factor = 1.0f;
-    pipelineInfo.rasterizer_state.depth_bias_clamp = 0.05f;
+    pipelineInfo.rasterizer_state = pipelineDesc.rasterizer_state;
 
     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
-    // SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
 
     SDL_ReleaseGPUShader(device, vertexShader);
     SDL_ReleaseGPUShader(device, fragmentShader);

@@ -4541,7 +4541,7 @@ SDL_AppResult Game::iterate()
             phaseStats.pointLights = static_cast<std::uint32_t>(dynLights.size());
             phaseStats.beamPointLights = beamPointLights;
         }
-        renderer->setPointLights(std::move(dynLights));
+        // renderer->setPointLights(std::move(dynLights));
         /////////////////////////////////////////// Point Lights ///////////////////////////////////////////
     }
     phaseSnap(phaseStats.entityCmdsMs);

@@ -11,6 +11,7 @@
 #include "Asset.hpp"
 #include "AssetLoader.hpp"
 #include "Boilerplate.hpp"
+#include "glm/gtc/random.hpp"
 #include "particles/ParticleSystem.hpp"
 
 #include <algorithm>
@@ -27,6 +28,7 @@
 #include <unordered_map>
 #include <vector>
 
+using enum PointLightType;
 namespace
 {
 /// Convert SDL high-resolution counter ticks to milliseconds.
@@ -98,7 +100,17 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    if (!createDepthPipeline()) {
+    if (!createDepthRes0Pipeline()) {
+        SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
+        return false;
+    }
+
+    if (!createDepthRes1Pipeline()) {
+        SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
+        return false;
+    }
+
+    if (!createDepthRes2Pipeline()) {
         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
         return false;
     }
@@ -150,8 +162,13 @@ bool NewRenderer::init(SDL_Window* window)
     skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
-    staticShadowMaps_ =
-        Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
+    staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
+
+    Uint32 movingShadowSize = shadowSize;
+#ifdef HAVE_MSL_SHADERS
+    movingShadowSize = macShadowSize;
+#endif
+    movingLightShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, macShadowSize, macShadowSize, true, MAX_MOVING_POINT_LIGHTS);
 
     cubeFaceTargets_[0] = glm::vec3(1, 0, 0);
     cubeFaceTargets_[1] = glm::vec3(-1, 0, 0);
@@ -168,6 +185,52 @@ bool NewRenderer::init(SDL_Window* window)
     cubeFaceUps_[5] = glm::vec3(0, -1, 0);
 
     firstFrame_ = true;
+
+    float globalIntensity = 50000;
+    std::vector<PointLight> sampleLights;
+    PointLight pl0{};
+    pl0.position = glm::vec3(300, 100.0f, 500);
+    pl0.intensity = globalIntensity;
+    pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl0.range = 500.0f;
+    sampleLights.push_back(pl0);
+
+    PointLight pl1{};
+    pl1.position = glm::vec3(1920.0f, 450.0f, 1209.0f);
+    pl1.intensity = globalIntensity;
+    pl1.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl1.range = 500.0f;
+    sampleLights.push_back(pl1);
+
+    PointLight pl2{};
+    pl2.position = glm::vec3(1315.0f, 450.0f, -651.0f);
+    pl2.intensity = globalIntensity;
+    pl2.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl2.range = 500.0f;
+    sampleLights.push_back(pl2);
+
+    PointLight pl3{};
+    pl3.position = glm::vec3(31.0f, 450.0f, -1302.0f);
+    pl3.intensity = globalIntensity;
+    pl3.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl3.range = 500.0f;
+    sampleLights.push_back(pl3);
+
+    PointLight pl4{};
+    pl4.position = glm::vec3(-1560.0f, -239.0f, 2079.0f);
+    pl4.intensity = globalIntensity;
+    pl4.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl4.range = 500.0f;
+    sampleLights.push_back(pl4);
+
+    PointLight pl5{};
+    pl5.position = glm::vec3(-292.0f, -239.0f, 854.0f);
+    pl5.intensity = globalIntensity;
+    pl5.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl5.range = 500.0f;
+    sampleLights.push_back(pl5);
+
+    setStaticPointLights(std::move(sampleLights));
 
     return true;
 }
@@ -222,7 +285,7 @@ bool NewRenderer::createGeometryPipeline()
     Boilerplate::ShaderInfo fragmentShader{};
     fragmentShader.path = "shaders-new/geometry_shadowed.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    fragmentShader.samplerCount = MATERIAL_MAX_TEXTURE_COUNT + 2;
+    fragmentShader.samplerCount = MATERIAL_MAX_TEXTURE_COUNT + 3;
     fragmentShader.uniformBufferCount = 3;
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
@@ -247,7 +310,8 @@ bool NewRenderer::createGeometryPipeline()
     return geometryPipeline_ != nullptr;
 }
 
-bool NewRenderer::createDepthPipeline()
+
+SDL_GPUGraphicsPipeline* NewRenderer::createDepthPipeline(const SDL_GPURasterizerState &rasterizer_state) const
 {
     Boilerplate::ShaderInfo vertexShader{};
     vertexShader.path = "shaders-new/geometry_depth.vert";
@@ -282,13 +346,52 @@ bool NewRenderer::createDepthPipeline()
     depthPipelineDesc.colorTarget = nullptr;
     depthPipelineDesc.depthTest = true;
     depthPipelineDesc.depthWrite = true;
-    // depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_BACK;
-    // depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_FRONT;
-    depthPipelineDesc.cullMode = SDL_GPU_CULLMODE_NONE;
 
-    depthPipeline_ = Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
+    depthPipelineDesc.rasterizer_state = rasterizer_state;
 
-    return depthPipeline_ != nullptr;
+
+    return Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
+}
+bool NewRenderer::createDepthRes0Pipeline()
+{
+    SDL_GPURasterizerState rasterizer_state;
+    rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    rasterizer_state.enable_depth_bias = true;
+    rasterizer_state.depth_bias_constant_factor = 500.0f;
+    rasterizer_state.depth_bias_slope_factor = 1.0f;
+    rasterizer_state.depth_bias_clamp = 0.005f;
+
+    depthRes0Pipeline_ = createDepthPipeline(rasterizer_state);
+    return depthRes0Pipeline_ != nullptr;
+}
+
+bool NewRenderer::createDepthRes1Pipeline()
+{
+    SDL_GPURasterizerState rasterizer_state;
+    rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    rasterizer_state.enable_depth_bias = true;
+    rasterizer_state.depth_bias_constant_factor = 500.0f;
+    rasterizer_state.depth_bias_slope_factor = 10.0f;
+    rasterizer_state.depth_bias_clamp = 0.1f;
+
+    depthRes1Pipeline_ = createDepthPipeline(rasterizer_state);
+    return depthRes1Pipeline_ != nullptr;
+}
+
+bool NewRenderer::createDepthRes2Pipeline()
+{
+    SDL_GPURasterizerState rasterizer_state;
+    rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    rasterizer_state.enable_depth_bias = true;
+    rasterizer_state.depth_bias_constant_factor = 100.0f;
+    rasterizer_state.depth_bias_slope_factor = 1.0f;
+    rasterizer_state.depth_bias_clamp = 0.03f;
+
+    depthRes2Pipeline_ = createDepthPipeline(rasterizer_state);
+    return depthRes2Pipeline_ != nullptr;
 }
 
 void NewRenderer::createMeshBuffers(MeshIdInt meshId) const
@@ -354,62 +457,20 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         }
     }
 
-    float globalIntensity = 50000;
-    std::vector<PointLight> sampleLights;
-    PointLight pl0{};
-    pl0.position = glm::vec3(300, 100.0f, 500); ////////////////////////
-    pl0.intensity = globalIntensity;
-    pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl0.range = 500.0f;
-    sampleLights.push_back(pl0);
-
-
-    PointLight pl1{};
-    pl1.position = glm::vec3(1920.0f, 450.0f, 1209.0f);//////////////////////
-    pl1.intensity = globalIntensity;
-    pl1.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl1.range = 500.0f;
-    sampleLights.push_back(pl1);
-
-    PointLight pl2{};
-    pl2.position = glm::vec3(1315.0f, 450.0f, -651.0f); ////////////////////////
-    pl2.intensity = globalIntensity;
-    pl2.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl2.range = 500.0f;
-    sampleLights.push_back(pl2);
-
-    PointLight pl3{};
-    pl3.position = glm::vec3(31.0f, 450.0f, -1302.0f);//////////////////////
-    pl3.intensity = globalIntensity;
-    pl3.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl3.range = 500.0f;
-    sampleLights.push_back(pl3);
-
-
-    PointLight pl4{};
-    pl4.position = glm::vec3(-1560.0f, -239.0f, 2079.0f);
-    pl4.intensity = globalIntensity;
-    pl4.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl4.range = 500.0f;
-    sampleLights.push_back(pl4);
-
-
-    PointLight pl5{};
-    pl5.position = glm::vec3(-292.0f, -239.0f, 854.0f); ////////////////////////
-    pl5.intensity = globalIntensity;
-    pl5.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl5.range = 500.0f;
-    sampleLights.push_back(pl5);
-
-    setPointLights(sampleLights);
-
     if (firstFrame_ && !Asset::modelInstances_.empty()) {
         onFirstFrame(cmd);
         std::cout << "FIRST FRAME" << std::endl;
         firstFrame_ = false;
     }
 
-    drawToShadowMap(cmd, dynamicShadowMaps_, false, true, true);
+    // setSampleStaticPointLights();
+    drawToShadowMap(cmd, dynamicShadowMaps_,1, false, true, true,STATIC);
+
+    Uint8 movingRes = 1;
+#ifdef HAVE_MSL_SHADERS
+    movingRes = 2
+#endif
+    drawToShadowMap(cmd, movingLightShadowMaps_,movingRes, true, true, true,MOVING);
 
     float fov = 60.0f;
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
@@ -451,6 +512,7 @@ void NewRenderer::setMainCamera(
 }
 
 void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
+                                        Uint8 res,
                                         Uint8 layer,
                                         SDL_GPUCommandBuffer* cmd,
                                         const glm::mat4& shadowViewProjection,
@@ -458,13 +520,20 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
                                         bool entityGeometry,
                                         bool skinnedGeometry)
 {
-    if (!staticGeometry && !entityGeometry && !skinnedGeometry) {
+    if (!staticGeometry && !entityGeometry && !skinnedGeometry)
         return;
+    SDL_GPUGraphicsPipeline* depthPipeline = nullptr;
+    switch (res) {
+        case 0: depthPipeline = depthRes0Pipeline_; break;
+        case 1: depthPipeline = depthRes1Pipeline_; break;
+        case 2: depthPipeline = depthRes2Pipeline_; break;
+        default: return;
     }
+
     SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture, layer, true);
 
     SDL_GPURenderPass* geometryDepthPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
-    SDL_BindGPUGraphicsPipeline(geometryDepthPass, depthPipeline_);
+    SDL_BindGPUGraphicsPipeline(geometryDepthPass, depthPipeline);
 
     SDL_PushGPUVertexUniformData(cmd, 0, &shadowViewProjection, sizeof(glm::mat4));
 
@@ -472,8 +541,6 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
 
     if (staticGeometry)
         drawWorldModelInstances(geometryDepthPass, cmd, true,frustumPlanes);
-    //SDL_SetGPUDepthBias(geometryDepthPass,);
-
     if (entityGeometry)
         drawEntityModels(geometryDepthPass, cmd, true,frustumPlanes);
     if (skinnedGeometry)
@@ -484,16 +551,34 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
 
 void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
                                   SDL_GPUTexture* shadowMapTexture,
+                                  Uint8 res,
                                   bool staticGeometry,
                                   bool entityGeometry,
-                                  bool skinnedGeometry)
+                                  bool skinnedGeometry,
+                                  PointLightType lightType)
 {
+
+    Uint32 lightCount = 0;
+    Uint32 maxLightCount = 0;
+    PointLight *pointLightArray = nullptr;
+    switch (lightType) {
+        case STATIC:
+            lightCount = sceneLightInfo_.numPointLights;
+            maxLightCount = MAX_POINT_LIGHTS;
+            pointLightArray = sceneLightInfo_.pointLights; break;
+        case MOVING:
+            lightCount = sceneLightInfo_.numMovingPointLights;
+            maxLightCount = MAX_MOVING_POINT_LIGHTS;
+            pointLightArray = sceneLightInfo_.movingPointLights; break;
+        default: return;
+    }
+
     glm::mat4 shadowProjection = glm::perspective(
         glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
     shadowProjection[1][1] *= -1;
-    // for (Uint8 iLight = 0; iLight < 1; iLight++) {
-    for (Uint8 iLight = 0; iLight < sceneLightInfo_.numPointLights; iLight++) {
-        PointLight& light = sceneLightInfo_.pointLights[iLight];
+
+    for (Uint8 iLight = 0; iLight < std::min(lightCount,maxLightCount); iLight++) {
+        PointLight& light = pointLightArray[iLight];
 
         for (int face = 0; face < NUM_CUBE_FACES; face++) {
             glm::vec3& iCubeFaceTarget = cubeFaceTargets_[face];
@@ -503,28 +588,31 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
             const glm::mat4 shadowViewProjection = shadowProjection * shadowView;
 
             drawGeometryDepthPass(shadowMapTexture,
+                                  res,
                                   iLight * NUM_CUBE_FACES + face,
                                   cmd,
                                   shadowViewProjection,
                                   staticGeometry,
                                   entityGeometry,
-                                  skinnedGeometry);
+                                  skinnedGeometry
+                                  );
         }
     }
 }
 
 void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
 {
-    drawToShadowMap(cmd, staticShadowMaps_, true, false, false);
+    drawToShadowMap(cmd, staticShadowMaps_,0, true, false, false,STATIC);
 }
 
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUTextureSamplerBinding shadowBindings[2];
+    SDL_GPUTextureSamplerBinding shadowBindings[3];
     shadowBindings[0] = {staticShadowMaps_, staticDepthSampler_};
     shadowBindings[1] = {dynamicShadowMaps_, dynamicDepthSampler_};
+    shadowBindings[2] = {movingLightShadowMaps_, dynamicDepthSampler_};
 
-    SDL_BindGPUFragmentSamplers(renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings, 2);
+    SDL_BindGPUFragmentSamplers(renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings, 3);
 
     SDL_PushGPUFragmentUniformData(cmd, 2, &sceneLightInfo_, sizeof(LightUBO));
 }
@@ -933,6 +1021,8 @@ void NewRenderer::quit()
             SDL_ReleaseGPUTexture(device_, staticShadowMaps_);
         if (dynamicShadowMaps_)
             SDL_ReleaseGPUTexture(device_, dynamicShadowMaps_);
+        if (movingLightShadowMaps_)
+            SDL_ReleaseGPUTexture(device_, movingLightShadowMaps_);
 
         ImGui_ImplSDLGPU3_Shutdown();
         SDL_ReleaseWindowFromGPUDevice(device_, window_);
@@ -1053,8 +1143,34 @@ void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
     // passes by pushing a light-array UBO to the fragment shader.  Cap at the
     // shader's array size and silently drop the rest.
     // pointLights_ = std::move(pointLights);
-    sceneLightInfo_.numPointLights =
-        std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_POINT_LIGHTS));
+    sceneLightInfo_.numMovingPointLights =
+        std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_MOVING_POINT_LIGHTS));
+
+    memcpy(sceneLightInfo_.movingPointLights, pointLights.data(), sceneLightInfo_.numMovingPointLights * sizeof(PointLight));
+}
+
+void NewRenderer::setSampleStaticPointLights()
+{
+
+    float globalIntensity = 50000;
+    std::vector<PointLight> sampleLights;
+
+    for (int i = 0; i < MAX_MOVING_POINT_LIGHTS; i++) {}
+    PointLight pl0{};
+    pl0.position = glm::linearRand(glm::vec3(0.0f),glm::vec3(2000.0f));
+    pl0.intensity = globalIntensity;
+    pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl0.range = 500.0f;
+
+
+    sampleLights.push_back(pl0);
+
+    setPointLights(std::move(sampleLights));
+}
+
+void NewRenderer::setStaticPointLights(std::vector<PointLight> &&pointLights)
+{
+    sceneLightInfo_.numPointLights = std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_POINT_LIGHTS));
 
     memcpy(sceneLightInfo_.pointLights, pointLights.data(), sceneLightInfo_.numPointLights * sizeof(PointLight));
 }

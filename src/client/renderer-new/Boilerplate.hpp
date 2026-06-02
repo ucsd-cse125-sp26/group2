@@ -11,6 +11,7 @@
 #include <vector>
 
 #define MAX_POINT_LIGHTS 8
+#define MAX_MOVING_POINT_LIGHTS 64
 #define MAX_SHADOW_COUNT MAX_POINT_LIGHTS
 
 namespace Boilerplate
@@ -57,7 +58,8 @@ struct PipelineDescription
     bool depthTest = false;
     bool depthWrite = true;
 
-    SDL_GPUCullMode cullMode = SDL_GPU_CULLMODE_BACK;
+    // SDL_GPUCullMode cullMode = SDL_GPU_CULLMODE_BACK;
+    SDL_GPURasterizerState rasterizer_state;
 };
 
 /// @brief Describes a pending CPU-to-GPU buffer upload: target buffer, source data, and byte size.
