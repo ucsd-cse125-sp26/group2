@@ -468,7 +468,7 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     Uint8 movingRes = 1;
 #ifdef HAVE_MSL_SHADERS
-    movingRes = 2
+    movingRes = 2;
 #endif
     drawToShadowMap(cmd, movingLightShadowMaps_,movingRes, true, true, true,MOVING);
 
