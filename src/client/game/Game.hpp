@@ -770,4 +770,21 @@ private:
     // Bullet tracer muzzle
     glm::vec3 cachedMuzzleWorld_{0.0f};
     bool cachedMuzzleValid_ = false;
+
+    // Transient muzzle-flash point lights. One is spawned at the muzzle world
+    // position on every fire event (see onRawParticleEvent) and faded out over
+    // a short lifetime in iterate(), where the surviving lights are pushed into
+    // the dynamic point-light list handed to the renderer.
+    struct MuzzleFlashLight
+    {
+        glm::vec3 position{0.0f}; ///< Muzzle world position at spawn time.
+        glm::vec3 color{1.0f};    ///< Flash colour (linear RGB).
+        float intensity = 0.0f;   ///< Peak intensity at spawn (faded by age).
+        float age = 0.0f;         ///< Seconds elapsed since spawn.
+        float lifetime = 0.06f;   ///< Total flash duration in seconds.
+    };
+    std::vector<MuzzleFlashLight> muzzleFlashLights_;
+
+    /// @brief Spawn a transient muzzle-flash point light at @p pos.
+    void spawnMuzzleFlashLight(const glm::vec3& pos);
 };

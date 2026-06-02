@@ -1272,6 +1272,16 @@ bool Game::init(AppContext& ctx)
             }
         }
 
+        // Pop a brief point light at the muzzle on every shot so the flash
+        // lights up nearby geometry. For the local player prefer the exact
+        // viewmodel muzzle; for everyone else use the shot's muzzle origin.
+        if (evt.effectType == ParticleEffectType::BulletTracer ||
+            evt.effectType == ParticleEffectType::HitscanBeam) {
+            const glm::vec3 flashPos =
+                (evt.source == localPlayer && cachedMuzzleValid_) ? cachedMuzzleWorld_ : evtOrigin;
+            spawnMuzzleFlashLight(flashPos);
+        }
+
         switch (evt.effectType) {
         case ParticleEffectType::BulletTracer:
             particleSystem.spawnBulletTracer(evtOrigin, evt.pos2, evt.param);
@@ -2100,6 +2110,20 @@ void Game::adoptGamepad(SDL_JoystickID id)
     } else {
         SDL_Log("[input] SDL_OpenGamepad failed for id=%u: %s", id, SDL_GetError());
     }
+}
+
+void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
+{
+    MuzzleFlashLight flash;
+    flash.position = pos;
+    // Warm orange-white muzzle flash. Intensity is in the same scale as the
+    // scene's static point lights (shader attenuation is pure 1/r²), so it
+    // needs to be large to noticeably light nearby surfaces.
+    flash.color = glm::vec3(1.0f, 0.65f, 0.30f);
+    flash.intensity = 90000.0f;
+    flash.age = 0.0f;
+    flash.lifetime = 0.06f;
+    muzzleFlashLights_.push_back(flash);
 }
 
 void Game::scanForConnectedGamepads()
@@ -4619,11 +4643,33 @@ SDL_AppResult Game::iterate()
             }
         });
 
+        // Muzzle-flash point lights — age out transient flashes and emit the
+        // survivors, fading intensity to zero over their lifetime so the flash
+        // pops bright and decays in a few frames.
+        constexpr std::size_t k_maxDynLights = 32;
+        for (auto it = muzzleFlashLights_.begin(); it != muzzleFlashLights_.end();) {
+            it->age += frameTime;
+            if (it->age >= it->lifetime) {
+                it = muzzleFlashLights_.erase(it);
+                continue;
+            }
+            if (dynLights.size() < k_maxDynLights) {
+                const float fade = 1.0f - (it->age / it->lifetime);
+                dynLights.push_back(PointLight{
+                    .position = it->position,
+                    .intensity = it->intensity * fade,
+                    .color = it->color,
+                    .range = 500.0f,
+                });
+            }
+            ++it;
+        }
+
         if (collectPerf) {
             phaseStats.pointLights = static_cast<std::uint32_t>(dynLights.size());
             phaseStats.beamPointLights = beamPointLights;
         }
-        // renderer->setPointLights(std::move(dynLights));
+        renderer->setPointLights(std::move(dynLights));
         /////////////////////////////////////////// Point Lights ///////////////////////////////////////////
     }
     phaseSnap(phaseStats.entityCmdsMs);
