@@ -72,6 +72,7 @@ enum class HudIcon : uint8_t
     LetterButton,
     LevelBarBack,
     LevelBarFront,
+    NoIcon,
     Radar,
     Scoreboard,
     EnemyDiamond,

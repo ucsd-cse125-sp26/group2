@@ -386,20 +386,10 @@ bool HudContext::icon(HudIcon id, float x, float y, float size, HudColor tint)
 
 bool HudContext::svg(HudIcon id, float x, float y, float w, float h, HudColor tint)
 {
-    if (!svgAtlas_ || w <= 0.f || h <= 0.f)
-        return false;
-
-    const int rasterW = std::max(1, static_cast<int>(std::ceil(w)));
-    const int rasterH = std::max(1, static_cast<int>(std::ceil(h)));
-    const auto sprite = svgAtlas_->sprite(id, rasterW, rasterH);
-    if (!sprite)
-        return false;
-
-    emitQuad(x, y, w, h, sprite->u0, sprite->v0, sprite->u1, sprite->v1, tint, 2.f);
-    return true;
+    return svgFlipped(id, x, y, w, h, false, false, tint);
 }
 
-bool HudContext::svgMask(HudIcon id, float x, float y, float w, float h, HudColor color)
+bool HudContext::svgFlipped(HudIcon id, float x, float y, float w, float h, bool flipX, bool flipY, HudColor tint)
 {
     if (!svgAtlas_ || w <= 0.f || h <= 0.f)
         return false;
@@ -410,7 +400,35 @@ bool HudContext::svgMask(HudIcon id, float x, float y, float w, float h, HudColo
     if (!sprite)
         return false;
 
-    emitQuad(x, y, w, h, sprite->u0, sprite->v0, sprite->u1, sprite->v1, color, 7.f);
+    const float u0 = flipX ? sprite->u1 : sprite->u0;
+    const float u1 = flipX ? sprite->u0 : sprite->u1;
+    const float v0 = flipY ? sprite->v1 : sprite->v0;
+    const float v1 = flipY ? sprite->v0 : sprite->v1;
+    emitQuad(x, y, w, h, u0, v0, u1, v1, tint, 2.f);
+    return true;
+}
+
+bool HudContext::svgMask(HudIcon id, float x, float y, float w, float h, HudColor color)
+{
+    return svgMaskFlipped(id, x, y, w, h, false, false, color);
+}
+
+bool HudContext::svgMaskFlipped(HudIcon id, float x, float y, float w, float h, bool flipX, bool flipY, HudColor color)
+{
+    if (!svgAtlas_ || w <= 0.f || h <= 0.f)
+        return false;
+
+    const int rasterW = std::max(1, static_cast<int>(std::ceil(w)));
+    const int rasterH = std::max(1, static_cast<int>(std::ceil(h)));
+    const auto sprite = svgAtlas_->sprite(id, rasterW, rasterH);
+    if (!sprite)
+        return false;
+
+    const float u0 = flipX ? sprite->u1 : sprite->u0;
+    const float u1 = flipX ? sprite->u0 : sprite->u1;
+    const float v0 = flipY ? sprite->v1 : sprite->v0;
+    const float v1 = flipY ? sprite->v0 : sprite->v1;
+    emitQuad(x, y, w, h, u0, v0, u1, v1, color, 7.f);
     return true;
 }
 
