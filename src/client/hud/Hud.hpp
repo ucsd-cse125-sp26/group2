@@ -5,6 +5,7 @@
 
 #include "HudContext.hpp"
 #include "HudRenderer.hpp"
+#include "HudSvgAtlas.hpp"
 #include "HudTween.hpp"
 #include "HudTypes.hpp"
 #include "HudWidget.hpp"
@@ -59,6 +60,7 @@ public:
 
 private:
     HudRenderer renderer_;
+    HudSvgAtlas svgAtlas_;
     HudContext context_;
     HudTweenPool tweens_;
     std::vector<std::unique_ptr<HudWidget>> widgets_;

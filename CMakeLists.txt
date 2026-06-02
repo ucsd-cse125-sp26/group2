@@ -377,6 +377,34 @@ FetchContent_MakeAvailable(stb)
 add_library(stb_image INTERFACE)
 target_include_directories(stb_image SYSTEM INTERFACE ${stb_SOURCE_DIR})
 
+# LunaSVG — static SVG rasterization for HUD assets. Runtime draws the
+# resulting RGBA pixels through the HUD sprite atlas.
+block()
+    set(BUILD_SHARED_LIBS OFF)
+    set(LUNASVG_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(LUNASVG_DISABLE_LOAD_SYSTEM_FONTS ON CACHE BOOL "" FORCE)
+    group2_dependency_git(lunasvg LUNASVG_REPOSITORY LUNASVG_TAG)
+    FetchContent_Declare(
+        lunasvg
+        GIT_REPOSITORY "${LUNASVG_REPOSITORY}"
+        GIT_TAG        "${LUNASVG_TAG}"
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(lunasvg)
+endblock()
+foreach(_lunasvg_target lunasvg plutovg)
+    if(TARGET ${_lunasvg_target})
+        target_compile_options(${_lunasvg_target} PRIVATE
+            $<$<CXX_COMPILER_ID:Clang,GNU>:-w>
+            $<$<CXX_COMPILER_ID:MSVC>:/W0>
+        )
+        get_target_property(_lunasvg_inc ${_lunasvg_target} INTERFACE_INCLUDE_DIRECTORIES)
+        if(_lunasvg_inc)
+            target_include_directories(${_lunasvg_target} SYSTEM INTERFACE ${_lunasvg_inc})
+        endif()
+    endif()
+endforeach()
+
 # minimp3 — single-header MP3 decoder (used by SfxSystem to load MP3 sound assets).
 # Same FetchContent+INTERFACE pattern as stb above.
 group2_dependency_git(minimp3 MINIMP3_REPOSITORY MINIMP3_TAG)
@@ -821,6 +849,10 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudRenderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudSvgAtlas.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudSvgAtlas.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudSvgRaster.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudSvgRaster.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudContext.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudWidget.hpp"
@@ -1176,6 +1208,7 @@ target_link_libraries(group2 PRIVATE
     imgui_lib
     assimp
     stb_image
+    lunasvg::lunasvg
     minimp3
     Opus::opus
     ozz_animation_offline
@@ -1974,6 +2007,31 @@ endif()
 set_compiler_warnings(tracer_effect_tests)
 enable_sanitizers(tracer_effect_tests)
 add_test(NAME tracer_effect_tests COMMAND tracer_effect_tests)
+
+add_executable(hud_svg_raster_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/hud_svg_raster_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudSvgRaster.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudSvgRaster.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTypes.hpp"
+)
+target_include_directories(hud_svg_raster_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+)
+target_link_libraries(hud_svg_raster_tests PRIVATE
+    SDL3::SDL3-static
+    glm::glm
+    lunasvg::lunasvg
+)
+target_compile_definitions(hud_svg_raster_tests PRIVATE
+    GROUP2_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(hud_svg_raster_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(hud_svg_raster_tests)
+enable_sanitizers(hud_svg_raster_tests)
+add_test(NAME hud_svg_raster_tests COMMAND hud_svg_raster_tests)
 
 # ---- Compiler warnings ----
 set_compiler_warnings(group2)

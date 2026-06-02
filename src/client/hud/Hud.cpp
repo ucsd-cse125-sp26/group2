@@ -37,10 +37,13 @@ bool Hud::init(SDL_GPUDevice* device,
     screenW_ = static_cast<float>(screenW);
     screenH_ = static_cast<float>(screenH);
 
-    if (!renderer_.init(device, shaderFormat, sdfAtlas, screenW, screenH))
+    if (!svgAtlas_.init(device, "assets/hud_icons"))
         return false;
 
-    context_.init(&sdfAtlas);
+    if (!renderer_.init(device, shaderFormat, sdfAtlas, &svgAtlas_, screenW, screenH))
+        return false;
+
+    context_.init(&sdfAtlas, &svgAtlas_);
     createWidgets();
 
     SDL_Log("Hud: init OK (%ux%u, %zu widgets)", screenW, screenH, widgets_.size());
@@ -51,6 +54,7 @@ void Hud::quit()
 {
     widgets_.clear();
     renderer_.quit();
+    svgAtlas_.quit();
 }
 
 void Hud::resize(uint32_t newW, uint32_t newH)
