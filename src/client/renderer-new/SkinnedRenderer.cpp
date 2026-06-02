@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <limits>
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
@@ -116,6 +117,31 @@ bool SkinnedRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJo
     skinnedMeshes_.clear();
     skinnedMeshes_.reserve(meshes.size());
 
+    // Bind-pose bounding sphere (rig-local space) for per-instance frustum
+    // culling in setFrame.  AABB over every mesh vertex → centre + farthest
+    // corner, then padded so animations that fling limbs past the bind pose
+    // (jumps, dashes, weapon poses) do not clip the character out early.
+    {
+        constexpr float kAnimationMargin = 1.5f;
+        glm::vec3 mn(std::numeric_limits<float>::max());
+        glm::vec3 mx(std::numeric_limits<float>::lowest());
+        bool anyVerts = false;
+        for (const auto& m : meshes) {
+            for (const auto& v : m.bindPoseVertices) {
+                mn = glm::min(mn, v.position);
+                mx = glm::max(mx, v.position);
+                anyVerts = true;
+            }
+        }
+        if (anyVerts) {
+            rigBoundingCenter_ = 0.5f * (mn + mx);
+            rigBoundingRadius_ = 0.5f * glm::length(mx - mn) * kAnimationMargin;
+        } else {
+            rigBoundingCenter_ = glm::vec3(0.0f);
+            rigBoundingRadius_ = 0.0f;
+        }
+    }
+
     // Single transfer buffer sized to the largest pending upload, reused
     // across all per-mesh uploads.
     Uint32 maxUploadBytes = 0;
@@ -186,11 +212,76 @@ bool SkinnedRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJo
 
 // ─── Per-frame: capture + upload ─────────────────────────────────────────────
 
-void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
+bool SkinnedRenderer::sphereInFrustum(const glm::vec3& center, float radius, const FrustumPlanes& planes)
 {
-    framePalette_ = palette;
-    frameInstances_ = instances;
-    frameDirty_ = !instances.empty();
+    const glm::vec4 sides[NUM_FRUSTUM_PLANES] = {
+        planes.left, planes.right, planes.bottom, planes.top, planes.near, planes.far};
+    for (const glm::vec4& pl : sides) {
+        const glm::vec3 n(pl);
+        const float len = glm::length(n);
+        if (len < 1e-8f)
+            continue; // Degenerate plane (shouldn't happen) — don't let it cull everything.
+        // Signed distance of the centre to the plane, normalised so `radius`
+        // is comparable.  Inside is >= 0 (Gribb-Hartmann convention); the
+        // sphere is fully outside this plane only when the centre is more than
+        // `radius` behind it.
+        const float dist = (glm::dot(n, center) + pl.w) / len;
+        if (dist < -radius)
+            return false;
+    }
+    return true;
+}
+
+void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
+                               const std::vector<SkinnedInstance>& instances,
+                               const FrustumPlanes& frustum)
+{
+    framePalette_.clear();
+    frameInstances_.clear();
+
+    // Without an installed rig / a valid bounding sphere we have nothing to
+    // size the cull with — submit everything untouched and let the (likely
+    // empty) draw path sort it out.
+    if (!rigInstalled_ || numJoints_ <= 0 || rigBoundingRadius_ <= 0.0f) {
+        framePalette_ = palette;
+        frameInstances_ = instances;
+        frameDirty_ = !instances.empty();
+        return;
+    }
+
+    framePalette_.reserve(palette.size());
+    frameInstances_.reserve(instances.size());
+
+    for (const SkinnedInstance& inst : instances) {
+        // Bounding sphere of THIS instance: rig-local sphere pushed through the
+        // instance world transform.  Centre tracks the actual rendered mesh
+        // (which is vertically offset from the sim position), and the radius is
+        // scaled by the transform's largest axis so the test is conservative
+        // for any (uniform or not) scale.
+        const glm::vec3 center = glm::vec3(inst.worldTransform * glm::vec4(rigBoundingCenter_, 1.0f));
+        const float sx = glm::length(glm::vec3(inst.worldTransform[0]));
+        const float sy = glm::length(glm::vec3(inst.worldTransform[1]));
+        const float sz = glm::length(glm::vec3(inst.worldTransform[2]));
+        const float radius = rigBoundingRadius_ * std::max({sx, sy, sz});
+
+        if (!sphereInFrustum(center, radius, frustum))
+            continue;
+
+        // Guard the palette slice so a malformed instance can never read past
+        // the source palette while we compact it.
+        const size_t base = inst.paletteBase;
+        if (base + static_cast<size_t>(numJoints_) > palette.size())
+            continue;
+
+        SkinnedInstance visible = inst;
+        visible.paletteBase = static_cast<uint32_t>(framePalette_.size());
+        framePalette_.insert(framePalette_.end(),
+                             palette.begin() + static_cast<std::ptrdiff_t>(base),
+                             palette.begin() + static_cast<std::ptrdiff_t>(base) + numJoints_);
+        frameInstances_.push_back(visible);
+    }
+
+    frameDirty_ = !frameInstances_.empty();
 }
 
 bool SkinnedRenderer::ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes)
