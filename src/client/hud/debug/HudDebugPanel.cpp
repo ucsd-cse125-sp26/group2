@@ -278,10 +278,10 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
     } else if (const auto* minimap = dynamic_cast<const Minimap*>(&widget)) {
         writeFloatParam(out, first, "mapSize", minimap->mapSize);
         writeFloatParam(out, first, "dotSize", minimap->dotSize);
-        writeFloatParam(out, first, "borderThickness", minimap->borderThickness);
-        writeFloatParam(out, first, "levelRingThickness", minimap->levelRingThickness);
-        writeFloatParam(out, first, "levelRingGap", minimap->levelRingGap);
-        writeFloatParam(out, first, "levelRingDrainSeconds", minimap->levelRingDrainSeconds);
+        writeFloatParam(out, first, "dotZoneRadius", minimap->dotZoneRadius);
+        writeFloatParam(out, first, "dotZoneOffsetX", minimap->dotZoneOffsetX);
+        writeFloatParam(out, first, "dotZoneOffsetY", minimap->dotZoneOffsetY);
+        writeBoolParam(out, first, "showDotZoneDebug", minimap->showDotZoneDebug);
     } else if (const auto* pickup = dynamic_cast<const PickupNotification*>(&widget)) {
         writeFloatParam(out, first, "entryHeight", pickup->entryHeight);
         writeFloatParam(out, first, "entryGap", pickup->entryGap);
@@ -473,10 +473,10 @@ void editWidgetSpecific(HudWidget& widget)
     } else if (auto* minimap = dynamic_cast<Minimap*>(&widget)) {
         editFloat("Map Size", minimap->mapSize, 1.0f, 20.0f, 800.0f);
         editFloat("Dot Size", minimap->dotSize, 0.25f, 0.0f, 80.0f);
-        editFloat("Border Thickness", minimap->borderThickness, 0.25f, 0.0f, 40.0f);
-        editFloat("Level Ring Thickness", minimap->levelRingThickness, 0.25f, 0.0f, 40.0f);
-        editFloat("Level Ring Gap", minimap->levelRingGap, 0.25f, 0.0f, 80.0f);
-        editFloat("Level Ring Drain Seconds", minimap->levelRingDrainSeconds, 0.05f, 0.01f, 10.0f);
+        editFloat("Dot Zone Radius", minimap->dotZoneRadius, 0.5f, 0.0f, 400.0f);
+        editFloat("Dot Zone Offset X", minimap->dotZoneOffsetX, 0.5f, -400.0f, 400.0f);
+        editFloat("Dot Zone Offset Y", minimap->dotZoneOffsetY, 0.5f, -400.0f, 400.0f);
+        ImGui::Checkbox("Show Dot Zone Debug", &minimap->showDotZoneDebug);
     } else if (auto* pickup = dynamic_cast<PickupNotification*>(&widget)) {
         editFloat("Entry Height", pickup->entryHeight, 0.5f, 4.0f, 120.0f);
         editFloat("Entry Gap", pickup->entryGap, 0.25f, 0.0f, 80.0f);
