@@ -70,7 +70,7 @@ private:
     // Near/far are sized for Quake units.
     float fovy_ = glm::radians(60.0f);
     float aspect_ = 1.0f;
-    float zNear_ = 5.0f;    ///< Near clip (Quake units); 5 ≈ half a foot.
+    float zNear_ = 1.0f;    ///< Near clip (Quake units); 1 ≈ a tenth of a foot.
     float zFar_ = 15000.0f; ///< Far clip; covers the 4 000-unit play area with margin.
 
     glm::mat4 view_{1.0f};

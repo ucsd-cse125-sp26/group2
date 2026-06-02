@@ -151,6 +151,11 @@ public:
     /// @brief Number of instances pending render this frame (0 if no frame submitted).
     [[nodiscard]] size_t pendingInstanceCount() const { return frameInstances_.size(); }
 
+    /// @brief Source material index of each installed rig mesh, in skinnedMeshes_
+    /// order. Lets the renderer build a per-mesh diffuse list aligned to the rig's
+    /// mesh order (which differs from the model loader's node-DFS order).
+    [[nodiscard]] const std::vector<uint32_t>& meshMaterialIndices() const { return meshMaterialIndices_; }
+
 private:
     /// @brief One mesh of the installed skinned rig.  Built by `setRig`.
     ///
@@ -199,6 +204,7 @@ private:
     bool rigInstalled_ = false;
     int numJoints_ = 0;
     std::vector<SkinnedMesh> skinnedMeshes_;
+    std::vector<uint32_t> meshMaterialIndices_; ///< Source material index per mesh, parallel to skinnedMeshes_.
 
     // Textured mode (first-person weapon viewmodel) ──────────────────────────
     bool textured_ = false;

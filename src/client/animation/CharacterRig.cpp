@@ -185,6 +185,7 @@ bool CharacterRig::loadFromFBX(const std::string& path, bool flipUVs)
             continue;
 
         RigMeshData rigMesh;
+        rigMesh.materialIndex = mesh->mMaterialIndex;
         rigMesh.baseVertices.resize(mesh->mNumVertices);
         rigMesh.skinWeights.resize(mesh->mNumVertices);
 

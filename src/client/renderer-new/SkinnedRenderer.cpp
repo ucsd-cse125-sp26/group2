@@ -49,6 +49,7 @@ void SkinnedRenderer::shutdown()
             SDL_ReleaseGPUBuffer(device_, sm.ib);
     }
     skinnedMeshes_.clear();
+    meshMaterialIndices_.clear();
 
     if (palettesSsboInfo_.ssbo_)
         SDL_ReleaseGPUBuffer(device_, palettesSsboInfo_.ssbo_);
@@ -106,6 +107,7 @@ bool SkinnedRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJo
                 SDL_ReleaseGPUBuffer(device_, sm.ib);
         }
         skinnedMeshes_.clear();
+        meshMaterialIndices_.clear();
         perMeshDiffuse_.clear();
         rigInstalled_ = false;
     }
@@ -131,6 +133,8 @@ bool SkinnedRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJo
     numJoints_ = numJoints;
     skinnedMeshes_.clear();
     skinnedMeshes_.reserve(meshes.size());
+    meshMaterialIndices_.clear();
+    meshMaterialIndices_.reserve(meshes.size());
 
     // Single transfer buffer sized to the largest pending upload, reused
     // across all per-mesh uploads.
@@ -187,6 +191,7 @@ bool SkinnedRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJo
             uploadToBuffer(sm.ib, m.indices.data(), iBytes);
 
         skinnedMeshes_.push_back(sm);
+        meshMaterialIndices_.push_back(m.materialIndex);
     }
 
     SDL_EndGPUCopyPass(cp);

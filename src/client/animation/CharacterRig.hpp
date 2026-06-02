@@ -30,6 +30,7 @@ struct RigMeshData
     std::vector<ModelVertex> baseVertices; ///< Bind-pose vertices (never mutated).
     std::vector<SkinWeight> skinWeights;   ///< Parallel to baseVertices.
     std::vector<uint32_t> indices;         ///< Triangle indices.
+    uint32_t materialIndex = 0;            ///< Source aiMesh material index — used to bind the right per-mesh texture.
 };
 
 /// @brief Shared skinned rig — skeleton + bind-pose meshes + joint map.

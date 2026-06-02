@@ -140,6 +140,7 @@ std::vector<RigMeshSource> WeaponViewmodelAnim::buildRigSources() const
     sources.reserve(impl_->rig.meshes().size());
     for (const RigMeshData& mesh : impl_->rig.meshes()) {
         RigMeshSource src;
+        src.materialIndex = mesh.materialIndex;
         src.bindPoseVertices = mesh.baseVertices;
         src.indices = mesh.indices;
         src.boneInfluences.reserve(mesh.skinWeights.size());

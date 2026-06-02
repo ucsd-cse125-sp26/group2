@@ -1153,25 +1153,49 @@ void NewRenderer::setViewmodelFrame(const std::vector<glm::mat4>& palette, const
     viewmodelSkinned_.setFrame(palette, instances);
 }
 
+namespace
+{
+/// Resolve the diffuse GPU texture for a model's source material *index*.
+/// Returns nullptr if the index/material/texture isn't present.
+SDL_GPUTexture* diffuseTexForMaterialIndex(const Asset::Model& model, uint32_t materialIndex)
+{
+    if (materialIndex >= model.materialsByIndex_.size())
+        return nullptr;
+    const MaterialIdInt matId = model.materialsByIndex_[materialIndex];
+    if (!Asset::materials_.contains(matId))
+        return nullptr;
+    const Asset::Material& mat = Asset::materials_.at(matId);
+    if (Asset::textures_.contains(mat.diffuseTexture))
+        return Asset::textures_.at(mat.diffuseTexture).tex;
+    return nullptr;
+}
+} // namespace
+
 void NewRenderer::setViewmodelTexture(int modelInstanceIndex)
 {
     if (modelInstanceIndex >= 0 && static_cast<size_t>(modelInstanceIndex) < Asset::modelInstances_.size()) {
         const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
-        if (Asset::models_.contains(modelId)) {
-            Asset::Model& model = Asset::models_.at(modelId);
-            for (auto& element : model.modelElements_) {
-                if (!Asset::materials_.contains(element.materialId_))
-                    continue;
-                const Asset::Material& mat = Asset::materials_.at(element.materialId_);
-                if (Asset::textures_.contains(mat.diffuseTexture)) {
-                    viewmodelSkinned_.setDiffuseTexture(Asset::textures_.at(mat.diffuseTexture).tex, sampler_);
-                    return;
-                }
+        const std::vector<uint32_t>& matIdx = viewmodelSkinned_.meshMaterialIndices();
+        if (Asset::models_.contains(modelId) && !matIdx.empty()) {
+            // Per-mesh diffuse so each gun part samples its OWN material texture, in
+            // the rig's mesh order. The R-301 magazine is a flat-color material with
+            // no UVs; binding the single body atlas to it sampled the atlas's unused,
+            // fully transparent (0,0) texel and the magazine vanished in-game. The
+            // loader synthesizes a 1x1 opaque texel for such flat-color parts, so the
+            // magazine now renders its true colour.
+            const Asset::Model& model = Asset::models_.at(modelId);
+            std::vector<SDL_GPUTexture*> perMesh;
+            perMesh.reserve(matIdx.size());
+            for (uint32_t mi : matIdx) {
+                SDL_GPUTexture* tex = diffuseTexForMaterialIndex(model, mi);
+                perMesh.push_back(tex ? tex : viewmodelFallbackTex_);
             }
+            viewmodelSkinned_.setPerMeshDiffuse(std::move(perMesh), sampler_);
+            return;
         }
     }
-    // Weapon has no diffuse texture (e.g. untextured Charge Rifle body): bind the
-    // neutral fallback so the previously equipped weapon's texture doesn't persist.
+    // No model / rig not installed: bind the neutral fallback so the previously
+    // equipped weapon's texture doesn't persist.
     viewmodelSkinned_.setDiffuseTexture(viewmodelFallbackTex_, sampler_);
 }
 
@@ -1186,25 +1210,25 @@ void NewRenderer::setPlayerBodyTextures(int modelInstanceIndex)
     const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
     if (!Asset::models_.contains(modelId))
         return;
-    Asset::Model& model = Asset::models_.at(modelId);
+    const Asset::Model& model = Asset::models_.at(modelId);
+    // Build the per-mesh diffuse list in the SKINNED RIG's mesh order (not the
+    // model loader's node-DFS order) by resolving each rig mesh's source material
+    // index → texture. CharacterRig enumerates scene meshes in array order and
+    // skips bone-less ones, so its order differs from modelElements_; indexing by
+    // material index keeps body/gear/head/hair textures on the correct mesh instead
+    // of swapping them (which made the Wraith body's textures look wrong).
+    const std::vector<uint32_t>& matIdx = skinnedRenderer_.meshMaterialIndices();
     std::vector<SDL_GPUTexture*> perMesh;
-    perMesh.reserve(model.modelElements_.size());
+    perMesh.reserve(matIdx.size());
     int withTex = 0;
-    for (auto& element : model.modelElements_) {
-        SDL_GPUTexture* tex = nullptr;
-        if (Asset::materials_.contains(element.materialId_)) {
-            const Asset::Material& mat = Asset::materials_.at(element.materialId_);
-            if (Asset::textures_.contains(mat.diffuseTexture))
-                tex = Asset::textures_.at(mat.diffuseTexture).tex;
-        }
+    for (uint32_t mi : matIdx) {
+        SDL_GPUTexture* tex = diffuseTexForMaterialIndex(model, mi);
         perMesh.push_back(tex);
         if (tex)
             ++withTex;
     }
     skinnedRenderer_.setPerMeshDiffuse(std::move(perMesh), sampler_);
-    SDL_Log("[renderer] player body textures: %d/%zu meshes have a diffuse texture",
-            withTex,
-            model.modelElements_.size());
+    SDL_Log("[renderer] player body textures: %d/%zu rig meshes have a diffuse texture", withTex, matIdx.size());
 }
 
 bool NewRenderer::setViewmodelArmsRig(const std::vector<RigMeshSource>& meshes, int numJoints)

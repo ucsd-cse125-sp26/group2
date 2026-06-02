@@ -111,6 +111,11 @@ struct Model
 {
     std::vector<ModelNode> modelNodes_;
     std::vector<ModelElement> modelElements_;
+    /// Material id for each source material *index* (parallel to aiScene::mMaterials).
+    /// Lets callers resolve a texture by raw material index — needed to bind
+    /// per-mesh textures in a skinned rig's mesh order, which differs from the
+    /// node-DFS order of `modelElements_`.
+    std::vector<MaterialIdInt> materialsByIndex_;
     std::unordered_map<std::string, MountPoint> mountPoints;
     bool hasMuzzle = false;
     glm::vec3 muzzleLocalPos{};

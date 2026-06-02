@@ -316,6 +316,57 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
         }
     }
 
+    // Heal collapsed translation tracks. Some clips — notably the Apex reload
+    // clips converted from .cast (apex_reload_rifle/kraber) — were exported with
+    // near-zero translations on a subset of joints: the whole center spine column
+    // (hip → spineA/B/C → neck → head) and the legs come in ~100x too short, while
+    // the arms/clavicles/hands/weapon-attach bones are correct. Left as-is, the
+    // masked upper-body reload overlay drives those joints and the head/neck/torso
+    // collapse onto the hip ("compressed into one place"); the legs hide it because
+    // they stay on the locomotion clip via the lower-body mask.
+    //
+    // For a rigid skinned skeleton, a non-root joint's local translation is a
+    // FIXED bone-length offset equal to the bind/rest pose — only rotations should
+    // animate. So any joint whose animated translation has shrunk far below its
+    // rest-pose length is corrupt data: replace its translation track with the
+    // constant rest-pose translation (rotations, the actual reload motion, are left
+    // untouched). Joints with legitimately small or animated translations
+    // (hip bob, weapon-attach helpers, hands) are NOT collapsed relative to their
+    // rest length, so they keep their authored tracks.
+    {
+        int healed = 0;
+        for (int j = 0; j < numJoints; ++j) {
+            const std::string jointName(jointNames[static_cast<size_t>(j)]);
+            const auto rpIt = restPoses.find(jointName);
+            if (rpIt == restPoses.end())
+                continue;
+            const ozz::math::Float3& restT = rpIt->second.translation;
+            const float restLen2 = restT.x * restT.x + restT.y * restT.y + restT.z * restT.z;
+            if (restLen2 <= 1.0f)
+                continue; // Rest bone offset is ~0 — nothing meaningful to collapse.
+            auto& track = raw.tracks[static_cast<size_t>(j)].translations;
+            if (track.empty())
+                continue;
+            float maxLen2 = 0.0f;
+            for (const auto& key : track) {
+                const auto& v = key.value;
+                maxLen2 = std::max(maxLen2, v.x * v.x + v.y * v.y + v.z * v.z);
+            }
+            // Collapsed if the largest authored offset is below half the rest
+            // length (i.e. squared length below a quarter). The corrupt joints sit
+            // at ~1% of rest length, well clear of any legitimately-moving joint.
+            if (maxLen2 < 0.25f * restLen2) {
+                track.clear();
+                track.push_back({0.f, restT});
+                ++healed;
+            }
+        }
+        if (healed > 0)
+            SDL_Log("AnimationLibrary: healed %d collapsed translation track(s) in '%s' (snapped to rest pose)",
+                    healed,
+                    path.c_str());
+    }
+
     // Strip horizontal root motion — Mixamo clips downloaded WITHOUT the
     // "In Place" toggle bake forward translation into the hip joint, which
     // makes the character drift during the loop and snap back at loop end.

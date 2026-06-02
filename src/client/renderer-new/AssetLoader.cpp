@@ -5,6 +5,9 @@
 
 #include "Asset.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <glm/gtc/quaternion.hpp>
 #include <iostream>
@@ -297,9 +300,11 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     std::cout << debugPrefix << "loadedMeshes" << std::endl;
 
     if (asimpSceneStructurePtr->HasMaterials()) {
+        newModel.materialsByIndex_.reserve(asimpSceneStructurePtr->mNumMaterials);
         for (unsigned int i = 0; i < asimpSceneStructurePtr->mNumMaterials; i++) {
             aiMaterial* mat = asimpSceneStructurePtr->mMaterials[i];
             MaterialIdInt matId = Asset::getMaterialIdFromString(assetIdNameSpace + "material_" + std::to_string(i));
+            newModel.materialsByIndex_.push_back(matId);
 
             Asset::Material& mat_ = Asset::materials_[matId];
 
@@ -307,6 +312,16 @@ bool AssetLoader::loadModel(const ModelIdInt id,
             mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_AMBIENT, mat_.kAmbient_);
             mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_SPECULAR, mat_.kSpecular_);
             mat_.hasPhongData_ |= readAiColor(*mat, AI_MATKEY_COLOR_EMISSIVE, mat_.kEmission_);
+
+            // glTF stores the base color as a linear factor (AI_MATKEY_BASE_COLOR);
+            // older Assimp builds don't always alias it onto COLOR_DIFFUSE. Read it
+            // explicitly so flat-color parts (e.g. the R-301 magazine's orange) keep
+            // their authored colour instead of falling back to the default grey.
+            aiColor4D baseColor;
+            if (mat->Get(AI_MATKEY_BASE_COLOR, baseColor) == AI_SUCCESS) {
+                mat_.kDiffuse_ = {baseColor.r, baseColor.g, baseColor.b};
+                mat_.hasPhongData_ = true;
+            }
 
             float shininess = 0.0f;
             if (mat->Get(AI_MATKEY_SHININESS, shininess) == AI_SUCCESS) {
@@ -348,6 +363,41 @@ bool AssetLoader::loadModel(const ModelIdInt id,
             } else if (hasUnknown) {
                 mat_.metallicRoughnessTexture =
                     loadEmbeddedMaterialTexture(*asimpSceneStructurePtr, assetIdNameSpace, unknownPath);
+            }
+
+            // Synthesize a 1x1 solid-color diffuse texture for a material that has a
+            // base/diffuse color but no albedo map (e.g. the R-301 magazine's flat
+            // 'assault_mag_orange', which also has no UVs). The unified per-mesh
+            // texture path needs a texture to bind for every mesh; without one those
+            // parts fall back to another mesh's atlas and sample its unused, fully
+            // transparent (0,0) texel — making the part vanish in-game even though
+            // its material alpha is 1. A dedicated opaque texel renders the true
+            // colour. The factor is linear (glTF), so sRGB-encode it before upload
+            // (the diffuse upload format is *_SRGB → the GPU decodes it back).
+            if (mat_.diffuseTexture == 0 && mat_.hasPhongData_) {
+                const TexIdInt solidId =
+                    Asset::getTexIdFromString(assetIdNameSpace + "solidcolor_" + std::to_string(i));
+                Asset::Texture& solid = Asset::textures_[solidId];
+                if (solid.tex == nullptr && solid.tex_raw == nullptr) {
+                    const auto encodeSrgb = [](float c) {
+                        c = std::clamp(c, 0.0f, 1.0f);
+                        const float e = c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+                        return static_cast<unsigned char>(std::lround(e * 255.0f));
+                    };
+                    auto* pixel = static_cast<stbi_uc*>(std::malloc(4));
+                    if (pixel) {
+                        pixel[0] = encodeSrgb(mat_.kDiffuse_.r);
+                        pixel[1] = encodeSrgb(mat_.kDiffuse_.g);
+                        pixel[2] = encodeSrgb(mat_.kDiffuse_.b);
+                        pixel[3] = 255;
+                        solid.tex_raw = pixel;
+                        solid.width = 1;
+                        solid.height = 1;
+                        solid.channels = 4;
+                    }
+                }
+                if (solid.tex_raw != nullptr || solid.tex != nullptr)
+                    mat_.diffuseTexture = solidId;
             }
         }
     }

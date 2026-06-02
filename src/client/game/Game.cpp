@@ -676,6 +676,7 @@ std::vector<RigMeshSource> buildRigMeshSources(const CharacterRig& rig)
 
     for (const RigMeshData& mesh : rig.meshes()) {
         RigMeshSource source;
+        source.materialIndex = mesh.materialIndex;
         source.bindPoseVertices = mesh.baseVertices;
         source.indices = mesh.indices;
         source.boneInfluences.reserve(mesh.skinWeights.size());
