@@ -1187,7 +1187,10 @@ bool NewRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJoints
 
 void NewRenderer::setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
 {
-    skinnedRenderer_.setFrame(palette, instances);
+    // The renderer owns frustum culling for skinned characters: Game.cpp hands
+    // us every character and SkinnedRenderer keeps only the ones whose bounding
+    // sphere is on screen, using this frame's camera frustum planes.
+    skinnedRenderer_.setFrame(palette, instances, camera_.getViewProjectionFrustumPlane());
 }
 
 

@@ -3315,35 +3315,13 @@ SDL_AppResult Game::iterate()
         candidates.reserve(128);
         const auto ragdollPoses = collectClientRagdollPoses(registry);
 
-        // Frustum extraction (Gribb-Hartmann).
-        const glm::mat4 vp = renderer->getCamera().getViewProjectionMatrix();
-        struct Plane
-        {
-            glm::vec3 n;
-            float d;
-        };
-        Plane frustum[6];
-        const glm::mat4 m = glm::transpose(vp);
-        const auto extract = [&](int idx, const glm::vec4& row) {
-            const glm::vec3 n(row.x, row.y, row.z);
-            const float len = glm::length(n);
-            frustum[idx].n = n / len;
-            frustum[idx].d = row.w / len;
-        };
-        extract(0, m[3] + m[0]);
-        extract(1, m[3] - m[0]);
-        extract(2, m[3] + m[1]);
-        extract(3, m[3] - m[1]);
-        extract(4, m[3] + m[2]);
-        extract(5, m[3] - m[2]);
-
-        const float charRadius = 1.5f * kRigScale_ * (rigMeshMinY_ < 0.0f ? -rigMeshMinY_ : 100.0f);
-        auto inFrustum = [&](const glm::vec3& center, float radius) {
-            for (const auto& p : frustum)
-                if (glm::dot(p.n, center) + p.d < -radius)
-                    return false;
-            return true;
-        };
+        // Frustum culling for skinned characters now lives in SkinnedRenderer:
+        // it sphere-tests every submitted instance against the camera frustum
+        // planes using the rig's real (mesh-centred) bounding sphere.  We hand
+        // it ALL non-dead players below and let it pick the visible subset —
+        // see SkinnedRenderer::setFrame.  (Doing it here off `pos.value` culled
+        // against the sim position, not the offset rendered mesh, which popped
+        // characters out at the screen edge.)
 
         // Detect movement-state transitions for SFX (landing, slide, abilities, respawn).
         // Runs over ALL PlayerVisState entities — dead, off-screen, and remote alike —
@@ -3470,10 +3448,6 @@ SDL_AppResult Game::iterate()
 
                 // Dead players are rendered from replicated ragdoll bones below.
                 if (ps.isDead)
-                    return;
-
-                const bool visible = isLocal || inFrustum(pos.value, charRadius);
-                if (!visible)
                     return;
 
                 AnimCandidate c;
@@ -4029,12 +4003,8 @@ SDL_AppResult Game::iterate()
                 if (poseIt == ragdollPoses.end())
                     return;
 
-                const size_t torsoIndex = static_cast<size_t>(RagdollBone::Torso);
-                const glm::vec3 cullCenter =
-                    poseIt->second[torsoIndex].present ? poseIt->second[torsoIndex].position : pos.value;
-                if (!inFrustum(cullCenter, charRadius))
-                    return;
-
+                // Frustum culling for these dead-player ragdoll instances is
+                // handled by SkinnedRenderer too — submit and let it cull.
                 std::vector<glm::mat4> ragdollSkinMatrices = ac.animator->skinMatrices();
                 if (ragdollSkinMatrices.size() != static_cast<size_t>(numJoints))
                     return;
