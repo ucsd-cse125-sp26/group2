@@ -175,6 +175,15 @@ struct HudWorldEnemy
     bool occluded = false; ///< True when world geometry blocks the line of sight from the camera (hide bar/name).
 };
 
+/// @brief Killcam target box — the killer's world AABB, framed in red on the
+/// death screen while the local player awaits respawn.
+struct HudKillerBox
+{
+    bool valid = false;          ///< True while the killcam is tracking a killer.
+    glm::vec3 center{0.f};       ///< Killer AABB center in world space.
+    glm::vec3 halfExtents{0.f};  ///< Killer AABB half-extents in world space.
+};
+
 /// @brief Equipment slot state — drives the bottom-center grapple/grenade/tactical row.
 struct HudEquipmentState
 {
@@ -371,6 +380,7 @@ struct HudGameState
     HudEquipmentState equipment;                                ///< Grapple / grenade / tactical state.
     HudGrenadeRadialState grenadeRadial;                        ///< Held-G grenade selection radial.
     HudEmoteWheelState emoteWheel;                              ///< Held-B emote selection wheel.
+    HudKillerBox killerBox;                                    ///< Killcam: red box framing the killer while dead.
     HudAbilitySelectionState abilitySelection;                  ///< Pending level-up ability choice.
     std::span<const HudPickupNotification> pickupNotifications; ///< Slide-in pickup messages this frame.
     std::span<const HudPopupMessage> popupMessages;             ///< Generic popup messages this frame.

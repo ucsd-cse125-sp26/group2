@@ -2842,6 +2842,72 @@ SDL_AppResult Game::iterate()
         }
     }
 
+    // Killcam: while dead and awaiting respawn, freeze the eye at the death
+    // position and rotate to keep the killer centered, framed by a red box (the
+    // box itself is drawn by the HUD). Inactive if the killer can't be located
+    // (disconnected, world/fall death, or a suicide).
+    {
+        bool killcamActive = false;
+        entt::entity localPlayerEnt = entt::null;
+        registry.view<LocalPlayer>().each([&](entt::entity e) { localPlayerEnt = e; });
+
+        if (localPlayerEnt != entt::null && registry.all_of<DeathInfo, RespawnTimer>(localPlayerEnt)) {
+            const auto& deathInfo = registry.get<DeathInfo>(localPlayerEnt);
+            ClientId localCid{-1};
+            if (const auto* lc = registry.try_get<ClientId>(localPlayerEnt))
+                localCid = *lc;
+
+            // Don't track a self-inflicted death (fall/suicide).
+            if (!(localCid.value != -1 && deathInfo.killerId == localCid)) {
+                entt::entity killer = entt::null;
+                registry.view<ClientId, Position, CollisionShape>().each(
+                    [&](entt::entity e, const ClientId& cid, const Position&, const CollisionShape&) {
+                        if (cid == deathInfo.killerId)
+                            killer = e;
+                    });
+
+                if (killer != entt::null) {
+                    const glm::vec3 killerPos = registry.get<Position>(killer).value;
+                    const glm::vec3 killerHalf = registry.get<CollisionShape>(killer).halfExtents;
+                    // Aim at the killer's torso (a little below AABB center reads
+                    // best for a humanoid whose Position is the capsule centre).
+                    const glm::vec3 killerCenter = killerPos + glm::vec3{0.0f, killerHalf.y * 0.1f, 0.0f};
+
+                    // Lock the eye at the death position on the activation edge
+                    // (killcamActive_ still holds the previous frame's value here).
+                    if (!killcamActive_) {
+                        killcamEye_ = renderEye;
+                        killcamYaw_ = renderYaw;
+                        killcamPitch_ = renderPitch;
+                    }
+
+                    const glm::vec3 toKiller = killerCenter - killcamEye_;
+                    if (glm::length(toKiller) > 1.0f) {
+                        const glm::vec3 dir = glm::normalize(toKiller);
+                        // Matches the camera basis: fwd = {sinYaw*cosPitch,
+                        // -sinPitch, cosYaw*cosPitch}.
+                        const float targetYaw = std::atan2(dir.x, dir.z);
+                        const float targetPitch = std::asin(std::clamp(-dir.y, -1.0f, 1.0f));
+
+                        const float blend = std::min(1.0f, 8.0f * frameTime);
+                        killcamYaw_ += std::remainder(targetYaw - killcamYaw_, glm::two_pi<float>()) * blend;
+                        killcamPitch_ += (targetPitch - killcamPitch_) * blend;
+
+                        renderEye = killcamEye_;
+                        renderYaw = killcamYaw_;
+                        renderPitch = killcamPitch_;
+                        targetRoll = 0.0f;
+
+                        killcamKillerCenter_ = killerPos;
+                        killcamKillerHalf_ = killerHalf;
+                        killcamActive = true;
+                    }
+                }
+            }
+        }
+        killcamActive_ = killcamActive;
+    }
+
     phaseSnap(phaseStats.cameraResolveMs);
     phaseStats.cameraMs = phaseStats.cameraResolveMs;
 
@@ -6146,6 +6212,12 @@ SDL_AppResult Game::iterate()
         SDL_GetWindowSizeInPixels(window, &winW, &winH);
         hudState.screenW = static_cast<float>(winW);
         hudState.screenH = static_cast<float>(winH);
+
+        // ── Killcam killer box (red AABB framing the killer while dead) ──
+        // The killer entity + AABB were resolved during camera resolution.
+        hudState.killerBox.valid = killcamActive_;
+        hudState.killerBox.center = killcamKillerCenter_;
+        hudState.killerBox.halfExtents = killcamKillerHalf_;
 
         // ── Floating damage numbers ──
         thread_local std::vector<HudDamageNumber> hudDamageNumbers;

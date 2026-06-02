@@ -859,6 +859,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Scoreboard.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EmoteWheelWidget.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EmoteWheelWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillcamBoxWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KillcamBoxWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/Minimap.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/VignetteWidget.cpp"
