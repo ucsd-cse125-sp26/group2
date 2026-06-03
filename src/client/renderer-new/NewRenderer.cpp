@@ -369,9 +369,10 @@ SDL_GPUGraphicsPipeline* NewRenderer::createDepthPipeline(const SDL_GPURasterize
 }
 bool NewRenderer::createDepthRes0Pipeline()
 {
-    SDL_GPURasterizerState rasterizer_state;
+    SDL_GPURasterizerState rasterizer_state{};
     rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     rasterizer_state.enable_depth_bias = true;
     rasterizer_state.depth_bias_constant_factor = 500.0f;
     rasterizer_state.depth_bias_slope_factor = 1.0f;
@@ -383,9 +384,10 @@ bool NewRenderer::createDepthRes0Pipeline()
 
 bool NewRenderer::createDepthRes1Pipeline()
 {
-    SDL_GPURasterizerState rasterizer_state;
+    SDL_GPURasterizerState rasterizer_state{};
     rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     rasterizer_state.enable_depth_bias = true;
     rasterizer_state.depth_bias_constant_factor = 500.0f;
     rasterizer_state.depth_bias_slope_factor = 10.0f;
@@ -397,9 +399,10 @@ bool NewRenderer::createDepthRes1Pipeline()
 
 bool NewRenderer::createDepthRes2Pipeline()
 {
-    SDL_GPURasterizerState rasterizer_state;
+    SDL_GPURasterizerState rasterizer_state{};
     rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     rasterizer_state.enable_depth_bias = true;
     rasterizer_state.depth_bias_constant_factor = 100.0f;
     rasterizer_state.depth_bias_slope_factor = 1.0f;
