@@ -27,6 +27,32 @@ struct BgResources
 };
 BgResources bgState;
 
+ImFont* g_terminalFont = nullptr;
+
+/// First terminal font file found on disk (relative to SDL base path or CWD).
+ImFont* tryLoadTerminalFont(ImGuiIO& io, const std::string& base)
+{
+    // NOTE: Can add more terminal fonts here if desired, only one will be loaded.
+    const std::string names[] = {"FSEX302.ttf"};
+    for (const std::string& name : names) {
+        std::string p1 = base;
+        p1.append("fonts/").append(name);
+        std::string p2 = base;
+        p2.append("assets/fonts/").append(name);
+        std::string p3 = "assets/fonts/";
+        p3.append(name);
+        const std::string candidates[] = {p1, p2, p3};
+        for (const std::string& path : candidates) {
+            std::error_code ec;
+            if (!std::filesystem::exists(path, ec))
+                continue;
+            if (ImFont* f = io.Fonts->AddFontFromFileTTF(path.c_str(), 20.0f))
+                return f;
+        }
+    }
+    return nullptr;
+}
+
 /// Try the conventional background-image names; first decodable one wins.
 bool tryLoadBackground(SDL_GPUDevice* device)
 {
@@ -128,6 +154,8 @@ void loadFonts()
     ImGuiIO& io = ImGui::GetIO();
     const char* base = SDL_GetBasePath();
     const std::string b = base ? base : "";
+
+    ImFont* spaceGrotesk = nullptr;
     const std::string candidates[] = {
         b + "fonts/SpaceGrotesk.ttf",
         b + "assets/fonts/SpaceGrotesk.ttf",
@@ -138,11 +166,37 @@ void loadFonts()
         if (!std::filesystem::exists(path, ec))
             continue; // Pre-check avoids ImGui's missing-file assertion in debug builds.
         if (ImFont* f = io.Fonts->AddFontFromFileTTF(path.c_str(), 20.0f)) {
-            io.FontDefault = f;
-            return;
+            spaceGrotesk = f;
+            break;
         }
     }
-    // No font file present: keep ImGui's built-in font (graceful, no error).
+
+    g_terminalFont = tryLoadTerminalFont(io, b);
+
+    if (g_terminalFont)
+        io.FontDefault = g_terminalFont;
+    else if (spaceGrotesk)
+        io.FontDefault = spaceGrotesk;
+    // Otherwise keep ImGui's built-in font (graceful, no error).
+}
+
+ImFont* terminalFont()
+{
+    return g_terminalFont;
+}
+
+ScopedTerminalFont::ScopedTerminalFont()
+{
+    if (g_terminalFont) {
+        ImGui::PushFont(g_terminalFont);
+        pushed = true;
+    }
+}
+
+ScopedTerminalFont::~ScopedTerminalFont()
+{
+    if (pushed)
+        ImGui::PopFont();
 }
 
 float scaleFor(const ImVec2& display)

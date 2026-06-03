@@ -93,8 +93,22 @@ ThemeSettings& settings();
 /// @note Call once after ImGui::CreateContext() (and after ImGui::StyleColorsDark()).
 void applyStyle();
 
-/// @brief Load the SpaceGrotesk UI font and set it as the default.  Safe (no-op) if the file is missing.
+/// @brief Load the UI font (terminal font if present, otherwise SpaceGrotesk) and set it as the default.
+///        Safe (no-op) if no font file is found.
 void loadFonts();
+
+/// @brief Pointer to the loaded terminal/CRT font, or nullptr if none was found by loadFonts().
+ImFont* terminalFont();
+
+/// @brief RAII helper that pushes terminalFont() for its lifetime.  No-op when the font is missing.
+struct ScopedTerminalFont
+{
+    bool pushed = false;
+    ScopedTerminalFont();
+    ~ScopedTerminalFont();
+    ScopedTerminalFont(const ScopedTerminalFont&) = delete;
+    ScopedTerminalFont& operator=(const ScopedTerminalFont&) = delete;
+};
 
 /// @brief Responsive UI scale derived from the current display size (1.0 at 1280x720).
 float scaleFor(const ImVec2& display);
