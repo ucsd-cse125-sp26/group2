@@ -92,6 +92,9 @@ UserSettings load(const std::string& path)
     if (auto v = input["gamepad-swap-sticks"].value<bool>()) {
         settings.gamepadSwapSticks = *v;
     }
+    if (auto v = input["muzzle-flash"].value<bool>()) {
+        settings.muzzleFlashEnabled = *v;
+    }
 
     auto loadBindingTable = [&](const auto table, BindingDevice device) {
         if (!table)
@@ -151,6 +154,7 @@ bool save(const std::string& path, const UserSettings& settings)
     out << "aim-assist-strength = "
         << std::clamp(settings.aimAssistStrength, k_minAimAssistStrength, k_maxAimAssistStrength) << "\n";
     out << "gamepad-swap-sticks = " << (settings.gamepadSwapSticks ? "true" : "false") << "\n";
+    out << "muzzle-flash = " << (settings.muzzleFlashEnabled ? "true" : "false") << "\n";
 
     out << "\n[input.keyboard]\n";
     for (Action action : InputBindings::actions()) {

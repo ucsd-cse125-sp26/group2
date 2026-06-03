@@ -137,6 +137,7 @@ void PauseMenu::openSettings(const UserSettings& settings)
     draftAimAssistEnabled = settings.aimAssistEnabled;
     draftAimAssistStrength = settings.aimAssistStrength;
     draftGamepadSwapSticks = settings.gamepadSwapSticks;
+    draftMuzzleFlashEnabled = settings.muzzleFlashEnabled;
     dirty = false;
     listeningBinding.reset();
     statusMessage.clear();
@@ -319,6 +320,14 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
                 dirty = true;
 
             ImGui::Spacing();
+            ImGui::SeparatorText("Video");
+
+            const bool previousMuzzleFlash = draftMuzzleFlashEnabled;
+            ImGui::Checkbox("Muzzle Flash", &draftMuzzleFlashEnabled);
+            if (draftMuzzleFlashEnabled != previousMuzzleFlash)
+                dirty = true;
+
+            ImGui::Spacing();
             ImGui::SeparatorText("Controller");
 
             const float previousGamepadYawSensitivity = draftGamepadYawSensitivity;
@@ -449,6 +458,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
                 draftAimAssistEnabled = defaults.aimAssistEnabled;
                 draftAimAssistStrength = defaults.aimAssistStrength;
                 draftGamepadSwapSticks = defaults.gamepadSwapSticks;
+                draftMuzzleFlashEnabled = defaults.muzzleFlashEnabled;
                 listeningBinding.reset();
                 dirty = true;
                 statusMessage.clear();
@@ -467,6 +477,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
                 settings.aimAssistEnabled = draftAimAssistEnabled;
                 settings.aimAssistStrength = draftAimAssistStrength;
                 settings.gamepadSwapSticks = draftGamepadSwapSticks;
+                settings.muzzleFlashEnabled = draftMuzzleFlashEnabled;
                 const bool saved = user_settings::save(std::string(settingsPath), settings);
                 statusMessage = saved ? "Settings saved." : "Settings could not be saved.";
                 dirty = false;
@@ -510,6 +521,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             draftAimAssistEnabled = settings.aimAssistEnabled;
             draftAimAssistStrength = settings.aimAssistStrength;
             draftGamepadSwapSticks = settings.gamepadSwapSticks;
+            draftMuzzleFlashEnabled = settings.muzzleFlashEnabled;
             closeSettingsPage();
             break;
         case PendingConfirm::None:

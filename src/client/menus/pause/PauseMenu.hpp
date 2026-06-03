@@ -82,6 +82,7 @@ private:
     bool draftAimAssistEnabled = true;                       ///< Editable aim-assist enabled draft.
     float draftAimAssistStrength = 1.0f;                     ///< Editable aim-assist strength draft.
     bool draftGamepadSwapSticks = false;                     ///< Editable southpaw stick-layout draft.
+    bool draftMuzzleFlashEnabled = true;                     ///< Editable muzzle-flash-enabled draft.
     bool dirty = false;                                      ///< True when draft settings differ from live settings.
     std::optional<ListeningBinding> listeningBinding;        ///< Binding slot waiting for the next input.
     std::string statusMessage;                               ///< Save status shown in the settings page.

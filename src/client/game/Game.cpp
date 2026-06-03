@@ -2138,6 +2138,11 @@ void Game::adoptGamepad(SDL_JoystickID id)
 
 void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
 {
+    // Respect the "Muzzle Flash" setting — skip spawning when disabled. Lights
+    // already in flight keep fading out naturally.
+    if (userSettings != nullptr && !userSettings->muzzleFlashEnabled)
+        return;
+
     MuzzleFlashLight flash;
     flash.position = pos;
     // Warm orange-white muzzle flash. Intensity is in the same scale as the
