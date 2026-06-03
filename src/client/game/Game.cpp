@@ -1407,13 +1407,20 @@ bool Game::init(AppContext& ctx)
     chatOpen_ = false;
 
     // Load the shared skinned-character rig (skeleton + bind pose + weights).
-    // Loading a single FBX is enough — any file with matching skin data works;
-    // we use standard_walk.fbx because it's guaranteed present for locomotion.
+    // character_rigged_new.glb supplies the visible character mesh; animation
+    // clips are layered on top via AnimationLibrary (same Mixamo skeleton).
+    //
+    // The .glb is a Blender glTF re-export (the .fbx had per-mesh bind-matrix
+    // divergence that exploded the skin). That export baked the armature's
+    // unapplied +90° X rotation into the rig, leaving it face-down in-engine,
+    // and inverted normal handedness vs the old FBX. Correct both at load:
+    // rotate the skeleton root -90° about X and flip normals.
     {
         const char* base = SDL_GetBasePath();
         const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
-        const std::string rigPath = assetsDir + "standard_walk.fbx";
-        if (!charRig_.loadFromFBX(rigPath)) {
+        const std::string rigPath = assetsDir + "character_rigged_new.glb";
+        const glm::quat rigOrientationFix = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        if (!charRig_.loadFromFBX(rigPath, rigOrientationFix, /*flipNormals=*/true)) {
             SDL_Log("[client] WARNING: rig load failed — animated characters disabled");
         } else {
             SDL_Log("[client] rig loaded — %d joints, %zu mesh(es)", charRig_.numJoints(), charRig_.meshes().size());
@@ -1455,10 +1462,14 @@ bool Game::init(AppContext& ctx)
             }
 
             // Load every animation clip onto the shared skeleton.
+            // Rotation-only retargeting: character_rigged_new has different
+            // proportions/up-axis than the clips' source skeleton, so take
+            // bone lengths from this rig (keeps it grounded) and rotations
+            // from the clips.
             for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
                 const ClipId id = static_cast<ClipId>(i);
                 const std::string clipPath = assetsDir + clipFile(id);
-                if (!animLibrary_.loadClipFromFBX(charRig_, id, clipPath)) {
+                if (!animLibrary_.loadClipFromFBX(charRig_, id, clipPath, /*useRigRestTranslations=*/true)) {
                     SDL_Log("[client] WARNING: failed to load clip '%s'", clipName(id));
                     continue;
                 }

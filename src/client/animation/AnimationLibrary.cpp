@@ -36,8 +36,11 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <unordered_map>
+#include <vector>
 
 const char* clipName(ClipId id)
 {
@@ -246,7 +249,8 @@ float AnimationLibrary::duration(ClipId id) const
     return anim ? anim->duration() : 0.0f;
 }
 
-bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const std::string& path)
+bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const std::string& path,
+                                       bool useRigRestTranslations)
 {
     if (!rig.isLoaded() || !rig.skeleton()) {
         SDL_Log("AnimationLibrary: cannot load '%s' — rig is not loaded", path.c_str());
@@ -288,6 +292,49 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
     const auto jointNames = skel->joint_names();
     const auto& restPoses = rig.restPoses();
 
+    // Retarget the clip's bone translations onto this rig's unit scale.
+    //
+    // Mixamo clips and the rig they're applied to can be authored at
+    // different unit scales — e.g. a clip exported as a centimetre FBX vs a
+    // rig baked to metres on glTF export. A bone's local translation is its
+    // length/offset from its parent, which differs between two copies of the
+    // SAME skeleton only by the uniform skeleton scale. If we copied clip
+    // translations verbatim onto a differently-scaled rig the limbs would
+    // stretch by that ratio. So compute a single uniform factor = (rig rest
+    // translation magnitude) / (clip translation magnitude), taken as the
+    // median over non-root bones that carry a meaningful translation, and
+    // scale every clip translation by it. For a same-scale rig the factor is
+    // ~1 (no-op), so existing rigs are unaffected.
+    float clipScale = 1.0f;
+    {
+        std::vector<float> ratios;
+        ratios.reserve(static_cast<size_t>(numJoints));
+        for (int j = 0; j < numJoints; ++j) {
+            const std::string jointName(jointNames[static_cast<size_t>(j)]);
+            // Skip the root/hips: it carries animated (not fixed-length)
+            // translation, so its magnitude isn't a clean scale proxy.
+            if (jointName.find("Hips") != std::string::npos)
+                continue;
+            const auto chIt = channels.find(jointName);
+            const auto rpIt = restPoses.find(jointName);
+            if (chIt == channels.end() || rpIt == restPoses.end() || chIt->second->mNumPositionKeys == 0)
+                continue;
+            const aiVector3D cv = chIt->second->mPositionKeys[0].mValue;
+            const float clipMag = std::sqrt(cv.x * cv.x + cv.y * cv.y + cv.z * cv.z);
+            const ozz::math::Float3 rv = rpIt->second.translation;
+            const float restMag = std::sqrt(rv.x * rv.x + rv.y * rv.y + rv.z * rv.z);
+            if (clipMag > 1e-4f && restMag > 1e-6f)
+                ratios.push_back(restMag / clipMag);
+        }
+        if (!ratios.empty()) {
+            std::sort(ratios.begin(), ratios.end());
+            clipScale = ratios[ratios.size() / 2]; // median is robust to per-bone noise
+        }
+    }
+    if (std::abs(clipScale - 1.0f) > 0.01f)
+        SDL_Log("AnimationLibrary: retargeting '%s' clip translations by scale %.5f", path.c_str(),
+                static_cast<double>(clipScale));
+
     ozz::animation::offline::RawAnimation raw;
     raw.duration = durationSec;
     raw.name = (anim->mName.length > 0) ? anim->mName.C_Str() : clipName(id);
@@ -301,11 +348,35 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
         if (chIt != channels.end()) {
             const aiNodeAnim* ch = chIt->second;
 
-            track.translations.reserve(ch->mNumPositionKeys);
-            for (unsigned k = 0; k < ch->mNumPositionKeys; ++k) {
-                const auto& key = ch->mPositionKeys[k];
-                const float t = static_cast<float>(key.mTime / ticksPerSec);
-                track.translations.push_back({t, ozz::math::Float3{key.mValue.x, key.mValue.y, key.mValue.z}});
+            // Rotation-only retargeting: take the bone's translation and scale
+            // from the rig's own rest pose (its native proportions) and let the
+            // clip drive rotation only. Keeps a different-proportioned rig
+            // grounded instead of inheriting the clip's hip height/root motion.
+            if (useRigRestTranslations) {
+                auto rpIt = restPoses.find(jointName);
+                if (rpIt != restPoses.end()) {
+                    track.translations.push_back({0.f, rpIt->second.translation});
+                    track.scales.push_back({0.f, rpIt->second.scale});
+                } else {
+                    track.translations.push_back({0.f, ozz::math::Float3{0, 0, 0}});
+                    track.scales.push_back({0.f, ozz::math::Float3{1, 1, 1}});
+                }
+            } else {
+                track.translations.reserve(ch->mNumPositionKeys);
+                for (unsigned k = 0; k < ch->mNumPositionKeys; ++k) {
+                    const auto& key = ch->mPositionKeys[k];
+                    const float t = static_cast<float>(key.mTime / ticksPerSec);
+                    track.translations.push_back(
+                        {t,
+                         ozz::math::Float3{key.mValue.x * clipScale, key.mValue.y * clipScale, key.mValue.z * clipScale}});
+                }
+
+                track.scales.reserve(ch->mNumScalingKeys);
+                for (unsigned k = 0; k < ch->mNumScalingKeys; ++k) {
+                    const auto& key = ch->mScalingKeys[k];
+                    const float t = static_cast<float>(key.mTime / ticksPerSec);
+                    track.scales.push_back({t, ozz::math::Float3{key.mValue.x, key.mValue.y, key.mValue.z}});
+                }
             }
 
             track.rotations.reserve(ch->mNumRotationKeys);
@@ -314,13 +385,6 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
                 const float t = static_cast<float>(key.mTime / ticksPerSec);
                 track.rotations.push_back(
                     {t, ozz::math::Quaternion{key.mValue.x, key.mValue.y, key.mValue.z, key.mValue.w}});
-            }
-
-            track.scales.reserve(ch->mNumScalingKeys);
-            for (unsigned k = 0; k < ch->mNumScalingKeys; ++k) {
-                const auto& key = ch->mScalingKeys[k];
-                const float t = static_cast<float>(key.mTime / ticksPerSec);
-                track.scales.push_back({t, ozz::math::Float3{key.mValue.x, key.mValue.y, key.mValue.z}});
             }
         } else {
             // No animation channel for this joint — hold at the rig's rest pose.
