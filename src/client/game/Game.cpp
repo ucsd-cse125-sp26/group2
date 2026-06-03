@@ -2293,6 +2293,12 @@ SDL_AppResult Game::iterate()
         // Physics rate: tick count / elapsed.
         measuredPhysicsHz = static_cast<float>(statsPhysTicks) / statsDt;
         statsPhysTicks = 0;
+
+        // Current FPS: actual rendered frames / elapsed time over the window —
+        // a true average, not a single noisy 1/dt snapshot of the last frame.
+        statsFPSCurrent = static_cast<float>(statsRenderFrames) / statsDt;
+        statsRenderFrames = 0;
+
         statsPrevTime = k_now;
 
         // FPS percentile stats from the ring buffer.
@@ -2312,8 +2318,6 @@ SDL_AppResult Game::iterate()
         statsFPSMax = sorted[count - 1];
         statsFPS1pLow = sorted[static_cast<int>(static_cast<float>(count) * 0.01f)]; // 1st percentile
         statsFPS5pLow = sorted[static_cast<int>(static_cast<float>(count) * 0.05f)]; // 5th percentile
-        // Most-recent sample (last written = head - 1).
-        statsFPSCurrent = fpsHistory[(fpsHistoryHead - 1 + k_fpsHistorySize) % k_fpsHistorySize];
     }
 
     // Bench mode: collect per-frame timings (after warmup) then aggregate +
@@ -5288,7 +5292,11 @@ SDL_AppResult Game::iterate()
         recorder.recordFrame(state);
     }
 
-    // 8. FPS sample -- record inter-render delta into ring buffer
+    // 8. FPS sample -- count this rendered frame (drives the average "cur" FPS)
+    // and record the inter-render delta into the ring buffer (drives min/max and
+    // the 1%/5% lows). This block only runs on frames that actually render (we
+    // returned early above otherwise), so the count is true rendered frames.
+    ++statsRenderFrames;
     if (prevRenderTime != 0) {
         const float renderDt = static_cast<float>(k_now - prevRenderTime) / static_cast<float>(k_perfFreq);
         if (renderDt > 0.0f && renderDt < 1.0f) { // ignore startup / minimised outliers

@@ -699,8 +699,9 @@ private:
     // Performance stats -- refreshed every 0.5 s
     Uint64 statsPrevTime = 0;       ///< Perf counter at the last stats snapshot.
     int statsPhysTicks = 0;         ///< Physics ticks accumulated since last snapshot.
+    int statsRenderFrames = 0;      ///< Rendered frames accumulated since last snapshot.
     float measuredPhysicsHz = 0.0f; ///< Computed physics rate (Hz).
-    float statsFPSCurrent = 0.0f;   ///< Most-recent render FPS sample.
+    float statsFPSCurrent = 0.0f;   ///< Average render FPS over the last stats window (actual frames / elapsed time).
     float statsFPSMin = 0.0f;       ///< Minimum FPS in the ring buffer.
     float statsFPSMax = 0.0f;       ///< Maximum FPS in the ring buffer.
     float statsFPS1pLow = 0.0f;     ///< 1st-percentile FPS (1 % low).
