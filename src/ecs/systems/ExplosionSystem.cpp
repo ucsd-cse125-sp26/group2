@@ -31,7 +31,8 @@ void queueExplosion(Registry& registry,
                     float selfDamageMultiplier,
                     float maxKnockback,
                     float knockbackFalloffExponent,
-                    entt::entity directKillTarget)
+                    entt::entity directKillTarget,
+                    WeaponType weaponType)
 {
     const entt::entity explosion = registry.create();
     registry.emplace<Explosion>(explosion,
@@ -43,7 +44,8 @@ void queueExplosion(Registry& registry,
                                           .maxKnockback = maxKnockback,
                                           .knockbackFalloffExponent = knockbackFalloffExponent,
                                           .owner = owner,
-                                          .directKillTarget = directKillTarget});
+                                          .directKillTarget = directKillTarget,
+                                          .weaponType = weaponType});
 }
 
 void runExplosion(Registry& registry,
@@ -56,6 +58,7 @@ void runExplosion(Registry& registry,
         NetParticleEvent event;
         event.source = explosion.owner;
         event.effectType = ParticleEffectType::Explosion;
+        event.weaponType = explosion.weaponType;
         event.pos1 = explosion.position;
         event.param = explosion.radius;
         outParticles.push_back(event);

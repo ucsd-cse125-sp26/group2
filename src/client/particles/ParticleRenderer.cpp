@@ -483,6 +483,163 @@ void ParticleRenderer::buildDecalTexture()
     decalSamp_ = SDL_CreateGPUSampler(device_, &sci);
 }
 
+// Fresh explosion atlas (1024x1024 RGBA8, 8x8 flipbook cells)
+
+void ParticleRenderer::buildExplosionAtlasTexture()
+{
+    constexpr int W = 1024;
+    constexpr int H = 1024;
+    constexpr int Cells = 8;
+    constexpr int Cell = W / Cells;
+    std::vector<uint8_t> pixels(W * H * 4, 0);
+
+    auto hash = [](int x, int y, int s) -> float {
+        uint32_t h = static_cast<uint32_t>(x * 374761393 + y * 668265263 + s * 1442695041);
+        h = (h ^ (h >> 13u)) * 1274126177u;
+        h ^= h >> 16u;
+        return static_cast<float>(h & 0xffu) / 255.0f;
+    };
+    auto smoothNoise = [&](float fx, float fy, int seed) -> float {
+        const int x = static_cast<int>(std::floor(fx));
+        const int y = static_cast<int>(std::floor(fy));
+        const float tx = fx - static_cast<float>(x);
+        const float ty = fy - static_cast<float>(y);
+        const float sx = tx * tx * (3.0f - 2.0f * tx);
+        const float sy = ty * ty * (3.0f - 2.0f * ty);
+        const float a = hash(x, y, seed);
+        const float b = hash(x + 1, y, seed);
+        const float c = hash(x, y + 1, seed);
+        const float d = hash(x + 1, y + 1, seed);
+        const float ab = a + (b - a) * sx;
+        const float cd = c + (d - c) * sx;
+        return ab + (cd - ab) * sy;
+    };
+    auto fbm = [&](float x, float y, int seed) -> float {
+        float amp = 0.55f;
+        float sum = 0.0f;
+        float freq = 1.0f;
+        for (int i = 0; i < 4; ++i) {
+            sum += smoothNoise(x * freq, y * freq, seed + i * 19) * amp;
+            freq *= 2.0f;
+            amp *= 0.5f;
+        }
+        return std::clamp(sum, 0.0f, 1.0f);
+    };
+    auto put = [&](int px, int py, glm::vec4 c) {
+        if (px < 0 || py < 0 || px >= W || py >= H)
+            return;
+        uint8_t* p = &pixels[static_cast<size_t>((py * W + px) * 4)];
+        p[0] = static_cast<uint8_t>(std::clamp(c.r, 0.0f, 1.0f) * 255.0f);
+        p[1] = static_cast<uint8_t>(std::clamp(c.g, 0.0f, 1.0f) * 255.0f);
+        p[2] = static_cast<uint8_t>(std::clamp(c.b, 0.0f, 1.0f) * 255.0f);
+        p[3] = static_cast<uint8_t>(std::clamp(c.a, 0.0f, 1.0f) * 255.0f);
+    };
+
+    for (int cell = 0; cell < Cells * Cells; ++cell) {
+        const int cx = cell % Cells;
+        const int cy = cell / Cells;
+        const int row = cy;
+        const int frame = cx;
+        const float age = static_cast<float>(frame) / 7.0f;
+        for (int y = 0; y < Cell; ++y) {
+            for (int x = 0; x < Cell; ++x) {
+                const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(Cell);
+                const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(Cell);
+                const glm::vec2 p{u * 2.0f - 1.0f, v * 2.0f - 1.0f};
+                const float r = glm::length(p);
+                const float n = fbm(u * 8.0f + age * 1.7f, v * 8.0f - age * 1.1f, row * 31 + frame);
+                glm::vec4 c{0.0f};
+
+                if (row == 0) {
+                    const float core = 1.0f - glm::smoothstep(0.08f, 0.55f + age * 0.18f, r + n * 0.16f);
+                    c = {1.0f, 0.82f - age * 0.35f, 0.30f - age * 0.22f, core * (1.0f - age * 0.45f)};
+                } else if (row == 1) {
+                    const float shell = 1.0f - glm::smoothstep(0.18f + age * 0.10f, 0.78f, r + n * 0.18f);
+                    const float hot = 1.0f - glm::smoothstep(0.0f, 0.22f, r);
+                    c = {1.0f, 0.34f + hot * 0.45f, 0.04f, shell * (1.0f - age * 0.25f)};
+                } else if (row == 2) {
+                    const float cloud = 1.0f - glm::smoothstep(0.18f, 0.82f, r + (n - 0.5f) * 0.30f);
+                    const float holes = glm::smoothstep(0.22f, 0.92f, n);
+                    c = {0.32f + n * 0.25f, 0.30f + n * 0.22f, 0.28f + n * 0.18f, cloud * holes};
+                } else if (row == 3) {
+                    const float ringR = 0.24f + age * 0.55f;
+                    const float ring = 1.0f - glm::smoothstep(0.035f, 0.11f, std::abs(r - ringR) + (n - 0.5f) * 0.045f);
+                    c = {1.0f, 0.46f, 0.11f, ring * (1.0f - age * 0.5f)};
+                } else if (row == 4) {
+                    const float ringR = 0.22f + age * 0.48f;
+                    const float ring = 1.0f - glm::smoothstep(0.02f, 0.085f, std::abs(r - ringR) + (n - 0.5f) * 0.035f);
+                    c = {0.14f, 0.74f, 1.0f, ring * (1.0f - age * 0.3f)};
+                } else if (row == 5) {
+                    const float flame = 1.0f - glm::smoothstep(0.18f, 0.62f, std::abs(p.x) + (p.y + 0.25f) * 0.34f + (1.0f - n) * 0.16f);
+                    const float taper = 1.0f - glm::smoothstep(-0.55f, 1.0f, p.y);
+                    c = {1.0f, 0.24f + n * 0.38f, 0.02f, flame * taper};
+                } else if (row == 6) {
+                    const float dust = 1.0f - glm::smoothstep(0.15f, 0.86f, r + (n - 0.5f) * 0.25f);
+                    c = {0.47f, 0.39f, 0.29f, dust * glm::smoothstep(0.14f, 0.90f, n)};
+                } else {
+                    const float outer = 1.0f - glm::smoothstep(0.30f, 0.92f, r + (n - 0.5f) * 0.20f);
+                    const float center = 1.0f - glm::smoothstep(0.0f, 0.30f, r + n * 0.06f);
+                    const glm::vec3 warm = (frame < 2)   ? glm::vec3{0.04f, 0.035f, 0.030f}
+                                           : (frame < 4) ? glm::vec3{0.24f, 0.20f, 0.16f}
+                                           : (frame < 6) ? glm::vec3{0.03f, 0.12f, 0.18f}
+                                                         : glm::vec3{0.12f, 0.055f, 0.025f};
+                    c = {warm.r, warm.g, warm.b, std::max(outer, center) * 0.95f};
+                }
+
+                put(cx * Cell + x, cy * Cell + y, c);
+            }
+        }
+    }
+
+    SDL_GPUTextureCreateInfo tci{};
+    tci.type = SDL_GPU_TEXTURETYPE_2D;
+    tci.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    tci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    tci.width = W;
+    tci.height = H;
+    tci.layer_count_or_depth = 1;
+    tci.num_levels = 1;
+    tci.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    explosionAtlasTex_ = SDL_CreateGPUTexture(device_, &tci);
+    if (!explosionAtlasTex_) {
+        SDL_Log("ParticleRenderer: explosion atlas texture creation failed: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_GPUTransferBufferCreateInfo ti{};
+    ti.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    ti.size = static_cast<uint32_t>(pixels.size());
+    SDL_GPUTransferBuffer* tb = SDL_CreateGPUTransferBuffer(device_, &ti);
+    void* mapped = SDL_MapGPUTransferBuffer(device_, tb, false);
+    std::memcpy(mapped, pixels.data(), pixels.size());
+    SDL_UnmapGPUTransferBuffer(device_, tb);
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device_);
+    SDL_GPUCopyPass* cp = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUTextureTransferInfo src{};
+    src.transfer_buffer = tb;
+    src.offset = 0;
+    src.pixels_per_row = W;
+    src.rows_per_layer = H;
+    SDL_GPUTextureRegion dst{};
+    dst.texture = explosionAtlasTex_;
+    dst.w = W;
+    dst.h = H;
+    dst.d = 1;
+    SDL_UploadToGPUTexture(cp, &src, &dst, false);
+    SDL_EndGPUCopyPass(cp);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_ReleaseGPUTransferBuffer(device_, tb);
+
+    SDL_GPUSamplerCreateInfo sci{};
+    sci.min_filter = SDL_GPU_FILTER_LINEAR;
+    sci.mag_filter = SDL_GPU_FILTER_LINEAR;
+    sci.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sci.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    sci.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    explosionAtlasSamp_ = SDL_CreateGPUSampler(device_, &sci);
+}
+
 // init / quit
 
 bool ParticleRenderer::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL_GPUShaderFormat shaderFmt)
@@ -499,12 +656,15 @@ bool ParticleRenderer::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, S
     arcBuf_.init(dev, sizeof(ArcVertex) * 4096, GpuParticleBuffer::Mode::Vertex); // hitscan + tesla beams share this
     smokeBuf_.init(dev, sizeof(SmokeParticle) * 1024);                            // 48 B × 1024 = 48 KB
     decalBuf_.init(dev, sizeof(DecalInstance) * 512);
+    explosionSpriteBuf_.init(dev, sizeof(VfxSpriteParticle) * 2048);
+    explosionDebrisBuf_.init(dev, sizeof(VfxDebrisParticle) * 1024);
     sdfWorldBuf_.init(dev, sizeof(SdfGlyphGPU) * 4096);
     sdfHudBuf_.init(dev, sizeof(SdfGlyphGPU) * 4096);
 
     buildQuadIndexBuffer();
     buildSmokeNoise();
     buildDecalTexture();
+    buildExplosionAtlasTexture();
 
     return buildPipelines();
 }
@@ -587,6 +747,14 @@ bool ParticleRenderer::buildPipelines()
     // Smoke -- premul alpha, storage, 1 sampler (noise)
     smokePipeline_ = makeStoragePipeline("smoke.vert", "smoke.frag", 1, 1, premulAlphaBlend(), true, false, false);
 
+    // Fresh explosion sprites -- premul alpha, storage, 1 sampler (procedural atlas)
+    explosionSpritePipeline_ =
+        makeStoragePipeline("explosion_sprite.vert", "explosion_sprite.frag", 1, 1, premulAlphaBlend(), true, false, false);
+
+    // Fresh explosion debris -- additive, storage
+    explosionDebrisPipeline_ =
+        makeStoragePipeline("explosion_debris.vert", "explosion_debris.frag", 1, 0, additiveBlend(), true, false, false);
+
     // Decal -- multiply blend, depth bias, no depth write
     decalPipeline_ = makeStoragePipeline("decal.vert",
                                           "decal.frag",
@@ -627,6 +795,8 @@ void ParticleRenderer::quit()
     relPL(arcPipeline_);
     relPL(smokePipeline_);
     relPL(decalPipeline_);
+    relPL(explosionSpritePipeline_);
+    relPL(explosionDebrisPipeline_);
     relPL(sdfWorldPipeline_);
     relPL(sdfHudPipeline_);
 
@@ -642,9 +812,17 @@ void ParticleRenderer::quit()
         SDL_ReleaseGPUTexture(device_, decalTex_);
         decalTex_ = nullptr;
     }
+    if (explosionAtlasTex_) {
+        SDL_ReleaseGPUTexture(device_, explosionAtlasTex_);
+        explosionAtlasTex_ = nullptr;
+    }
     if (decalSamp_) {
         SDL_ReleaseGPUSampler(device_, decalSamp_);
         decalSamp_ = nullptr;
+    }
+    if (explosionAtlasSamp_) {
+        SDL_ReleaseGPUSampler(device_, explosionAtlasSamp_);
+        explosionAtlasSamp_ = nullptr;
     }
     if (smokeSampler_) {
         SDL_ReleaseGPUSampler(device_, smokeSampler_);
@@ -658,6 +836,8 @@ void ParticleRenderer::quit()
     arcBuf_.quit();
     smokeBuf_.quit();
     decalBuf_.quit();
+    explosionSpriteBuf_.quit();
+    explosionDebrisBuf_.quit();
     sdfWorldBuf_.quit();
     sdfHudBuf_.quit();
 
@@ -699,6 +879,16 @@ void ParticleRenderer::uploadSmoke(SDL_GPUCommandBuffer* cmd, const SmokeParticl
 void ParticleRenderer::uploadDecals(SDL_GPUCommandBuffer* cmd, const DecalInstance* d, uint32_t n)
 {
     decalBuf_.upload(cmd, d, n, sizeof(DecalInstance));
+}
+
+void ParticleRenderer::uploadExplosionSprites(SDL_GPUCommandBuffer* cmd, const VfxSpriteParticle* d, uint32_t n)
+{
+    explosionSpriteBuf_.upload(cmd, d, n, sizeof(VfxSpriteParticle));
+}
+
+void ParticleRenderer::uploadExplosionDebris(SDL_GPUCommandBuffer* cmd, const VfxDebrisParticle* d, uint32_t n)
+{
+    explosionDebrisBuf_.upload(cmd, d, n, sizeof(VfxDebrisParticle));
 }
 
 void ParticleRenderer::uploadSdfWorld(SDL_GPUCommandBuffer* cmd, const SdfGlyphGPU* d, uint32_t n)
@@ -792,6 +982,13 @@ void ParticleRenderer::drawAll(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cm
         drawQuads(billboardBuf_.liveCount());
     }
 
+    if (explosionDebrisPipeline_ && explosionDebrisBuf_.liveCount() > 0) {
+        SDL_BindGPUGraphicsPipeline(pass, explosionDebrisPipeline_);
+        bindIndex();
+        explosionDebrisBuf_.bindAsVertexStorage(pass, 0);
+        drawQuads(explosionDebrisBuf_.liveCount());
+    }
+
     // 7. Smoke (premul alpha, noise sampler)
     if (smokePipeline_ && smokeBuf_.liveCount() > 0 && smokeNoise_ && smokeSampler_) {
         SDL_BindGPUGraphicsPipeline(pass, smokePipeline_);
@@ -800,6 +997,15 @@ void ParticleRenderer::drawAll(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cm
         SDL_GPUTextureSamplerBinding tsb{smokeNoise_, smokeSampler_};
         SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
         drawQuads(smokeBuf_.liveCount());
+    }
+
+    if (explosionSpritePipeline_ && explosionSpriteBuf_.liveCount() > 0 && explosionAtlasTex_ && explosionAtlasSamp_) {
+        SDL_BindGPUGraphicsPipeline(pass, explosionSpritePipeline_);
+        bindIndex();
+        explosionSpriteBuf_.bindAsVertexStorage(pass, 0);
+        SDL_GPUTextureSamplerBinding tsb{explosionAtlasTex_, explosionAtlasSamp_};
+        SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
+        drawQuads(explosionSpriteBuf_.liveCount());
     }
 
     // 8. World SDF text (alpha, depth test) — only draw if atlas is registered

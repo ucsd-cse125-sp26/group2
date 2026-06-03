@@ -84,11 +84,9 @@ void ParticleSystem::update(float dt, const NewCamera& cam, Registry& reg)
     tesla_.update(dt, camForward_);
 
     smoke_.update(dt, reg, camPos_, camForward_);
+    explosionVfx_.update(dt, reg, camPos_, camForward_);
     impact_.update(dt);
     decals_.update(dt);
-    explosions_.update(dt);
-
-    // Deferred explosion smoke is emitted inside explosions_.update().
 
     // Clear SDF queues for this frame (re-filled by drawWorldText/drawScreenText calls)
     sdf_.clear();
@@ -125,6 +123,8 @@ void ParticleSystem::uploadToGpu(SDL_GPUCommandBuffer* cmd)
     renderer_.uploadArcs(cmd, arcScratch_.data(), static_cast<uint32_t>(arcScratch_.size()));
     renderer_.uploadSmoke(cmd, smoke_.data(), smoke_.count());
     renderer_.uploadDecals(cmd, decals_.data(), decals_.count());
+    renderer_.uploadExplosionSprites(cmd, explosionVfx_.spriteData(), explosionVfx_.spriteCount());
+    renderer_.uploadExplosionDebris(cmd, explosionVfx_.debrisData(), explosionVfx_.debrisCount());
     renderer_.uploadSdfWorld(cmd, sdf_.worldData(), sdf_.worldCount());
     renderer_.uploadSdfHud(cmd, sdf_.hudData(), sdf_.hudCount());
 }
@@ -187,7 +187,17 @@ void ParticleSystem::spawnFire(glm::vec3 pos, float radius)
 
 void ParticleSystem::spawnExplosion(glm::vec3 pos, float blastRadius)
 {
-    explosions_.spawn(pos, blastRadius, smoke_);
+    spawnExplosionVfx(pos, glm::vec3{0.0f, 1.0f, 0.0f}, blastRadius, ExplosionVfxKind::Rocket);
+}
+
+void ParticleSystem::spawnExplosionVfx(glm::vec3 pos, glm::vec3 normal, float blastRadius, ExplosionVfxKind kind)
+{
+    explosionVfx_.spawn(pos, normal, blastRadius, kind);
+}
+
+void ParticleSystem::driveGroundFire(entt::entity fieldEntity, glm::vec3 pos, float radius, float remaining, float duration)
+{
+    explosionVfx_.driveGroundFire(fieldEntity, pos, radius, remaining, duration);
 }
 
 // SDF text
@@ -217,5 +227,5 @@ void ParticleSystem::onImpact(const ProjectileImpactEvent& e)
 
 void ParticleSystem::onExplosion(const ExplosionEvent& e)
 {
-    spawnExplosion(e.pos, e.blastRadius);
+    spawnExplosionVfx(e.pos, e.normal, e.blastRadius, explosionVfxKindForWeapon(e.weaponType));
 }

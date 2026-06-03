@@ -36,7 +36,6 @@
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/Orientation.hpp"
-#include "ecs/components/ParticleEmitterTag.hpp"
 #include "ecs/components/PlayerColor.hpp"
 #include "ecs/components/PlayerColors.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
@@ -1323,12 +1322,16 @@ bool Game::init(AppContext& ctx)
             }
             break;
         case ParticleEffectType::Explosion:
-            particleSystem.spawnExplosion(evt.pos1, evt.param);
+            particleSystem.spawnExplosionVfx(
+                evt.pos1, glm::length(evt.pos2) > 0.001f ? glm::normalize(evt.pos2) : glm::vec3{0.0f, 1.0f, 0.0f}, evt.param, explosionVfxKindForWeapon(evt.weaponType));
+            spawnExplosionFlashLight(evt.pos1, evt.weaponType, evt.param);
             // Dispatch ExplosionEvent so SfxSystem plays the explosion sound.
             {
                 ExplosionEvent expl;
                 expl.pos = evt.pos1;
+                expl.normal = glm::length(evt.pos2) > 0.001f ? glm::normalize(evt.pos2) : glm::vec3{0.0f, 1.0f, 0.0f};
                 expl.blastRadius = evt.param;
+                expl.weaponType = evt.weaponType;
                 dispatcher.enqueue(expl);
             }
             break;
@@ -1336,11 +1339,8 @@ bool Game::init(AppContext& ctx)
             particleSystem.spawnSmoke(evt.pos1, evt.param);
             break;
         case ParticleEffectType::Fire:
-            // One-shot fire puff. Persistent FireField AoE rendering is
-            // driven directly off replicated FireField entities (above);
-            // this case exists so server-side code can request a one-off
-            // flame burst the same way it does smoke/explosions.
-            particleSystem.spawnFire(evt.pos1, evt.param /*radius*/);
+            particleSystem.spawnExplosionVfx(evt.pos1, {0.0f, 1.0f, 0.0f}, evt.param, ExplosionVfxKind::Molotov);
+            spawnExplosionFlashLight(evt.pos1, WeaponType::Molotov, evt.param);
             break;
         }
     });
@@ -2144,7 +2144,7 @@ void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
     if (userSettings != nullptr && !userSettings->muzzleFlashEnabled)
         return;
 
-    MuzzleFlashLight flash;
+    TransientVfxLight flash;
     flash.position = pos;
     // Warm orange-white muzzle flash. Intensity is in the same scale as the
     // scene's static point lights (shader attenuation is pure 1/r²), so it
@@ -2157,7 +2157,41 @@ void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
     // enough that consecutive shots' flashes overlap into a continuous glow
     // during rapid fire, while a single shot still reads as a quick flash.
     flash.lifetime = 0.20f;
-    muzzleFlashLights_.push_back(flash);
+    flash.range = 500.0f;
+    transientVfxLights_.push_back(flash);
+}
+
+void Game::spawnExplosionFlashLight(const glm::vec3& pos, WeaponType weaponType, float radius)
+{
+    TransientVfxLight flash;
+    flash.position = pos;
+    flash.age = 0.0f;
+    flash.range = std::clamp(radius * 3.0f, 300.0f, 900.0f);
+
+    switch (weaponType) {
+    case WeaponType::Sticky:
+        flash.color = glm::vec3{0.18f, 0.70f, 1.0f};
+        flash.intensity = 9800.0f;
+        flash.lifetime = 0.14f;
+        break;
+    case WeaponType::HEGrenade:
+        flash.color = glm::vec3{1.0f, 0.72f, 0.34f};
+        flash.intensity = 7600.0f;
+        flash.lifetime = 0.12f;
+        break;
+    case WeaponType::Molotov:
+        flash.color = glm::vec3{1.0f, 0.38f, 0.08f};
+        flash.intensity = 6200.0f;
+        flash.lifetime = 0.24f;
+        break;
+    case WeaponType::Rocket:
+    default:
+        flash.color = glm::vec3{1.0f, 0.56f, 0.18f};
+        flash.intensity = 11000.0f;
+        flash.lifetime = 0.18f;
+        break;
+    }
+    transientVfxLights_.push_back(flash);
 }
 
 void Game::scanForConnectedGamepads()
@@ -3215,39 +3249,10 @@ SDL_AppResult Game::iterate()
     dispatcher.update();
     phaseSnap(phaseStats.dispatchMs);
 
-    // Drive fire VFX from replicated FireField entities (Molotov AoE).
-    // Server replicates `FireField` only; the renderer pulls fire emission
-    // off `Position` + `ParticleEmitterTag{Fire}`, so attach those locally
-    // and keep them synced to the field's authoritative position/radius.
-    // The SmokeEffect emitter pump (fire-coloured branch) does the rest.
+    // Drive fresh molotov ground-fire VFX from replicated FireField entities.
     registry.view<FireField>().each([&](entt::entity e, const FireField& field) {
-        registry.emplace_or_replace<Position>(e, Position{field.position});
-        auto& tag = registry.get_or_emplace<ParticleEmitterTag>(e);
-        tag.type = EmitterType::Fire;
-        tag.radius = field.radius;
-        tag.ratePerSecond = 24.f; // dense flame puffs for visible AoE
+        particleSystem.driveGroundFire(e, field.position, field.radius, field.remaining, field.remaining);
     });
-
-    // Reap orphaned fire emitters. When the server destroys a FireField, the
-    // replicated component is stripped on the next snapshot — but the
-    // client-attached `Position` + `ParticleEmitterTag` (added just above) keep
-    // the entity non-orphan, so `continuous_loader::orphans()` never reaps it
-    // and the flame puffs pump forever (the "molly stays forever" bug). Strip
-    // the fire emitter from any entity that no longer has a FireField so the
-    // VFX ends with the field and the now-componentless entity can be reaped.
-    {
-        thread_local std::vector<entt::entity> deadFireEmitters;
-        deadFireEmitters.clear();
-        registry.view<ParticleEmitterTag>(entt::exclude<FireField>)
-            .each([&](entt::entity e, const ParticleEmitterTag& tag) {
-                if (tag.type == EmitterType::Fire)
-                    deadFireEmitters.push_back(e);
-            });
-        for (const entt::entity e : deadFireEmitters) {
-            registry.remove<ParticleEmitterTag>(e);
-            registry.remove<Position>(e);
-        }
-    }
 
     // Update particle system (render-rate, not physics-rate)
     particleSystem.update(frameTime, renderer->getCamera(), registry);
@@ -4715,10 +4720,10 @@ SDL_AppResult Game::iterate()
         constexpr float k_flashAttack = 0.02f;            // rise-to-full time (seconds)
         constexpr float k_flashDecay = 3.0f;              // decay steepness — smaller = more gradual
         const float flashFloor = std::exp(-k_flashDecay); // exp value at decay end, subtracted so fade hits 0
-        for (auto it = muzzleFlashLights_.begin(); it != muzzleFlashLights_.end();) {
+        for (auto it = transientVfxLights_.begin(); it != transientVfxLights_.end();) {
             it->age += frameTime;
             if (it->age >= it->lifetime) {
-                it = muzzleFlashLights_.erase(it);
+                it = transientVfxLights_.erase(it);
                 continue;
             }
             if (dynLights.size() < k_maxDynLights) {
@@ -4735,7 +4740,7 @@ SDL_AppResult Game::iterate()
                     .position = it->position,
                     .intensity = it->intensity * env,
                     .color = it->color,
-                    .range = 500.0f,
+                    .range = it->range,
                 });
             }
             ++it;
