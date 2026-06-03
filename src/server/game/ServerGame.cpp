@@ -64,6 +64,7 @@
 #include "ecs/systems/PickupGeometry.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
+#include "ecs/components/Ragdoll.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
 #include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
@@ -784,7 +785,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         // Phase 13: age out ragdolls so gameplay can fade / despawn corpses.
         GROUP2_PROF_SCOPE("ragdolls");
-        systems::runRagdolls(registry, dt);
+        if (kRagdollsEnabled)
+            systems::runRagdolls(registry, dt);
     }
     {
         GROUP2_PROF_SCOPE("explosion");

@@ -530,6 +530,8 @@ constexpr RagdollJointBinding kRagdollJointBindings[] = {
 std::unordered_map<ClientId, ClientRagdollPose> collectClientRagdollPoses(Registry& registry)
 {
     std::unordered_map<ClientId, ClientRagdollPose> poses;
+    if constexpr (!kRagdollsEnabled)
+        return poses; // ragdolls disabled — no corpse poses to collect/render
     registry.view<RagdollBoneTag, Position>().each([&](entt::entity e, const RagdollBoneTag& tag, const Position& pos) {
         if (tag.characterId.value < 0)
             return;
@@ -4237,7 +4239,7 @@ SDL_AppResult Game::iterate()
             });
         }
 
-        if (charRig_.isLoaded() && numJoints > 0) {
+        if (kRagdollsEnabled && charRig_.isLoaded() && numJoints > 0) {
             registry.view<AnimatedCharacter, Position, PlayerVisState, ClientId>().each([&](entt::entity e,
                                                                                             AnimatedCharacter& ac,
                                                                                             const Position& pos,
