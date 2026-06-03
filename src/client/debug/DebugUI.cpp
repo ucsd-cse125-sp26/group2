@@ -937,7 +937,6 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         {"Smoke", ps.smokeCount(), 1024},
         {"Explosion sprites", ps.explosionSpriteCount(), 2048},
         {"Explosion debris", ps.explosionDebrisCount(), 1024},
-        {"Explosion decals", ps.explosionDecalCount(), 256},
         {"Decals", ps.decalCount(), 512},
     };
 

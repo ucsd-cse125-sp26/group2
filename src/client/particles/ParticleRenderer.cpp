@@ -658,7 +658,6 @@ bool ParticleRenderer::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, S
     decalBuf_.init(dev, sizeof(DecalInstance) * 512);
     explosionSpriteBuf_.init(dev, sizeof(VfxSpriteParticle) * 2048);
     explosionDebrisBuf_.init(dev, sizeof(VfxDebrisParticle) * 1024);
-    explosionDecalBuf_.init(dev, sizeof(DecalInstance) * 256);
     sdfWorldBuf_.init(dev, sizeof(SdfGlyphGPU) * 4096);
     sdfHudBuf_.init(dev, sizeof(SdfGlyphGPU) * 4096);
 
@@ -766,15 +765,6 @@ bool ParticleRenderer::buildPipelines()
                                           false,
                                           true);
 
-    explosionDecalPipeline_ = makeStoragePipeline("decal.vert",
-                                                   "decal.frag",
-                                                   1,
-                                                   1,
-                                                   multiplyBlend(),
-                                                   true,
-                                                   false,
-                                                   true);
-
     // SDF world text -- alpha blend, depth test
     sdfWorldPipeline_ = makeStoragePipeline("sdf_text.vert", "sdf_text.frag", 1, 1, alphaBlend(), true, false, false);
 
@@ -807,7 +797,6 @@ void ParticleRenderer::quit()
     relPL(decalPipeline_);
     relPL(explosionSpritePipeline_);
     relPL(explosionDebrisPipeline_);
-    relPL(explosionDecalPipeline_);
     relPL(sdfWorldPipeline_);
     relPL(sdfHudPipeline_);
 
@@ -849,7 +838,6 @@ void ParticleRenderer::quit()
     decalBuf_.quit();
     explosionSpriteBuf_.quit();
     explosionDebrisBuf_.quit();
-    explosionDecalBuf_.quit();
     sdfWorldBuf_.quit();
     sdfHudBuf_.quit();
 
@@ -903,11 +891,6 @@ void ParticleRenderer::uploadExplosionDebris(SDL_GPUCommandBuffer* cmd, const Vf
     explosionDebrisBuf_.upload(cmd, d, n, sizeof(VfxDebrisParticle));
 }
 
-void ParticleRenderer::uploadExplosionDecals(SDL_GPUCommandBuffer* cmd, const DecalInstance* d, uint32_t n)
-{
-    explosionDecalBuf_.upload(cmd, d, n, sizeof(DecalInstance));
-}
-
 void ParticleRenderer::uploadSdfWorld(SDL_GPUCommandBuffer* cmd, const SdfGlyphGPU* d, uint32_t n)
 {
     sdfWorldBuf_.upload(cmd, d, n, sizeof(SdfGlyphGPU));
@@ -959,15 +942,6 @@ void ParticleRenderer::drawAll(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cm
             SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
         }
         drawQuads(decalBuf_.liveCount());
-    }
-
-    if (explosionDecalPipeline_ && explosionDecalBuf_.liveCount() > 0 && explosionAtlasTex_ && explosionAtlasSamp_) {
-        SDL_BindGPUGraphicsPipeline(pass, explosionDecalPipeline_);
-        bindIndex();
-        explosionDecalBuf_.bindAsVertexStorage(pass, 0);
-        SDL_GPUTextureSamplerBinding tsb{explosionAtlasTex_, explosionAtlasSamp_};
-        SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
-        drawQuads(explosionDecalBuf_.liveCount());
     }
 
     // 2. Capsule tracers (additive)

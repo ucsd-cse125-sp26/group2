@@ -139,7 +139,6 @@ public:
     [[nodiscard]] uint32_t smokeCount() const { return smoke_.count(); }
     [[nodiscard]] uint32_t explosionSpriteCount() const { return explosionVfx_.spriteCount(); }
     [[nodiscard]] uint32_t explosionDebrisCount() const { return explosionVfx_.debrisCount(); }
-    [[nodiscard]] uint32_t explosionDecalCount() const { return explosionVfx_.decalCount(); }
     [[nodiscard]] uint32_t decalCount() const { return decals_.count(); }
     [[nodiscard]] bool sdfReady() const { return sdf_.ready(); }
 

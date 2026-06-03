@@ -79,9 +79,6 @@ public:
     /// @brief Upload fresh explosion debris/spark data to the GPU.
     void uploadExplosionDebris(SDL_GPUCommandBuffer* cmd, const VfxDebrisParticle* data, uint32_t count);
 
-    /// @brief Upload fresh explosion scorch decal instances to the GPU.
-    void uploadExplosionDecals(SDL_GPUCommandBuffer* cmd, const DecalInstance* data, uint32_t count);
-
     /// @brief Upload world-space SDF glyph data to the GPU.
     /// @param cmd   Active command buffer.
     /// @param data  Pointer to SDF glyph array.
@@ -130,7 +127,6 @@ private:
     SDL_GPUGraphicsPipeline* decalPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* explosionSpritePipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* explosionDebrisPipeline_ = nullptr;
-    SDL_GPUGraphicsPipeline* explosionDecalPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* sdfWorldPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* sdfHudPipeline_ = nullptr;
 
@@ -148,7 +144,6 @@ private:
     GpuParticleBuffer decalBuf_;     // storage
     GpuParticleBuffer explosionSpriteBuf_; // storage
     GpuParticleBuffer explosionDebrisBuf_; // storage
-    GpuParticleBuffer explosionDecalBuf_;  // storage
     GpuParticleBuffer sdfWorldBuf_;  // storage
     GpuParticleBuffer sdfHudBuf_;    // storage
 

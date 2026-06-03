@@ -125,7 +125,6 @@ void ParticleSystem::uploadToGpu(SDL_GPUCommandBuffer* cmd)
     renderer_.uploadDecals(cmd, decals_.data(), decals_.count());
     renderer_.uploadExplosionSprites(cmd, explosionVfx_.spriteData(), explosionVfx_.spriteCount());
     renderer_.uploadExplosionDebris(cmd, explosionVfx_.debrisData(), explosionVfx_.debrisCount());
-    renderer_.uploadExplosionDecals(cmd, explosionVfx_.decalData(), explosionVfx_.decalCount());
     renderer_.uploadSdfWorld(cmd, sdf_.worldData(), sdf_.worldCount());
     renderer_.uploadSdfHud(cmd, sdf_.hudData(), sdf_.hudCount());
 }

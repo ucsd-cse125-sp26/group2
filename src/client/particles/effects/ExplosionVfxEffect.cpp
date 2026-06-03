@@ -125,41 +125,6 @@ void ExplosionVfxEffect::spawnDebris(glm::vec3 pos,
     p->sim = {0.0f, std::max(0.01f, lifetime), gravity, drag};
 }
 
-void ExplosionVfxEffect::spawnScorch(glm::vec3 pos, glm::vec3 normal, float size, float opacity, ExplosionVfxKind kind)
-{
-    const uint32_t idx = decalHead_ % k_maxDecals;
-    ++decalHead_;
-
-    DecalInstance& d = decals_[idx];
-    d.pos = pos + normal * 0.8f;
-    d.size = size;
-    d.opacity = opacity;
-    d.right = tangentAround(normal);
-    d.up = glm::normalize(glm::cross(d.right, normal));
-    d._p0 = 0.0f;
-
-    // The procedural atlas reserves rows for warmer soot, dust, and blue plasma marks.
-    switch (kind) {
-    case ExplosionVfxKind::Sticky:
-        d.uvMin = {0.50f, 0.75f};
-        d.uvMax = {0.75f, 1.00f};
-        break;
-    case ExplosionVfxKind::Frag:
-        d.uvMin = {0.25f, 0.75f};
-        d.uvMax = {0.50f, 1.00f};
-        break;
-    case ExplosionVfxKind::Molotov:
-        d.uvMin = {0.75f, 0.75f};
-        d.uvMax = {1.00f, 1.00f};
-        break;
-    case ExplosionVfxKind::Rocket:
-    default:
-        d.uvMin = {0.00f, 0.75f};
-        d.uvMax = {0.25f, 1.00f};
-        break;
-    }
-}
-
 void ExplosionVfxEffect::spawn(glm::vec3 pos, glm::vec3 normal, float radius, ExplosionVfxKind kind)
 {
     if (glm::dot(normal, normal) < 1e-4f)
@@ -219,7 +184,6 @@ void ExplosionVfxEffect::spawnRocket(glm::vec3 pos, glm::vec3 normal, float radi
                     1.8f,
                     randRange(3.0f, 7.0f));
     }
-    spawnScorch(pos, normal, radius * 0.42f, 0.95f, ExplosionVfxKind::Rocket);
 }
 
 void ExplosionVfxEffect::spawnFrag(glm::vec3 pos, glm::vec3 normal, float radius)
@@ -257,7 +221,6 @@ void ExplosionVfxEffect::spawnFrag(glm::vec3 pos, glm::vec3 normal, float radius
                     2.5f,
                     randRange(4.0f, 9.0f));
     }
-    spawnScorch(pos, normal, radius * 0.34f, 0.82f, ExplosionVfxKind::Frag);
 }
 
 void ExplosionVfxEffect::spawnSticky(glm::vec3 pos, glm::vec3 normal, float radius)
@@ -295,7 +258,6 @@ void ExplosionVfxEffect::spawnSticky(glm::vec3 pos, glm::vec3 normal, float radi
                     0.70f,
                     0.25f);
     }
-    spawnScorch(pos, normal, radius * 0.22f, 0.70f, ExplosionVfxKind::Sticky);
 }
 
 void ExplosionVfxEffect::spawnMolotovBurst(glm::vec3 pos, glm::vec3 normal, float radius)
@@ -330,7 +292,6 @@ void ExplosionVfxEffect::spawnMolotovBurst(glm::vec3 pos, glm::vec3 normal, floa
                     0.8f,
                     randRange(2.0f, 5.0f));
     }
-    spawnScorch(pos, normal, radius * 0.50f, 0.72f, ExplosionVfxKind::Molotov);
 }
 
 void ExplosionVfxEffect::driveGroundFire(entt::entity fieldEntity,
@@ -470,11 +431,6 @@ void ExplosionVfxEffect::update(float dt, Registry& registry, glm::vec3 camPos, 
         p.color.a = (1.0f - t) * (1.0f - t * 0.65f);
         return true;
     });
-
-    const uint32_t liveDecals = std::min(decalHead_, k_maxDecals);
-    for (uint32_t i = 0; i < liveDecals; ++i) {
-        decals_[i].opacity = std::max(0.0f, decals_[i].opacity - dt / 18.0f);
-    }
 
     sortedSprites_.resize(spritePool_.liveCount());
     std::copy(spritePool_.rawData(), spritePool_.rawData() + spritePool_.liveCount(), sortedSprites_.begin());

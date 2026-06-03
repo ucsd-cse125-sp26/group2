@@ -37,9 +37,6 @@ public:
     [[nodiscard]] const VfxDebrisParticle* debrisData() const { return debrisPool_.rawData(); }
     [[nodiscard]] uint32_t debrisCount() const { return debrisPool_.liveCount(); }
 
-    [[nodiscard]] const DecalInstance* decalData() const { return decals_.data(); }
-    [[nodiscard]] uint32_t decalCount() const { return std::min(decalHead_, k_maxDecals); }
-
 private:
     struct GroundFireAnchor
     {
@@ -58,10 +55,6 @@ private:
     ParticlePool<VfxSpriteParticle, 2048> spritePool_;
     ParticlePool<VfxDebrisParticle, 1024> debrisPool_;
     std::vector<VfxSpriteParticle> sortedSprites_;
-
-    static constexpr uint32_t k_maxDecals = 256;
-    std::array<DecalInstance, k_maxDecals> decals_{};
-    uint32_t decalHead_ = 0;
 
     std::vector<GroundFireAnchor> groundFire_;
     uint32_t sequence_ = 1;
@@ -89,8 +82,6 @@ private:
                      float gravity,
                      float drag,
                      float stretch);
-    void spawnScorch(glm::vec3 pos, glm::vec3 normal, float size, float opacity, ExplosionVfxKind kind);
-
     void spawnRocket(glm::vec3 pos, glm::vec3 normal, float radius);
     void spawnFrag(glm::vec3 pos, glm::vec3 normal, float radius);
     void spawnSticky(glm::vec3 pos, glm::vec3 normal, float radius);
