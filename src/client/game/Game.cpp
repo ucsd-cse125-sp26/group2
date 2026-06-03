@@ -2571,20 +2571,6 @@ SDL_AppResult Game::iterate()
                                         localGravFlipped,
                                         userSettings->gamepadSwapSticks);
         systems::runGamepadWeapon(registry, activeGamepad_, userSettings->inputBindings);
-
-        // Apply scroll-wheel weapon switch, constrained to primary/secondary.
-        if (pendingScrollSwitch_ != 0) {
-            registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
-                int slotIdx = 0;
-                registry.view<LocalPlayer, WeaponState>().each(
-                    [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
-
-                slotIdx = (slotIdx + pendingScrollSwitch_ + 2) % 2;
-                snap.switchToPrimary = (slotIdx == 0);
-                snap.switchToSecondary = (slotIdx == 1);
-            });
-            pendingScrollSwitch_ = 0;
-        }
     } else {
         // Gameplay input is suppressed (paused / chat / menu) — make sure the
         // emote wheel doesn't get stuck open with no way to release it.
@@ -2625,6 +2611,27 @@ SDL_AppResult Game::iterate()
         // server confirms it for everyone else via PlayerVisState/AnimSnapshot.
         if (emoteRequestThisFrame >= 0)
             localEmote_ = emoteRequestThisFrame;
+
+        // Apply scroll-wheel / button weapon switch (mouse wheel, gamepad Y),
+        // constrained to primary/secondary. Consumed HERE — inside the
+        // physics-tick gate — rather than every iterate, so a press is only
+        // cleared on a frame that actually stamps and sends input. Consuming it
+        // in the per-frame block dropped presses on render frames that ran no
+        // physics tick (common above 128 fps), which made the toggle fire only
+        // ~128/FPS of the time. pendingScrollSwitch_ now persists across no-tick
+        // frames until a tick consumes it.
+        if (pendingScrollSwitch_ != 0) {
+            registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
+                int slotIdx = 0;
+                registry.view<LocalPlayer, WeaponState>().each(
+                    [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
+
+                slotIdx = (slotIdx + pendingScrollSwitch_ + 2) % 2;
+                snap.switchToPrimary = (slotIdx == 0);
+                snap.switchToSecondary = (slotIdx == 1);
+            });
+            pendingScrollSwitch_ = 0;
+        }
 
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
