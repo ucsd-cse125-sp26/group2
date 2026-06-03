@@ -117,6 +117,11 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
 
             ImGui::EndTable();
         }
+
+        ImGui::Separator();
+        if (ImGui::Button("Return to Menu")) {
+            result.returnToMenuClicked = true;
+        }
     }
     menu_theme::endPanel();
 

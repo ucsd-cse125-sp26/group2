@@ -1120,6 +1120,10 @@ add_executable(group2
         src/client/menus/lobby/Lobby.cpp
         src/client/menus/lobby/ui/LobbyUI.hpp
         src/client/menus/lobby/ui/LobbyUI.cpp
+        src/client/menus/main/MainMenu.hpp
+        src/client/menus/main/MainMenu.cpp
+        src/client/menus/main/ui/MainMenuUI.hpp
+        src/client/menus/main/ui/MainMenuUI.cpp
         src/client/renderer-new/RendererTypes.hpp
         src/client/menus/home/Home.hpp
         src/client/menus/home/Home.cpp

@@ -28,7 +28,7 @@ struct JoinRequest
     std::string serverName;      ///< Display name shown in the lobby after joining.
 };
 
-/// @brief IScreen implementation for the main menu; hosts the server join form.
+/// @brief IScreen implementation for the home/join screen; hosts the server join form.
 class Home : public IScreen
 {
 public:
@@ -48,6 +48,10 @@ public:
     /// @return True if a host request was pending.
     bool consumeHostRequest();
 
+    /// @brief Take the pending return-to-menu request set when the user clicks "Return to Menu", clearing it.
+    /// @return True if a return-to-menu request was pending.
+    bool consumeReturnToMenuRequest();
+
     /// @brief Display an error string on the join form (e.g. from a failed connection attempt).
     void setJoinError(const std::string& error);
 
@@ -55,16 +59,17 @@ public:
     void setPopupMessage(const std::string& message);
 
 private:
-    NewRenderer* renderer = nullptr; ///< Renderer; not owned.
-    SDL_Window* window = nullptr;    ///< Application window; not owned.
+    NewRenderer* renderer = nullptr;         ///< Renderer; not owned.
+    SDL_Window* window = nullptr;            ///< Application window; not owned.
     GlobalDiscoveryConfig discoveryConfig;
-    JoinMenuState joinMenuState;     ///< Mutable state backing the join form widgets.
+    JoinMenuState joinMenuState;             ///< Mutable state backing the join form widgets.
     std::optional<JoinRequest>
-        pendingJoinRequest;          ///< Set when the user clicks "Join", cleared on App transition to Lobby.
-    bool pendingHostRequest = false; ///< Set when the user clicks "Host", cleared on App transition.
-    std::string joinError;           ///< Error message shown on the join form; empty when no error.
-    std::string popupMessage;        ///< Modal message shown once after returning to home.
-    bool openPopupMessage = false;   ///< True when the modal should be opened next frame.
+        pendingJoinRequest;                  ///< Set when the user clicks "Join", cleared on App transition to Lobby.
+    bool pendingHostRequest = false;         ///< Set when the user clicks "Host", cleared on App transition.
+    bool pendingReturnToMenuRequest = false; ///< Set when the user clicks "Return to Menu", cleared on transition.
+    std::string joinError;                   ///< Error message shown on the join form; empty when no error.
+    std::string popupMessage;                ///< Modal message shown once after returning to home.
+    bool openPopupMessage = false;           ///< True when the modal should be opened next frame.
 
     std::unique_ptr<DiscoveryClient> localDiscoveryClient = std::make_unique<DiscoveryClient>();
 

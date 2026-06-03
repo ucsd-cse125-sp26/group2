@@ -10,6 +10,7 @@
 #include "menus/home/Home.hpp"
 #include "menus/host/HostConfig.hpp"
 #include "menus/lobby/Lobby.hpp"
+#include "menus/main/MainMenu.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
 
@@ -169,14 +170,14 @@ bool App::init()
         current = Screen::InGame;
     } else {
         AppContext ctx = screenContext();
-        auto homeScreen = std::make_unique<Home>();
-        if (!homeScreen->init(ctx)) {
-            homeScreen->quit();
+        auto mainMenu = std::make_unique<MainMenu>();
+        if (!mainMenu->init(ctx)) {
+            mainMenu->quit();
             cleanup();
             return false;
         }
-        screen_ = std::move(homeScreen);
-        current = Screen::Home;
+        screen_ = std::move(mainMenu);
+        current = Screen::MainMenu;
     }
 
     return true;
@@ -198,10 +199,32 @@ SDL_AppResult App::iterate()
         return result;
 
     switch (current) {
+    case Screen::MainMenu: {
+        auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get());
+        if (!mainMenu)
+            break;
+
+        if (mainMenu->consumeExitRequest()) {
+            return SDL_APP_SUCCESS;
+        }
+        if (mainMenu->consumePlayRequest()) {
+            transitionTo(Screen::Home);
+            break;
+        }
+        if (mainMenu->consumeHostRequest()) {
+            transitionTo(Screen::HostConfig);
+            break;
+        }
+        break;
+    }
     case Screen::Home: {
         auto home = dynamic_cast<Home*>(screen_.get());
         if (!home)
             break;
+        if (home->consumeReturnToMenuRequest()) {
+            transitionTo(Screen::MainMenu);
+            break;
+        }
         if (auto joinRequest = home->consumeJoinRequest()) {
             std::string serverIp = joinRequest->serverIp;
             uint16_t serverPort = joinRequest->serverPort;
@@ -359,9 +382,11 @@ SDL_AppResult App::iterate()
             }
             client.shutdown();
 
-            transitionTo(Screen::Home);
             if (showServerShutdownNotice) {
+                transitionTo(Screen::Home);
                 showHomePopupMessage("Server shutdown");
+            } else {
+                transitionTo(Screen::MainMenu);
             }
             break;
         }
@@ -383,9 +408,11 @@ SDL_AppResult App::iterate()
                 shutdownHostedServerGracefully();
             }
             client.shutdown();
-            transitionTo(Screen::Home);
             if (showServerShutdownNotice) {
+                transitionTo(Screen::Home);
                 showHomePopupMessage("Server shutdown");
+            } else {
+                transitionTo(Screen::MainMenu);
             }
             break;
         }
@@ -421,6 +448,16 @@ void App::transitionTo(Screen next)
 
     AppContext ctx = screenContext();
     switch (next) {
+    case Screen::MainMenu: {
+        auto mainMenu = std::make_unique<MainMenu>();
+        if (mainMenu->init(ctx)) {
+            screen_ = std::move(mainMenu);
+            current = next;
+        } else {
+            mainMenu->quit();
+        }
+        break;
+    }
     case Screen::InGame: {
         auto game = std::make_unique<Game>();
         if (game->initDebugUI(ctx) && game->init(ctx)) {

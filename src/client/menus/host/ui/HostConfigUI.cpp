@@ -174,7 +174,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
         ImGui::Separator();
         ImGui::BeginDisabled(inputs.serverRunning);
-        if (ImGui::Button("Back to Main Menu")) {
+        if (ImGui::Button("Back to Home")) {
             result.backToHomeClicked = true;
         }
         ImGui::EndDisabled();

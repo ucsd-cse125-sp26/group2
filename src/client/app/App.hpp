@@ -42,7 +42,8 @@ public:
     /// @brief Named screens the application can display.
     enum class Screen
     {
-        Home,       ///< Main menu screen.
+        MainMenu,   ///< Top-level landing menu.
+        Home,       ///< Join/server-browser screen.
         HostConfig, ///< Local hosting configuration screen.
         Lobby,      ///< Pre-match lobby waiting room.
         InGame      ///< Active match session.
@@ -74,9 +75,9 @@ private:
         .maxPlayers = 8,
     }; ///< Persistent host screen draft state.
 
-    Screen current = Screen::Home;    ///< Which screen is currently active.
-    std::unique_ptr<IScreen> screen_; ///< Active screen instance.
-    bool imguiContextOwned = false;   ///< True once App has created the ImGui context.
+    Screen current = Screen::MainMenu; ///< Which screen is currently active.
+    std::unique_ptr<IScreen> screen_;  ///< Active screen instance.
+    bool imguiContextOwned = false;    ///< True once App has created the ImGui context.
 
     /// @brief Destroy all subsystems without asserting on partial-init state.
     void cleanup();

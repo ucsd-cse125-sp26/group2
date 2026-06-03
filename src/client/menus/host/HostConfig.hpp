@@ -82,5 +82,5 @@ private:
     bool pendingLaunch = false;     ///< Set when the user clicks "Launch", cleared by App.
     bool pendingShutdown = false;   ///< Set when the user clicks "Shutdown", cleared by App.
     bool pendingGoToLobby = false;  ///< Set when the user clicks "Go to Lobby", cleared by App.
-    bool pendingBackToHome = false; ///< Set when the user clicks "Back to Main Menu", cleared by App.
+    bool pendingBackToHome = false; ///< Set when the user clicks "Back to Home", cleared by App.
 };

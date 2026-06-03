@@ -27,7 +27,7 @@ struct HostConfigResult
     bool updateClicked = false;     ///< True if the user pressed "Update Settings" this frame.
     bool shutdownClicked = false;   ///< True if the user pressed "Shutdown" this frame.
     bool goToLobbyClicked = false;  ///< True if the user wants to enter the lobby.
-    bool backToHomeClicked = false; ///< True if the user wants to return to the main menu.
+    bool backToHomeClicked = false; ///< True if the user wants to return to the home screen.
 };
 
 namespace host_config_ui

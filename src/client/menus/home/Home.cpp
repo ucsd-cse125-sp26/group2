@@ -128,6 +128,10 @@ SDL_AppResult Home::iterate()
         joinError.clear();
         pendingHostRequest = true;
     }
+    if (result.returnToMenuClicked) {
+        joinError.clear();
+        pendingReturnToMenuRequest = true;
+    }
 
     if (result.connectClicked) {
         joinError.clear();
@@ -205,6 +209,16 @@ bool Home::consumeHostRequest()
     }
 
     pendingHostRequest = false;
+    return true;
+}
+
+bool Home::consumeReturnToMenuRequest()
+{
+    if (!pendingReturnToMenuRequest) {
+        return false;
+    }
+
+    pendingReturnToMenuRequest = false;
     return true;
 }
 

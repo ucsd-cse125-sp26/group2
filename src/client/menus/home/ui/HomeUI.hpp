@@ -20,11 +20,12 @@ struct JoinMenuState
 /// @brief Output from a single home UI frame.
 struct JoinMenuResult
 {
-    bool connectClicked = false; ///< True if the user pressed "Join" this frame.
-    bool hostClicked = false;    ///< True if the user pressed "Host" this frame.
-    bool refreshClicked = false; ///< True if the user requested a global browser refresh.
-    int localServerIndex = -1;   ///< Index of a discovered local server to join, or -1.
-    int globalServerIndex = -1;  ///< Index of a discovered server to join, or -1.
+    bool connectClicked = false;      ///< True if the user pressed "Join" this frame.
+    bool hostClicked = false;         ///< True if the user pressed "Host" this frame.
+    bool refreshClicked = false;      ///< True if the user requested a global browser refresh.
+    bool returnToMenuClicked = false; ///< True if the user pressed "Return to Menu" this frame.
+    int localServerIndex = -1;        ///< Index of a discovered local server to join, or -1.
+    int globalServerIndex = -1;       ///< Index of a discovered server to join, or -1.
 };
 
 namespace home_ui
