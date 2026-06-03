@@ -187,6 +187,62 @@ void writeColorParam(std::ostream& out, bool& first, std::string_view name, HudC
     writeColorValue(out, color);
 }
 
+void writeEquipmentSvgTuningParam(std::ostream& out,
+                                  bool& first,
+                                  std::string_view prefix,
+                                  const EquipmentSlots::SvgComponentTuning& tuning)
+{
+    const std::string name(prefix);
+    writeFloatParam(out, first, name + "Scale", tuning.scale);
+    writeFloatParam(out, first, name + "OffsetX", tuning.offsetX);
+    writeFloatParam(out, first, name + "OffsetY", tuning.offsetY);
+    writeFloatParam(out, first, name + "StretchX", tuning.stretchX);
+    writeFloatParam(out, first, name + "StretchY", tuning.stretchY);
+}
+
+void writeEquipmentElementParams(std::ostream& out,
+                                 bool& first,
+                                 std::string_view prefix,
+                                 const EquipmentSlots::AbilityElementTuning& element)
+{
+    const std::string name(prefix);
+    writeEquipmentSvgTuningParam(out, first, name + "IconFrame", element.iconFrame);
+    writeEquipmentSvgTuningParam(out, first, name + "Icon", element.icon);
+    writeEquipmentSvgTuningParam(out, first, name + "Bar", element.bar);
+    writeBoolParam(out, first, name + "IconFlipX", element.flipIconX);
+    writeBoolParam(out, first, name + "IconFlipY", element.flipIconY);
+    writeBoolParam(out, first, name + "BarFlipX", element.flipBarX);
+    writeBoolParam(out, first, name + "BarFlipY", element.flipBarY);
+}
+
+void editEquipmentSvgTuning(const char* label, EquipmentSlots::SvgComponentTuning& tuning)
+{
+    if (!ImGui::TreeNode(label))
+        return;
+
+    editFloat("Scale", tuning.scale, 0.01f, 0.01f, 8.0f);
+    editFloat("Offset X", tuning.offsetX, 0.5f, -2000.0f, 2000.0f);
+    editFloat("Offset Y", tuning.offsetY, 0.5f, -2000.0f, 2000.0f);
+    editFloat("Stretch X", tuning.stretchX, 0.01f, 0.01f, 8.0f);
+    editFloat("Stretch Y", tuning.stretchY, 0.01f, 0.01f, 8.0f);
+    ImGui::TreePop();
+}
+
+void editEquipmentElement(const char* label, EquipmentSlots::AbilityElementTuning& element)
+{
+    if (!ImGui::TreeNode(label))
+        return;
+
+    editEquipmentSvgTuning("Icon Frame SVG", element.iconFrame);
+    editEquipmentSvgTuning("Ability Icon SVG", element.icon);
+    ImGui::Checkbox("Flip Icon X", &element.flipIconX);
+    ImGui::Checkbox("Flip Icon Y", &element.flipIconY);
+    editEquipmentSvgTuning("Cooldown Bar SVG", element.bar);
+    ImGui::Checkbox("Flip Bar X", &element.flipBarX);
+    ImGui::Checkbox("Flip Bar Y", &element.flipBarY);
+    ImGui::TreePop();
+}
+
 void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
 {
     bool first = true;
@@ -226,12 +282,15 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "showAfterDamageSecs", enemy->showAfterDamageSecs);
         writeFloatParam(out, first, "fadeOutSecs", enemy->fadeOutSecs);
     } else if (const auto* equipment = dynamic_cast<const EquipmentSlots*>(&widget)) {
-        writeFloatParam(out, first, "slotSize", equipment->slotSize);
-        writeFloatParam(out, first, "slotGap", equipment->slotGap);
-        writeFloatParam(out, first, "iconSize", equipment->iconSize);
-        writeFloatParam(out, first, "keyFontSize", equipment->keyFontSize);
-        writeFloatParam(out, first, "keyPadX", equipment->keyPadX);
-        writeFloatParam(out, first, "keyPadY", equipment->keyPadY);
+        writeFloatParam(out, first, "iconFrameWidth", equipment->iconFrameWidth);
+        writeFloatParam(out, first, "iconFrameHeight", equipment->iconFrameHeight);
+        writeFloatParam(out, first, "abilityIconSize", equipment->abilityIconSize);
+        writeFloatParam(out, first, "barWidth", equipment->barWidth);
+        writeFloatParam(out, first, "barHeight", equipment->barHeight);
+        writeFloatParam(out, first, "iconBarGap", equipment->iconBarGap);
+        writeFloatParam(out, first, "centerGap", equipment->centerGap);
+        writeEquipmentElementParams(out, first, "left", equipment->abilityElements[0]);
+        writeEquipmentElementParams(out, first, "right", equipment->abilityElements[1]);
     } else if (const auto* gravity = dynamic_cast<const GravityIndicator*>(&widget)) {
         writeFloatParam(out, first, "diskSize", gravity->diskSize);
     } else if (const auto* grenades = dynamic_cast<const GrenadeSlotsWidget*>(&widget)) {
@@ -248,9 +307,11 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
     } else if (const auto* health = dynamic_cast<const HealthArmorBar*>(&widget)) {
         writeFloatParam(out, first, "panelWidth", health->panelWidth);
         writeFloatParam(out, first, "barHeight", health->barHeight);
-        writeFloatParam(out, first, "chamferSize", health->chamferSize);
-        writeFloatParam(out, first, "cornerCutSize", health->cornerCutSize);
-        writeFloatParam(out, first, "outlineThickness", health->outlineThickness);
+        writeFloatParam(out, first, "svgScale", health->svgScale);
+        writeFloatParam(out, first, "svgOffsetX", health->svgOffsetX);
+        writeFloatParam(out, first, "svgOffsetY", health->svgOffsetY);
+        writeFloatParam(out, first, "svgStretchX", health->svgStretchX);
+        writeFloatParam(out, first, "svgStretchY", health->svgStretchY);
     } else if (const auto* hit = dynamic_cast<const HitMarkerWidget*>(&widget)) {
         writeFloatParam(out, first, "armLength", hit->armLength);
         writeFloatParam(out, first, "armThickness", hit->armThickness);
@@ -276,10 +337,10 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
     } else if (const auto* minimap = dynamic_cast<const Minimap*>(&widget)) {
         writeFloatParam(out, first, "mapSize", minimap->mapSize);
         writeFloatParam(out, first, "dotSize", minimap->dotSize);
-        writeFloatParam(out, first, "borderThickness", minimap->borderThickness);
-        writeFloatParam(out, first, "levelRingThickness", minimap->levelRingThickness);
-        writeFloatParam(out, first, "levelRingGap", minimap->levelRingGap);
-        writeFloatParam(out, first, "levelRingDrainSeconds", minimap->levelRingDrainSeconds);
+        writeFloatParam(out, first, "dotZoneRadius", minimap->dotZoneRadius);
+        writeFloatParam(out, first, "dotZoneOffsetX", minimap->dotZoneOffsetX);
+        writeFloatParam(out, first, "dotZoneOffsetY", minimap->dotZoneOffsetY);
+        writeBoolParam(out, first, "showDotZoneDebug", minimap->showDotZoneDebug);
     } else if (const auto* pickup = dynamic_cast<const PickupNotification*>(&widget)) {
         writeFloatParam(out, first, "entryHeight", pickup->entryHeight);
         writeFloatParam(out, first, "entryGap", pickup->entryGap);
@@ -419,12 +480,15 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Show After Damage Secs", enemy->showAfterDamageSecs, 0.1f, 0.0f, 30.0f);
         editFloat("Fade Out Secs", enemy->fadeOutSecs, 0.05f, 0.0f, 10.0f);
     } else if (auto* equipment = dynamic_cast<EquipmentSlots*>(&widget)) {
-        editFloat("Slot Size", equipment->slotSize, 1.0f, 8.0f, 240.0f);
-        editFloat("Slot Gap", equipment->slotGap, 0.5f, 0.0f, 80.0f);
-        editFloat("Icon Size", equipment->iconSize, 0.5f, 4.0f, 160.0f);
-        editFloat("Key Font Size", equipment->keyFontSize, 0.5f, 4.0f, 96.0f);
-        editFloat("Key Pad X", equipment->keyPadX, 0.25f, 0.0f, 40.0f);
-        editFloat("Key Pad Y", equipment->keyPadY, 0.25f, 0.0f, 40.0f);
+        editFloat("Icon Frame Width", equipment->iconFrameWidth, 1.0f, 8.0f, 400.0f);
+        editFloat("Icon Frame Height", equipment->iconFrameHeight, 1.0f, 8.0f, 400.0f);
+        editFloat("Ability Icon Size", equipment->abilityIconSize, 0.5f, 4.0f, 300.0f);
+        editFloat("Bar Width", equipment->barWidth, 1.0f, 8.0f, 800.0f);
+        editFloat("Bar Height", equipment->barHeight, 1.0f, 8.0f, 400.0f);
+        editFloat("Icon-Bar Gap", equipment->iconBarGap, 0.5f, 0.0f, 200.0f);
+        editFloat("Center Gap", equipment->centerGap, 0.5f, 0.0f, 200.0f);
+        editEquipmentElement("Left Ability SVGs", equipment->abilityElements[0]);
+        editEquipmentElement("Right Ability SVGs", equipment->abilityElements[1]);
     } else if (auto* gravity = dynamic_cast<GravityIndicator*>(&widget)) {
         editFloat("Disk Size", gravity->diskSize, 1.0f, 4.0f, 240.0f);
     } else if (auto* grenades = dynamic_cast<GrenadeSlotsWidget*>(&widget)) {
@@ -441,9 +505,11 @@ void editWidgetSpecific(HudWidget& widget)
     } else if (auto* health = dynamic_cast<HealthArmorBar*>(&widget)) {
         editFloat("Panel Width", health->panelWidth, 1.0f, 80.0f, 1200.0f);
         editFloat("Bar Height", health->barHeight, 0.5f, 4.0f, 200.0f);
-        editFloat("Chamfer Size", health->chamferSize, 0.5f, 0.0f, 120.0f);
-        editFloat("Corner Cut Size", health->cornerCutSize, 0.25f, 0.0f, 80.0f);
-        editFloat("Outline Thickness", health->outlineThickness, 0.25f, 0.0f, 40.0f);
+        editFloat("SVG Scale", health->svgScale, 0.01f, 0.01f, 8.0f);
+        editFloat("SVG Offset X", health->svgOffsetX, 0.5f, -2000.0f, 2000.0f);
+        editFloat("SVG Offset Y", health->svgOffsetY, 0.5f, -2000.0f, 2000.0f);
+        editFloat("SVG Stretch X", health->svgStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("SVG Stretch Y", health->svgStretchY, 0.01f, 0.01f, 8.0f);
     } else if (auto* hit = dynamic_cast<HitMarkerWidget*>(&widget)) {
         editFloat("Arm Length", hit->armLength, 0.25f, 0.0f, 120.0f);
         editFloat("Arm Thickness", hit->armThickness, 0.1f, 0.0f, 40.0f);
@@ -469,10 +535,10 @@ void editWidgetSpecific(HudWidget& widget)
     } else if (auto* minimap = dynamic_cast<Minimap*>(&widget)) {
         editFloat("Map Size", minimap->mapSize, 1.0f, 20.0f, 800.0f);
         editFloat("Dot Size", minimap->dotSize, 0.25f, 0.0f, 80.0f);
-        editFloat("Border Thickness", minimap->borderThickness, 0.25f, 0.0f, 40.0f);
-        editFloat("Level Ring Thickness", minimap->levelRingThickness, 0.25f, 0.0f, 40.0f);
-        editFloat("Level Ring Gap", minimap->levelRingGap, 0.25f, 0.0f, 80.0f);
-        editFloat("Level Ring Drain Seconds", minimap->levelRingDrainSeconds, 0.05f, 0.01f, 10.0f);
+        editFloat("Dot Zone Radius", minimap->dotZoneRadius, 0.5f, 0.0f, 400.0f);
+        editFloat("Dot Zone Offset X", minimap->dotZoneOffsetX, 0.5f, -400.0f, 400.0f);
+        editFloat("Dot Zone Offset Y", minimap->dotZoneOffsetY, 0.5f, -400.0f, 400.0f);
+        ImGui::Checkbox("Show Dot Zone Debug", &minimap->showDotZoneDebug);
     } else if (auto* pickup = dynamic_cast<PickupNotification*>(&widget)) {
         editFloat("Entry Height", pickup->entryHeight, 0.5f, 4.0f, 120.0f);
         editFloat("Entry Gap", pickup->entryGap, 0.25f, 0.0f, 80.0f);

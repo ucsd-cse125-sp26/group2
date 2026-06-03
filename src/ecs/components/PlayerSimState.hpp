@@ -50,6 +50,11 @@ struct PlayerSimState
     float jumpLurchTimer{0.0f};       ///< Time elapsed since the jump that enabled lurch (s).
     glm::vec2 moveInputsOnJump{0.0f}; ///< WASD direction when jump started (for direction-change detection).
 
+    // ── Levitate (tier-1 updraft ability) ───────────────────────────────────
+    bool levitateActive{false};   ///< True while currently riding the updraft.
+    bool levitatePrevHeld{false}; ///< Ability-key state last tick (for rising-edge start).
+    float levitateTimer{0.0f};    ///< Seconds the current levitate has lasted.
+
     // ── Sliding ────────────────────────────────────────────────────────────
     float slideTimer{0.0f};         ///< How long the current slide has lasted (s).
     int slideFatigueCounter{0};     ///< Diminishing returns on consecutive slidehops.

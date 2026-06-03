@@ -31,7 +31,8 @@ enum class Action : uint8_t
     SwitchToSecondary, ///< Switch to the secondary weapon slot.
     PreviousWeapon,    ///< Cycle to the previous weapon slot.
     NextWeapon,        ///< Cycle to the next weapon slot.
-    CycleGrenade,      ///< Quick-throw or open the grenade radial menu.
+    CycleGrenade,      ///< Cycle to the next grenade type that has ammo.
+    ThrowGrenade,      ///< Throw the currently selected grenade.
     KillSelf,          ///< Request self-elimination.
     Scoreboard,        ///< Show the scoreboard while held.
     Emote,             ///< Hold to open the emote wheel; release to play the selected emote.
@@ -168,6 +169,7 @@ public:
                 Action::PreviousWeapon,
                 Action::NextWeapon,
                 Action::CycleGrenade,
+                Action::ThrowGrenade,
                 Action::KillSelf,
                 Action::Scoreboard,
                 Action::Emote,

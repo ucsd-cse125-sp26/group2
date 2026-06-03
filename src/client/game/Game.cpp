@@ -1272,6 +1272,16 @@ bool Game::init(AppContext& ctx)
             }
         }
 
+        // Pop a brief point light at the muzzle on every shot so the flash
+        // lights up nearby geometry. For the local player prefer the exact
+        // viewmodel muzzle; for everyone else use the shot's muzzle origin.
+        if (evt.effectType == ParticleEffectType::BulletTracer ||
+            evt.effectType == ParticleEffectType::HitscanBeam) {
+            const glm::vec3 flashPos =
+                (evt.source == localPlayer && cachedMuzzleValid_) ? cachedMuzzleWorld_ : evtOrigin;
+            spawnMuzzleFlashLight(flashPos);
+        }
+
         switch (evt.effectType) {
         case ParticleEffectType::BulletTracer:
             particleSystem.spawnBulletTracer(evtOrigin, evt.pos2, evt.param);
@@ -1720,15 +1730,15 @@ void Game::clearGameplayInputForChat()
     systems::pendingGrenadeThrow = false;
     systems::pendingGrenadeCycleNext = false;
     systems::pendingGrenadeCyclePrev = false;
-    systems::grenadeCycledThisHold = false;
-    systems::prevGrenadeCycleNext = false;
-    systems::prevGrenadeCyclePrev = false;
-    systems::prevGamepadGrenadeKey = false;
-    systems::gamepadGrenadeCycledThisHold = false;
-    systems::prevGamepadGrenadeCycleNext = false;
-    systems::prevGamepadGrenadeCyclePrev = false;
+    systems::prevGrenadeCycleKey = false;
+    systems::prevGrenadeThrowKey = false;
+    systems::prevGamepadGrenadeCycleKey = false;
+    systems::prevGamepadGrenadeThrowKey = false;
+    systems::prevGamepadPickupKey = false;
+    systems::gamepadPickupHoldFired = false;
+    systems::pendingGamepadWeaponSwap = false;
+    systems::gamepadLookAccel = 0.0f;
     systems::prevKillSelfKey = false;
-    systems::prevGrenadeKey = false;
     systems::prevAbilitySelectLeft = false;
     systems::prevAbilitySelectRight = false;
     systems::prevGamepadAbilitySelectLeft = false;
@@ -1994,11 +2004,35 @@ SDL_AppResult Game::event(SDL_Event* event)
         }
     }
 
+    // Gamepad Start (right menu button) toggles the pause menu, mirroring ESC.
+    if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && event->gbutton.button == SDL_GAMEPAD_BUTTON_START) {
+        if (pauseMenu.isOpen()) {
+            if (pauseMenu.handleEscape()) {
+                pauseMenu.close();
+                mouseCaptured = true;
+                SDL_SetWindowRelativeMouseMode(window, true);
+                clearGameplayInputForChat();
+            }
+        } else {
+            pauseMenu.open();
+            mouseCaptured = false;
+            SDL_SetWindowRelativeMouseMode(window, false);
+            centerMouseInWindow(window);
+            clearGameplayInputForChat();
+        }
+        return SDL_APP_CONTINUE;
+    }
+
     if (pauseMenu.consumeEvent(*event))
         return SDL_APP_CONTINUE;
 
-    // Configurable wheel/button events can toggle between primary and secondary weapon slots.
-    if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured && userSettings) {
+    // Configurable wheel/button events can toggle between primary and secondary
+    // weapon slots. Mouse wheel (KBM) and gamepad buttons (e.g. Y/North) both
+    // route through eventMatches; NextWeapon flips to the other slot, acting as
+    // a single "toggle gun" press on the controller.
+    if ((event->type == SDL_EVENT_MOUSE_WHEEL || event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) && mouseCaptured &&
+        userSettings)
+    {
         bool down = false;
         if (userSettings->inputBindings.eventMatches(Action::PreviousWeapon, *event, down) && down)
             pendingScrollSwitch_ = -1;
@@ -2100,6 +2134,20 @@ void Game::adoptGamepad(SDL_JoystickID id)
     } else {
         SDL_Log("[input] SDL_OpenGamepad failed for id=%u: %s", id, SDL_GetError());
     }
+}
+
+void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
+{
+    MuzzleFlashLight flash;
+    flash.position = pos;
+    // Warm orange-white muzzle flash. Intensity is in the same scale as the
+    // scene's static point lights (shader attenuation is pure 1/r²), so it
+    // needs to be large to noticeably light nearby surfaces.
+    flash.color = glm::vec3(1.0f, 0.65f, 0.30f);
+    flash.intensity = 9000.0f;
+    flash.age = 0.0f;
+    flash.lifetime = 0.06f;
+    muzzleFlashLights_.push_back(flash);
 }
 
 void Game::scanForConnectedGamepads()
@@ -2527,20 +2575,6 @@ SDL_AppResult Game::iterate()
                                         localGravFlipped,
                                         userSettings->gamepadSwapSticks);
         systems::runGamepadWeapon(registry, activeGamepad_, userSettings->inputBindings);
-
-        // Apply scroll-wheel weapon switch, constrained to primary/secondary.
-        if (pendingScrollSwitch_ != 0) {
-            registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
-                int slotIdx = 0;
-                registry.view<LocalPlayer, WeaponState>().each(
-                    [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
-
-                slotIdx = (slotIdx + pendingScrollSwitch_ + 2) % 2;
-                snap.switchToPrimary = (slotIdx == 0);
-                snap.switchToSecondary = (slotIdx == 1);
-            });
-            pendingScrollSwitch_ = 0;
-        }
     } else {
         // Gameplay input is suppressed (paused / chat / menu) — make sure the
         // emote wheel doesn't get stuck open with no way to release it.
@@ -2581,6 +2615,32 @@ SDL_AppResult Game::iterate()
         // server confirms it for everyone else via PlayerVisState/AnimSnapshot.
         if (emoteRequestThisFrame >= 0)
             localEmote_ = emoteRequestThisFrame;
+
+        // A quick tap of gamepad Y latches a weapon swap (hold-Y is pickup,
+        // handled in runGamepadWeapon). Fold it into the same scroll-switch path.
+        if (systems::consumePendingGamepadWeaponSwap())
+            pendingScrollSwitch_ = 1;
+
+        // Apply scroll-wheel / button weapon switch (mouse wheel, gamepad Y tap),
+        // constrained to primary/secondary. Consumed HERE — inside the
+        // physics-tick gate — rather than every iterate, so a press is only
+        // cleared on a frame that actually stamps and sends input. Consuming it
+        // in the per-frame block dropped presses on render frames that ran no
+        // physics tick (common above 128 fps), which made the toggle fire only
+        // ~128/FPS of the time. pendingScrollSwitch_ now persists across no-tick
+        // frames until a tick consumes it.
+        if (pendingScrollSwitch_ != 0) {
+            registry.view<InputSnapshot, LocalPlayer>().each([&](InputSnapshot& snap) {
+                int slotIdx = 0;
+                registry.view<LocalPlayer, WeaponState>().each(
+                    [&](const WeaponState& ws) { slotIdx = static_cast<int>(ws.current); });
+
+                slotIdx = (slotIdx + pendingScrollSwitch_ + 2) % 2;
+                snap.switchToPrimary = (slotIdx == 0);
+                snap.switchToSecondary = (slotIdx == 1);
+            });
+            pendingScrollSwitch_ = 0;
+        }
 
         // Movement keys: sample once for this whole group of ticks.
         if (inputSyncedWithPhysics && mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
@@ -3049,6 +3109,12 @@ SDL_AppResult Game::iterate()
                 const float hipHitDist = glm::length(hipToHit);
                 const glm::vec3 hipDir = (hipHitDist > 0.1f) ? hipToHit / hipHitDist : cachedCamFwd_;
                 particleSystem.spawnBulletTracer(hip, hipDir, hipHitDist);
+
+                // Muzzle-flash point light for the local player's own shot.
+                // Spawned here (not in onRawParticleEvent) because the server
+                // echo of our own non-charge fire is skipped for instant local
+                // feedback — see the early return in onRawParticleEvent.
+                spawnMuzzleFlashLight(hip);
 
                 // Visual recoil kick (viewmodel-only).
                 // Third-person recoil happens via the WeaponFiredEvent
@@ -3905,6 +3971,12 @@ SDL_AppResult Game::iterate()
             skinnedInstances.reserve(drawSlot);
         }
 
+        // Wallhack (tier-2): while the local player's reveal window is active,
+        // every other player is drawn with the red chams pass (see-through-walls).
+        bool localWallhackActive = false;
+        registry.view<LocalPlayer, AbilityState>().each(
+            [&](const AbilityState& abil) { localWallhackActive = abil.wallhackTimer > 0.0f; });
+
         // Phase F task 14: applyHandIkTargets + weapon-world derivation moved
         // into the worker pool above. This pass is now purely sequential
         // registry writeback — copying joint matrices to JointMatrices, pushing
@@ -4022,8 +4094,11 @@ SDL_AppResult Game::iterate()
                 instance.worldTransform = c.worldTransform;
                 instance.paletteBase = static_cast<uint32_t>(bonePalette.size());
                 instance.tint = c.tint;
-                // Flag the killer so the renderer draws its wallhack chams pass.
-                instance.materialId = (killcamActive_ && c.entity == killcamKillerEntity_) ? 1u : 0u;
+                // Flag for the red chams pass: the killcam killer, or — while the
+                // local player's wallhack is active — every other player.
+                const bool chamsKiller = killcamActive_ && c.entity == killcamKillerEntity_;
+                const bool chamsWallhack = localWallhackActive && !c.isLocal;
+                instance.materialId = (chamsKiller || chamsWallhack) ? 1u : 0u;
 
                 bonePalette.insert(bonePalette.end(), skinMatrices.begin(), skinMatrices.end());
                 skinnedInstances.push_back(instance);
@@ -4610,11 +4685,33 @@ SDL_AppResult Game::iterate()
             }
         });
 
+        // Muzzle-flash point lights — age out transient flashes and emit the
+        // survivors, fading intensity to zero over their lifetime so the flash
+        // pops bright and decays in a few frames.
+        constexpr std::size_t k_maxDynLights = 32;
+        for (auto it = muzzleFlashLights_.begin(); it != muzzleFlashLights_.end();) {
+            it->age += frameTime;
+            if (it->age >= it->lifetime) {
+                it = muzzleFlashLights_.erase(it);
+                continue;
+            }
+            if (dynLights.size() < k_maxDynLights) {
+                const float fade = 1.0f - (it->age / it->lifetime);
+                dynLights.push_back(PointLight{
+                    .position = it->position,
+                    .intensity = it->intensity * fade,
+                    .color = it->color,
+                    .range = 500.0f,
+                });
+            }
+            ++it;
+        }
+
         if (collectPerf) {
             phaseStats.pointLights = static_cast<std::uint32_t>(dynLights.size());
             phaseStats.beamPointLights = beamPointLights;
         }
-        // renderer->setPointLights(std::move(dynLights));
+        renderer->setPointLights(std::move(dynLights));
         /////////////////////////////////////////// Point Lights ///////////////////////////////////////////
     }
     phaseSnap(phaseStats.entityCmdsMs);

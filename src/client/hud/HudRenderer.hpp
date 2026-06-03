@@ -12,6 +12,7 @@
 #include <span>
 
 class SdfAtlas;
+class HudSvgAtlas;
 
 /// @brief Renders batched HUD geometry to an offscreen RGBA8 texture.
 ///
@@ -31,6 +32,7 @@ public:
     bool init(SDL_GPUDevice* device,
               SDL_GPUShaderFormat shaderFormat,
               const SdfAtlas& sdfAtlas,
+              const HudSvgAtlas* svgAtlas,
               uint32_t screenW,
               uint32_t screenH);
 
@@ -79,6 +81,7 @@ private:
     // Samplers (bound to fragment set 1)
     SDL_GPUTexture* sdfAtlasTex_ = nullptr;   ///< Non-owning: from SdfAtlas.
     SDL_GPUSampler* sdfAtlasSamp_ = nullptr;  ///< Non-owning: from SdfAtlas.
+    const HudSvgAtlas* svgAtlas_ = nullptr;   ///< Non-owning: LunaSVG HUD sprite atlas.
     SDL_GPUTexture* iconAtlasTex_ = nullptr;  ///< Owning: 1x1 white fallback until real atlas.
     SDL_GPUSampler* iconAtlasSamp_ = nullptr; ///< Owning.
 

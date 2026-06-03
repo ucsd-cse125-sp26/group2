@@ -20,19 +20,26 @@ enum class AbilityType : uint8_t
     Dash,
     Grapple,
     Gravity,
-    Recall
+    Recall,
+    Levitate, ///< Tier-1: hold to ride a gentle updraft for a few seconds.
+    Wallhack  ///< Tier-2: briefly see enemies through walls (red chams).
 };
 
 inline constexpr std::size_t kAbilityChoicesPerTier = 2;
 
+// Per-match candidate pools. `ServerGame::selectMatchAbilityPool()` draws
+// `kAbilityChoicesPerTier` (2) from each pool to offer at level-up. With a pool
+// of exactly 2, both are always offered. To test Levitate/Wallhack they're
+// slotted in here alongside one familiar option each; widen a pool past 2 to
+// have the match randomly pick which two are offered.
 inline constexpr std::array<AbilityType, kAbilityChoicesPerTier> primaryAbilityTypes = {
+    AbilityType::Levitate,
     AbilityType::Dash,
-    AbilityType::Grapple,
 };
 
 inline constexpr std::array<AbilityType, kAbilityChoicesPerTier> secondaryAbilityTypes = {
+    AbilityType::Wallhack,
     AbilityType::Gravity,
-    AbilityType::Recall,
 };
 
 inline constexpr const char* abilityName(AbilityType type)
@@ -46,6 +53,10 @@ inline constexpr const char* abilityName(AbilityType type)
         return "GRAVITY";
     case AbilityType::Recall:
         return "RECALL";
+    case AbilityType::Levitate:
+        return "LEVITATE";
+    case AbilityType::Wallhack:
+        return "WALLHACK";
     case AbilityType::None:
     default:
         return "LOCKED";
@@ -63,6 +74,10 @@ inline constexpr const char* abilityDescription(AbilityType type)
         return "Flip gravity and fight from the ceiling.";
     case AbilityType::Recall:
         return "Mark a spot, then return to it.";
+    case AbilityType::Levitate:
+        return "Hold to ride a gentle updraft.";
+    case AbilityType::Wallhack:
+        return "See enemies through walls briefly.";
     case AbilityType::None:
     default:
         return "No ability selected.";
@@ -91,6 +106,11 @@ struct AbilityState
     bool recallMarkerSet = false;
     bool recallMarkerGravityFlipped = false;
     glm::vec3 recallMarkerPosition{0.0f};
+
+    /// @brief Wallhack reveal: seconds remaining of the see-through-walls effect.
+    /// Set by WallhackAbility, ticked down by the ability system, replicated to
+    /// the client (which flags enemies for the red chams pass while > 0).
+    float wallhackTimer = 0.0f;
 };
 
 inline bool hasPendingAbilitySelection(const AbilityState& state)

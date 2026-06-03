@@ -86,7 +86,7 @@ bool App::init()
     }
 
     // Create window
-    window = SDL_CreateWindow(k_appName, 1280, 720, SDL_WINDOW_RESIZABLE);
+    window = SDL_CreateWindow(k_appName, 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window) {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
         cleanup();
@@ -129,6 +129,9 @@ bool App::init()
     {
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        // Let a connected controller drive menus/debug UI (pause menu, etc.).
+        // The SDL3 backend feeds gamepad state into ImGui nav each frame.
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     }
     ImGui::StyleColorsDark();
     menu_theme::applyStyle();

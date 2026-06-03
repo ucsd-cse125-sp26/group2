@@ -29,8 +29,8 @@ struct UserSettings
     float horizontalFovDegrees{110.0f};                      ///< Player-facing horizontal camera FOV in degrees.
     bool showControllerBindings{false};                     ///< Settings page shows controller bindings when true.
 
-    float gamepadYawSensitivity{6.0f};                      ///< radians/sec
-    float gamepadPitchSensitivity{6.0f};
+    float gamepadYawSensitivity{4.2f};                      ///< radians/sec (30% below the old 6.0 base; look acceleration ramps it up on sustained turns)
+    float gamepadPitchSensitivity{4.2f};
     float gamepadLookDeadzone{0.12f}; ///< Gamepad look deadzone radius in [0, 1]. Ignores stick drift out of the box.
     float gamepadMoveDeadzone{
         0.18f}; ///< Gamepad move deadzone radius in [0, 1]. Higher than look — drift-walking is worse than drift-aim.

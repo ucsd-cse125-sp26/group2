@@ -11,6 +11,11 @@
 namespace Boilerplate
 {
 
+namespace
+{
+constexpr Uint32 kMaxCubeArrayLayersForMetal = 336;
+}
+
 ImGui_ImplSDLGPU3_InitInfo createImGuiInfo(SDL_GPUDevice* device, SDL_Window* window)
 {
     ImGui_ImplSDLGPU3_InitInfo info{};
@@ -346,6 +351,17 @@ void uploadBuffers(SDL_GPUDevice* device, SDL_GPUCommandBuffer* cmd, const std::
 SDL_GPUTexture* createEmptyTextureD32F(SDL_GPUDevice* device, Uint32 width, Uint32 height, bool cube, Uint32 arraySize)
 {
     SDL_GPUTextureCreateInfo textureInfo{};
+    if (cube) {
+        const Uint32 maxCubeEntries = kMaxCubeArrayLayersForMetal / 6u;
+        if (arraySize > maxCubeEntries) {
+            SDL_Log("createEmptyTextureD32F: clamping cube-array entries from %u to %u to stay within Metal "
+                    "texture array limits",
+                    static_cast<unsigned>(arraySize),
+                    static_cast<unsigned>(maxCubeEntries));
+            arraySize = maxCubeEntries;
+        }
+    }
+
     const bool array = arraySize > 1;
 
     if (cube) {
