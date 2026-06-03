@@ -279,3 +279,19 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+/// @brief Grounding reference that aligns the IDLE pose's feet with the floor.
+///
+/// The renderer grounds a character by aligning the rig's bind-pose lowest
+/// vertex (`bindMeshMinY`) with the bottom of the collision AABB. Mixamo clips
+/// bend the knees slightly, so the *animated* feet sit a constant amount above
+/// the straight-legged T-pose bind — grounding off the bind makes every clip
+/// appear lifted by that amount. This samples the Idle clip once and returns
+/// `bindMeshMinY` shifted by the idle-vs-bind foot-joint Y delta, so all clips
+/// (which share the idle floor reference) sit on the ground. Falls back to
+/// `bindMeshMinY` if the rig has no recognisable foot joints or no Idle clip.
+///
+/// @param orientationFix  Same rotation passed to CharacterRig::loadFromFBX,
+///        so the bind foot positions are measured in the rendered frame.
+[[nodiscard]] float computeIdleGroundedMinY(const CharacterRig& rig, const AnimationLibrary& library,
+                                            const glm::quat& orientationFix, float bindMeshMinY);

@@ -1461,20 +1461,37 @@ bool Game::init(AppContext& ctx)
                         static_cast<double>(kRigVerticalOffset_));
             }
 
-            // Load every animation clip onto the shared skeleton.
-            // Rotation-only retargeting: character_rigged_new has different
-            // proportions/up-axis than the clips' source skeleton, so take
-            // bone lengths from this rig (keeps it grounded) and rotations
-            // from the clips.
+            // Load every animation clip onto the shared skeleton. The rig is a
+            // standard Mixamo skeleton matching the clips, so use the clips'
+            // full translations (only scaled to the rig's units by clipScale in
+            // loadClipFromFBX). This preserves authored hip/root vertical motion
+            // so crouch/slide lower the body and the feet stay on the floor.
             for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
                 const ClipId id = static_cast<ClipId>(i);
                 const std::string clipPath = assetsDir + clipFile(id);
-                if (!animLibrary_.loadClipFromFBX(charRig_, id, clipPath, /*useRigRestTranslations=*/true)) {
+                if (!animLibrary_.loadClipFromFBX(charRig_, id, clipPath)) {
                     SDL_Log("[client] WARNING: failed to load clip '%s'", clipName(id));
                     continue;
                 }
                 SDL_Log(
                     "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
+            }
+
+            // Ground off the IDLE pose, not the T-pose bind. The clips bend the
+            // knees slightly, so the animated feet sit a constant amount above
+            // the straight-legged bind — grounding off the bind lifts every clip
+            // by that amount. Re-reference the grounding min-Y to the idle feet
+            // (now that clips are loaded) and recompute the vertical offset.
+            {
+                const float groundedMinY =
+                    computeIdleGroundedMinY(charRig_, animLibrary_, rigOrientationFix, rigMeshMinY_);
+                if (groundedMinY != rigMeshMinY_) {
+                    SDL_Log("[client] rig grounding: idle-referenced minY %.3f -> %.3f",
+                            static_cast<double>(rigMeshMinY_),
+                            static_cast<double>(groundedMinY));
+                    rigMeshMinY_ = groundedMinY;
+                    kRigVerticalOffset_ = -tms::k_standingHalfHeight - rigMeshMinY_ * kRigScale_;
+                }
             }
 
             // Cache the right-hand bone index. The third-person weapon mesh

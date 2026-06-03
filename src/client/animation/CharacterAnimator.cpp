@@ -25,11 +25,15 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <glm/mat4x4.hpp>
 #include <initializer_list>
+#include <limits>
+#include <vector>
 
 namespace
 {
@@ -1602,4 +1606,50 @@ void CharacterAnimator::computeSkinnedVertices(std::vector<std::vector<ModelVert
     for (size_t m = 0; m < meshes.size(); ++m) {
         impl_->skinner->skin(impl_->skinMats, meshes[m].baseVertices, meshes[m].skinWeights, out[m]);
     }
+}
+
+float computeIdleGroundedMinY(const CharacterRig& rig, const AnimationLibrary& library,
+                              const glm::quat& /*orientationFix*/, float bindMeshMinY)
+{
+    if (!rig.isLoaded() || !library.has(ClipId::Idle))
+        return bindMeshMinY;
+
+    // Sample the actual displayed IDLE pose. The character never renders at the
+    // T-pose bind — it always plays a clip, and Mixamo clips reposition the
+    // skeleton (the hip/root sits at the clip's floor reference, not the bind
+    // mesh's), which lifts the whole body off the ground. Settle a throwaway
+    // animator into Idle over several frames (so the mode crossfade + override
+    // time stabilise), then take the lowest *skinned* vertex — that is exactly
+    // where the rendered feet land. No skinning backend is needed: skinMatrices()
+    // is the LBS palette, populated by update().
+    CharacterAnimator probe(rig, library);
+    probe.setDebugOverride(ClipId::Idle);
+    AnimationInputs in{};
+    in.grounded = true;
+    for (int i = 0; i < 30; ++i)
+        probe.update(in, 1.0f / 30.0f);
+
+    const std::vector<glm::mat4>& palette = probe.skinMatrices();
+    if (palette.empty())
+        return bindMeshMinY;
+
+    float minY = std::numeric_limits<float>::max();
+    for (const RigMeshData& mesh : rig.meshes()) {
+        for (size_t v = 0; v < mesh.baseVertices.size(); ++v) {
+            const glm::vec4 p(mesh.baseVertices[v].position, 1.0f);
+            const SkinWeight& w = mesh.skinWeights[v];
+            glm::vec3 skinned(0.0f);
+            for (int k = 0; k < 4; ++k) {
+                if (w.weights[k] <= 0.0f)
+                    continue;
+                const int b = w.boneIndices[k];
+                if (b < 0 || b >= static_cast<int>(palette.size()))
+                    continue;
+                skinned += w.weights[k] * glm::vec3(palette[static_cast<size_t>(b)] * p);
+            }
+            minY = std::min(minY, skinned.y);
+        }
+    }
+
+    return (minY == std::numeric_limits<float>::max()) ? bindMeshMinY : minY;
 }
