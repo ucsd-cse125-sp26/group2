@@ -1277,8 +1277,9 @@ bool Game::init(AppContext& ctx)
         // viewmodel muzzle; for everyone else use the shot's muzzle origin.
         if (evt.effectType == ParticleEffectType::BulletTracer ||
             evt.effectType == ParticleEffectType::HitscanBeam) {
-            const glm::vec3 flashPos =
-                (evt.source == localPlayer && cachedMuzzleValid_) ? cachedMuzzleWorld_ : evtOrigin;
+            // Local player: 10 units ahead of the right palm along the view dir
+            // (muzzleFlashOrigin). Remote players: the shot's muzzle origin.
+            const glm::vec3 flashPos = (evt.source == localPlayer) ? muzzleFlashOrigin(evtOrigin) : evtOrigin;
             spawnMuzzleFlashLight(flashPos);
         }
 
@@ -3122,8 +3123,9 @@ SDL_AppResult Game::iterate()
                 // Muzzle-flash point light for the local player's own shot.
                 // Spawned here (not in onRawParticleEvent) because the server
                 // echo of our own non-charge fire is skipped for instant local
-                // feedback — see the early return in onRawParticleEvent.
-                spawnMuzzleFlashLight(hip);
+                // feedback — see the early return in onRawParticleEvent. Origin
+                // is 10 units ahead of the right palm along the view direction.
+                spawnMuzzleFlashLight(muzzleFlashOrigin(hip));
 
                 // Visual recoil kick (viewmodel-only).
                 // Third-person recoil happens via the WeaponFiredEvent
@@ -5150,6 +5152,7 @@ SDL_AppResult Game::iterate()
             vm.transform = weaponWorld;
             const auto& fpHands = fpHandMountParams_[static_cast<int>(currentEquippedType_)];
             const Asset::Model* currentWeaponModel = modelFromRendererIndex(currentWeaponModelIdx);
+            cachedRightPalmValid_ = false;
             if (viewmodelRightHandModelIdx_ >= 0) {
                 vm.hands.right.modelIndex = viewmodelRightHandModelIdx_;
                 vm.hands.right.visible = true;
@@ -5160,6 +5163,10 @@ SDL_AppResult Game::iterate()
                                                                       "ik_r_palm",
                                                                       fpHands.rightArm.palm,
                                                                       fpHands.scale);
+                // Cache the right palm's world position (translation column) so
+                // the muzzle flash can spawn relative to it (see muzzleFlashOrigin).
+                cachedRightPalmWorld_ = glm::vec3(vm.hands.right.transform[3]);
+                cachedRightPalmValid_ = true;
             }
             if (viewmodelLeftHandModelIdx_ >= 0) {
                 vm.hands.left.modelIndex = viewmodelLeftHandModelIdx_;

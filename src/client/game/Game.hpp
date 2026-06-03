@@ -772,6 +772,20 @@ private:
     glm::vec3 cachedMuzzleWorld_{0.0f};
     bool cachedMuzzleValid_ = false;
 
+    // Local player's right-palm world position, cached from the viewmodel pass
+    // each frame. Used as the muzzle-flash origin (see muzzleFlashOrigin).
+    glm::vec3 cachedRightPalmWorld_{0.0f};
+    bool cachedRightPalmValid_ = false;
+
+    /// @brief World position to spawn the local player's muzzle flash: 10 units
+    /// in front of the right palm along the current view direction, falling back
+    /// to @p fallback (the weapon muzzle) when the palm position isn't available.
+    [[nodiscard]] glm::vec3 muzzleFlashOrigin(const glm::vec3& fallback) const
+    {
+        constexpr float k_muzzleFlashForward = 10.0f;
+        return cachedRightPalmValid_ ? cachedRightPalmWorld_ + cachedCamFwd_ * k_muzzleFlashForward : fallback;
+    }
+
     // Transient muzzle-flash point lights. One is spawned at the muzzle world
     // position on every fire event (see onRawParticleEvent) and faded out over
     // a short lifetime in iterate(), where the surviving lights are pushed into
