@@ -28,18 +28,12 @@ namespace systems
 
 /// @brief Tracks previous-frame key state for edge detection.
 inline bool prevKillSelfKey = false;
-/// @brief Tracks previous-frame G (CycleGrenade) key state for tap-throw vs hold-cycle.
-inline bool prevGrenadeKey = false;
-/// @brief True once a cycle (next/prev) fired during the current G hold — suppresses throw on release.
-inline bool grenadeCycledThisHold = false;
-/// @brief Previous-frame Shoot/Scope state while G held, for cycle edge detection (keyboard/mouse).
-inline bool prevGrenadeCycleNext = false;
-inline bool prevGrenadeCyclePrev = false;
-/// @brief Gamepad equivalents of the above for the hold-(D-pad Left) + RT/LT cycle chord.
-inline bool prevGamepadGrenadeKey = false;
-inline bool gamepadGrenadeCycledThisHold = false;
-inline bool prevGamepadGrenadeCycleNext = false;
-inline bool prevGamepadGrenadeCyclePrev = false;
+/// @brief Previous-frame CycleGrenade (H) / ThrowGrenade (G) key state for edge detection (keyboard/mouse).
+inline bool prevGrenadeCycleKey = false;
+inline bool prevGrenadeThrowKey = false;
+/// @brief Gamepad equivalents: CycleGrenade (D-pad Left) / ThrowGrenade (B).
+inline bool prevGamepadGrenadeCycleKey = false;
+inline bool prevGamepadGrenadeThrowKey = false;
 /// @brief Latched throw request, consumed once per frame by the game loop.
 inline bool pendingGrenadeThrow = false;
 /// @brief Latched cycle next/prev requests, consumed once per frame by the game loop.
@@ -339,42 +333,25 @@ inline void runWeaponKeys(Registry& registry, const InputBindings& bindings)
     prevAbilitySelectLeft = selectLeftNow;
     prevAbilitySelectRight = selectRightNow;
 
-    // Grenade: hold CycleGrenade (G) as a modifier. While held, Shoot cycles to
-    // the next grenade and Scope to the previous (both edge-triggered and
-    // suppressed from firing). A quick tap of G with no cycle throws the
-    // selected grenade — detected as a release where no cycle fired this hold.
-    // Cycle/throw requests are latched here and pulsed once per frame by the
-    // game loop (mirrors throwGrenade) so the server applies each exactly once.
-    const bool grenadeKeyNow = bindings.pressed(Action::CycleGrenade, kKeys, mouse);
-    if (grenadeKeyNow) {
-        if (!prevGrenadeKey) {
-            grenadeCycledThisHold = false;
-        }
-        const bool cycleNextNow = shootDown && !abilityMenuHeld;
-        const bool cyclePrevNow = scopeDown && !abilityMenuHeld;
-        if (cycleNextNow && !prevGrenadeCycleNext) {
-            pendingGrenadeCycleNext = true;
-            grenadeCycledThisHold = true;
-        }
-        if (cyclePrevNow && !prevGrenadeCyclePrev) {
-            pendingGrenadeCyclePrev = true;
-            grenadeCycledThisHold = true;
-        }
-        prevGrenadeCycleNext = cycleNextNow;
-        prevGrenadeCyclePrev = cyclePrevNow;
-    } else {
-        if (prevGrenadeKey && !grenadeCycledThisHold) {
-            pendingGrenadeThrow = true;
-        }
-        prevGrenadeCycleNext = false;
-        prevGrenadeCyclePrev = false;
+    // Grenade: discrete keys. Press CycleGrenade (H) to advance to the next
+    // grenade type with ammo; press ThrowGrenade (G) to throw the selected one.
+    // Both are edge-triggered (rising edge only) and latched here, pulsed once
+    // per frame by the game loop so the server applies each exactly once.
+    const bool grenadeCycleNow = bindings.pressed(Action::CycleGrenade, kKeys, mouse);
+    if (grenadeCycleNow && !prevGrenadeCycleKey) {
+        pendingGrenadeCycleNext = true;
     }
-    prevGrenadeKey = grenadeKeyNow;
+    prevGrenadeCycleKey = grenadeCycleNow;
 
-    // Suppress fire/aim while the grenade modifier is held — Shoot/Scope are
-    // repurposed for cycling, exactly as AbilityMenu repurposes them for ability
-    // selection. Also suppress while the emote wheel is open.
-    const bool fireSuppressed = abilityMenuHeld || grenadeKeyNow || emoteWheelOpen;
+    const bool grenadeThrowNow = bindings.pressed(Action::ThrowGrenade, kKeys, mouse);
+    if (grenadeThrowNow && !prevGrenadeThrowKey) {
+        pendingGrenadeThrow = true;
+    }
+    prevGrenadeThrowKey = grenadeThrowNow;
+
+    // Suppress fire/aim while the ability menu is held (Shoot/Scope are
+    // repurposed for ability selection) or while the emote wheel is open.
+    const bool fireSuppressed = abilityMenuHeld || emoteWheelOpen;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.shooting = shootDown && !fireSuppressed;
@@ -625,7 +602,6 @@ inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const Inp
     const bool padPickup = bindings.controllerPressed(Action::Pickup, gamepad);
     const bool padPrimary = bindings.controllerPressed(Action::SwitchToPrimary, gamepad);
     const bool padSecondary = bindings.controllerPressed(Action::SwitchToSecondary, gamepad);
-    const bool padCycleGrenade = bindings.controllerPressed(Action::CycleGrenade, gamepad);
     const bool selectLeftNow = abilityMenuHeld && padShoot;
     const bool selectRightNow = abilityMenuHeld && padScope;
     const bool selectLeftEdge = selectLeftNow && !prevGamepadAbilitySelectLeft;
@@ -633,37 +609,23 @@ inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const Inp
     prevGamepadAbilitySelectLeft = selectLeftNow;
     prevGamepadAbilitySelectRight = selectRightNow;
 
-    // Grenade: mirror of the keyboard hold-G chord. Hold CycleGrenade (D-pad
-    // Left) as a modifier; Right Trigger (Shoot) cycles next, Left Trigger
-    // (Scope) cycles previous; a tap with no cycle throws. Latches feed the same
-    // once-per-frame pulse as the keyboard path.
-    if (padCycleGrenade) {
-        if (!prevGamepadGrenadeKey) {
-            gamepadGrenadeCycledThisHold = false;
-        }
-        const bool cycleNextNow = padShoot && !abilityMenuHeld;
-        const bool cyclePrevNow = padScope && !abilityMenuHeld;
-        if (cycleNextNow && !prevGamepadGrenadeCycleNext) {
-            pendingGrenadeCycleNext = true;
-            gamepadGrenadeCycledThisHold = true;
-        }
-        if (cyclePrevNow && !prevGamepadGrenadeCyclePrev) {
-            pendingGrenadeCyclePrev = true;
-            gamepadGrenadeCycledThisHold = true;
-        }
-        prevGamepadGrenadeCycleNext = cycleNextNow;
-        prevGamepadGrenadeCyclePrev = cyclePrevNow;
-    } else {
-        if (prevGamepadGrenadeKey && !gamepadGrenadeCycledThisHold) {
-            pendingGrenadeThrow = true;
-        }
-        prevGamepadGrenadeCycleNext = false;
-        prevGamepadGrenadeCyclePrev = false;
+    // Grenade: discrete buttons mirroring the keyboard path. D-pad Left cycles
+    // to the next grenade type with ammo; B (East) throws the selected one.
+    // Both edge-triggered and latched into the same once-per-frame pulse.
+    const bool padCycleGrenade = bindings.controllerPressed(Action::CycleGrenade, gamepad);
+    if (padCycleGrenade && !prevGamepadGrenadeCycleKey) {
+        pendingGrenadeCycleNext = true;
     }
-    prevGamepadGrenadeKey = padCycleGrenade;
+    prevGamepadGrenadeCycleKey = padCycleGrenade;
 
-    // Suppress fire/aim while either modifier (ability menu or grenade) is held.
-    const bool fireSuppressed = abilityMenuHeld || padCycleGrenade;
+    const bool padThrowGrenade = bindings.controllerPressed(Action::ThrowGrenade, gamepad);
+    if (padThrowGrenade && !prevGamepadGrenadeThrowKey) {
+        pendingGrenadeThrow = true;
+    }
+    prevGamepadGrenadeThrowKey = padThrowGrenade;
+
+    // Suppress fire/aim while the ability menu modifier is held.
+    const bool fireSuppressed = abilityMenuHeld;
 
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         snap.shooting |= padShoot && !fireSuppressed;

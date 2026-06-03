@@ -464,6 +464,22 @@ static void spawnGrenade(Registry& registry,
     registry.emplace<CollisionShape>(proj, CollisionShape{.halfExtents = {5.0f, 5.0f, 5.0f}});
 }
 
+/// @brief Find the next grenade type index (wrapping in direction @p dir, +1 or
+/// -1) that still has ammo, starting the search one step away from @p start.
+/// Returns @p start when no other type has ammo (including when @p start itself
+/// is the only one with ammo, or none do).
+inline int nextGrenadeWithAmmo(const GrenadeState& grenades, int start, int dir)
+{
+    const int count = static_cast<int>(kGrenadeTypeCount);
+    for (int step = 1; step <= count; ++step) {
+        const int idx = (((start + dir * step) % count) + count) % count;
+        if (grenades.ammo[static_cast<std::size_t>(idx)] > 0) {
+            return idx;
+        }
+    }
+    return start;
+}
+
 inline void handleGrenadeInput(Registry& registry,
                                entt::entity shooter,
                                InputSnapshot& input,
@@ -472,15 +488,14 @@ inline void handleGrenadeInput(Registry& registry,
                                GrenadeState& grenades,
                                bool gravityFlipped)
 {
-    // Cycle the selected grenade type. next/prev are edge-pulsed once per input
-    // and consumed here so the selection advances exactly one step.
+    // Cycle the selected grenade type, skipping types the player has no ammo
+    // for. next/prev are edge-pulsed once per input and consumed here so the
+    // selection advances exactly one held-ammo step. If no other type has ammo
+    // the selection stays put.
     if (input.grenadeCycleNext || input.grenadeCyclePrev) {
-        const int count = static_cast<int>(kGrenadeTypeCount);
-        int index = static_cast<int>(grenadeTypeIndex(grenades.selected));
-        index += input.grenadeCycleNext ? 1 : 0;
-        index -= input.grenadeCyclePrev ? 1 : 0;
-        index = ((index % count) + count) % count;
-        grenades.selected = grenadeTypeAt(static_cast<std::size_t>(index));
+        const int dir = input.grenadeCyclePrev ? -1 : 1;
+        const int start = static_cast<int>(grenadeTypeIndex(grenades.selected));
+        grenades.selected = grenadeTypeAt(static_cast<std::size_t>(nextGrenadeWithAmmo(grenades, start, dir)));
         input.grenadeCycleNext = false;
         input.grenadeCyclePrev = false;
     }
@@ -514,6 +529,13 @@ inline void handleGrenadeInput(Registry& registry,
     spawnGrenade(registry, shooter, type, muzzle, direction, eyeRight, inheritVel);
     grenades.cooldown = getGrenadeConfig(type).throwCooldown;
     --grenadeAmmo(grenades, type);
+
+    // Auto-cycle to the next grenade type that still has ammo when this one runs
+    // dry, so the player is never left holding an empty type.
+    if (grenadeAmmo(grenades, type) <= 0) {
+        const int start = static_cast<int>(grenadeTypeIndex(grenades.selected));
+        grenades.selected = grenadeTypeAt(static_cast<std::size_t>(nextGrenadeWithAmmo(grenades, start, 1)));
+    }
 }
 
 inline void

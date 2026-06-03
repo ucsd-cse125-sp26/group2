@@ -129,6 +129,9 @@ bool App::init()
     {
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        // Let a connected controller drive menus/debug UI (pause menu, etc.).
+        // The SDL3 backend feeds gamepad state into ImGui nav each frame.
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     }
     ImGui::StyleColorsDark();
     menu_theme::applyStyle();

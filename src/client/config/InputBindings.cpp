@@ -313,21 +313,27 @@ InputBindings InputBindings::defaults()
     b.rebind(Action::SwitchToSecondary, Binding::bindKeyboard(SDL_SCANCODE_2));
     b.rebind(Action::PreviousWeapon, Binding::bindMouseWheel(MouseWheelDirection::Up));
     b.rebind(Action::NextWeapon, Binding::bindMouseWheel(MouseWheelDirection::Down));
-    b.rebind(Action::CycleGrenade, Binding::bindKeyboard(SDL_SCANCODE_G));
+    b.rebind(Action::CycleGrenade, Binding::bindKeyboard(SDL_SCANCODE_H));
+    b.rebind(Action::ThrowGrenade, Binding::bindKeyboard(SDL_SCANCODE_G));
     b.rebind(Action::KillSelf, Binding::bindKeyboard(SDL_SCANCODE_K));
     b.rebind(Action::Scoreboard, Binding::bindKeyboard(SDL_SCANCODE_TAB));
     b.rebind(Action::Emote, Binding::bindKeyboard(SDL_SCANCODE_B));
     b.rebind(Action::PushToTalk, Binding::bindKeyboard(SDL_SCANCODE_V));
 
-    // Controller — standard twin-stick console-FPS layout. Triggers fire/aim,
-    // face buttons handle jump/crouch/reload/interact, bumpers run abilities,
-    // and the D-pad covers weapon swap / grenade / ability menu.
+    // Controller — twin-stick console-FPS layout. Triggers fire/aim; face
+    // buttons handle jump (A) / throw grenade (B) / reload (X) / weapon swap (Y);
+    // bumpers run abilities; the D-pad covers weapon swap and grenade cycle /
+    // ability menu. Sticks click for crouch (L3) and a second jump (R3). The
+    // menu buttons open the scoreboard (left/Back) and pause menu (right/Start).
     b.rebind(Action::Shoot, Binding::bindGamepadAxis(GamepadAxisBinding::RightTrigger), BindingDevice::Controller);
     b.rebind(Action::Scope, Binding::bindGamepadAxis(GamepadAxisBinding::LeftTrigger), BindingDevice::Controller);
     b.rebind(Action::Jump, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_SOUTH), BindingDevice::Controller);
-    b.rebind(Action::Crouch, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_EAST), BindingDevice::Controller);
+    // R3 (right stick click) duplicates jump as a second binding slot.
+    b.rebind(Action::Jump, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_STICK), BindingDevice::Controller, 1);
+    b.rebind(Action::ThrowGrenade, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_EAST), BindingDevice::Controller);
     b.rebind(Action::Reload, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_WEST), BindingDevice::Controller);
-    b.rebind(Action::Pickup, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_NORTH), BindingDevice::Controller);
+    b.rebind(Action::NextWeapon, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_NORTH), BindingDevice::Controller);
+    b.rebind(Action::Crouch, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_LEFT_STICK), BindingDevice::Controller);
     b.rebind(Action::Ability1, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER), BindingDevice::Controller);
     b.rebind(
         Action::Ability2, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), BindingDevice::Controller);
@@ -338,8 +344,6 @@ InputBindings InputBindings::defaults()
     b.rebind(Action::CycleGrenade, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_LEFT), BindingDevice::Controller);
     b.rebind(Action::AbilityMenu, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_RIGHT), BindingDevice::Controller);
     b.rebind(Action::Scoreboard, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_BACK), BindingDevice::Controller);
-    b.rebind(Action::Emote, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_STICK), BindingDevice::Controller);
-    b.rebind(Action::PushToTalk, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_LEFT_STICK), BindingDevice::Controller);
 
     return b;
 }
@@ -383,6 +387,8 @@ std::string_view InputBindings::actionLabel(Action a)
         return "Next Weapon";
     case Action::CycleGrenade:
         return "Cycle Grenade";
+    case Action::ThrowGrenade:
+        return "Throw Grenade";
     case Action::KillSelf:
         return "Kill Self";
     case Action::Scoreboard:
@@ -436,6 +442,8 @@ std::string_view InputBindings::configKey(Action a)
         return "next-weapon";
     case Action::CycleGrenade:
         return "cycle-grenade";
+    case Action::ThrowGrenade:
+        return "throw-grenade";
     case Action::KillSelf:
         return "kill-self";
     case Action::Scoreboard:

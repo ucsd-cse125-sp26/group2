@@ -1730,15 +1730,11 @@ void Game::clearGameplayInputForChat()
     systems::pendingGrenadeThrow = false;
     systems::pendingGrenadeCycleNext = false;
     systems::pendingGrenadeCyclePrev = false;
-    systems::grenadeCycledThisHold = false;
-    systems::prevGrenadeCycleNext = false;
-    systems::prevGrenadeCyclePrev = false;
-    systems::prevGamepadGrenadeKey = false;
-    systems::gamepadGrenadeCycledThisHold = false;
-    systems::prevGamepadGrenadeCycleNext = false;
-    systems::prevGamepadGrenadeCyclePrev = false;
+    systems::prevGrenadeCycleKey = false;
+    systems::prevGrenadeThrowKey = false;
+    systems::prevGamepadGrenadeCycleKey = false;
+    systems::prevGamepadGrenadeThrowKey = false;
     systems::prevKillSelfKey = false;
-    systems::prevGrenadeKey = false;
     systems::prevAbilitySelectLeft = false;
     systems::prevAbilitySelectRight = false;
     systems::prevGamepadAbilitySelectLeft = false;
@@ -2004,11 +2000,35 @@ SDL_AppResult Game::event(SDL_Event* event)
         }
     }
 
+    // Gamepad Start (right menu button) toggles the pause menu, mirroring ESC.
+    if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && event->gbutton.button == SDL_GAMEPAD_BUTTON_START) {
+        if (pauseMenu.isOpen()) {
+            if (pauseMenu.handleEscape()) {
+                pauseMenu.close();
+                mouseCaptured = true;
+                SDL_SetWindowRelativeMouseMode(window, true);
+                clearGameplayInputForChat();
+            }
+        } else {
+            pauseMenu.open();
+            mouseCaptured = false;
+            SDL_SetWindowRelativeMouseMode(window, false);
+            centerMouseInWindow(window);
+            clearGameplayInputForChat();
+        }
+        return SDL_APP_CONTINUE;
+    }
+
     if (pauseMenu.consumeEvent(*event))
         return SDL_APP_CONTINUE;
 
-    // Configurable wheel/button events can toggle between primary and secondary weapon slots.
-    if (event->type == SDL_EVENT_MOUSE_WHEEL && mouseCaptured && userSettings) {
+    // Configurable wheel/button events can toggle between primary and secondary
+    // weapon slots. Mouse wheel (KBM) and gamepad buttons (e.g. Y/North) both
+    // route through eventMatches; NextWeapon flips to the other slot, acting as
+    // a single "toggle gun" press on the controller.
+    if ((event->type == SDL_EVENT_MOUSE_WHEEL || event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) && mouseCaptured &&
+        userSettings)
+    {
         bool down = false;
         if (userSettings->inputBindings.eventMatches(Action::PreviousWeapon, *event, down) && down)
             pendingScrollSwitch_ = -1;
