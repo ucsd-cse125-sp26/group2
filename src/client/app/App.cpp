@@ -7,10 +7,10 @@
 #include "game/Game.hpp"
 #include "host/HostedServer.hpp"
 #include "menus/MenuTheme.hpp"
-#include "menus/home/Home.hpp"
 #include "menus/host/HostConfig.hpp"
 #include "menus/lobby/Lobby.hpp"
 #include "menus/main/MainMenu.hpp"
+#include "menus/title/TitleScreen.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
 
@@ -170,14 +170,14 @@ bool App::init()
         current = Screen::InGame;
     } else {
         AppContext ctx = screenContext();
-        auto mainMenu = std::make_unique<MainMenu>();
-        if (!mainMenu->init(ctx)) {
-            mainMenu->quit();
+        auto titleScreen = std::make_unique<TitleScreen>();
+        if (!titleScreen->init(ctx)) {
+            titleScreen->quit();
             cleanup();
             return false;
         }
-        screen_ = std::move(mainMenu);
-        current = Screen::MainMenu;
+        screen_ = std::move(titleScreen);
+        current = Screen::TitleScreen;
     }
 
     return true;
@@ -199,33 +199,33 @@ SDL_AppResult App::iterate()
         return result;
 
     switch (current) {
-    case Screen::MainMenu: {
-        auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get());
-        if (!mainMenu)
+    case Screen::TitleScreen: {
+        auto* titleScreen = dynamic_cast<TitleScreen*>(screen_.get());
+        if (!titleScreen)
             break;
 
-        if (mainMenu->consumeExitRequest()) {
+        if (titleScreen->consumeExitRequest()) {
             return SDL_APP_SUCCESS;
         }
-        if (mainMenu->consumePlayRequest()) {
-            transitionTo(Screen::Home);
+        if (titleScreen->consumePlayRequest()) {
+            transitionTo(Screen::MainMenu);
             break;
         }
-        if (mainMenu->consumeHostRequest()) {
+        if (titleScreen->consumeHostRequest()) {
             transitionTo(Screen::HostConfig);
             break;
         }
         break;
     }
-    case Screen::Home: {
-        auto home = dynamic_cast<Home*>(screen_.get());
-        if (!home)
+    case Screen::MainMenu: {
+        auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get());
+        if (!mainMenu)
             break;
-        if (home->consumeReturnToMenuRequest()) {
-            transitionTo(Screen::MainMenu);
+        if (mainMenu->consumeReturnToTitleScreenRequest()) {
+            transitionTo(Screen::TitleScreen);
             break;
         }
-        if (auto joinRequest = home->consumeJoinRequest()) {
+        if (auto joinRequest = mainMenu->consumeJoinRequest()) {
             std::string serverIp = joinRequest->serverIp;
             uint16_t serverPort = joinRequest->serverPort;
             std::optional<net::UdpSessionTransport::RelayConfig> relayConfig;
@@ -293,7 +293,7 @@ SDL_AppResult App::iterate()
                         serverIp.c_str(),
                         serverPort,
                         connectErrorLogName(connectError));
-                home->setJoinError(joinErrorMessage(connectError));
+                mainMenu->setJoinError(joinErrorMessage(connectError));
             } else {
                 SDL_Log("Successfully connected to server at %s:%d", serverIp.c_str(), serverPort);
                 currentServerName = joinRequest->serverName.empty() ? serverIp : joinRequest->serverName;
@@ -301,7 +301,7 @@ SDL_AppResult App::iterate()
             }
         }
 
-        if (home->consumeHostRequest()) {
+        if (mainMenu->consumeHostRequest()) {
             transitionTo(Screen::HostConfig);
         }
         break;
@@ -356,12 +356,12 @@ SDL_AppResult App::iterate()
             break;
         }
 
-        if (hostConfig->consumeBackToHomeRequest()) {
+        if (hostConfig->consumeBackToMainMenuRequest()) {
             if (hostedServer.isRunning()) {
                 shutdownHostedServerGracefully();
             }
             client.shutdown();
-            transitionTo(Screen::Home);
+            transitionTo(Screen::MainMenu);
         }
         break;
     }
@@ -383,8 +383,8 @@ SDL_AppResult App::iterate()
             client.shutdown();
 
             if (showServerShutdownNotice) {
-                transitionTo(Screen::Home);
-                showHomePopupMessage("Server shutdown");
+                transitionTo(Screen::MainMenu);
+                showMainMenuPopupMessage("Server shutdown");
             } else {
                 transitionTo(Screen::MainMenu);
             }
@@ -409,8 +409,8 @@ SDL_AppResult App::iterate()
             }
             client.shutdown();
             if (showServerShutdownNotice) {
-                transitionTo(Screen::Home);
-                showHomePopupMessage("Server shutdown");
+                transitionTo(Screen::MainMenu);
+                showMainMenuPopupMessage("Server shutdown");
             } else {
                 transitionTo(Screen::MainMenu);
             }
@@ -448,13 +448,13 @@ void App::transitionTo(Screen next)
 
     AppContext ctx = screenContext();
     switch (next) {
-    case Screen::MainMenu: {
-        auto mainMenu = std::make_unique<MainMenu>();
-        if (mainMenu->init(ctx)) {
-            screen_ = std::move(mainMenu);
+    case Screen::TitleScreen: {
+        auto titleScreen = std::make_unique<TitleScreen>();
+        if (titleScreen->init(ctx)) {
+            screen_ = std::move(titleScreen);
             current = next;
         } else {
-            mainMenu->quit();
+            titleScreen->quit();
         }
         break;
     }
@@ -488,13 +488,13 @@ void App::transitionTo(Screen next)
         }
         break;
     }
-    case Screen::Home: {
-        auto homeScreen = std::make_unique<Home>();
-        if (homeScreen->init(ctx)) {
-            screen_ = std::move(homeScreen);
+    case Screen::MainMenu: {
+        auto mainMenu = std::make_unique<MainMenu>();
+        if (mainMenu->init(ctx)) {
+            screen_ = std::move(mainMenu);
             current = next;
         } else {
-            homeScreen->quit();
+            mainMenu->quit();
         }
         break;
     }
@@ -551,11 +551,11 @@ AppContext App::screenContext()
     };
 }
 
-void App::showHomePopupMessage(const std::string& message)
+void App::showMainMenuPopupMessage(const std::string& message)
 {
-    auto* home = dynamic_cast<Home*>(screen_.get());
-    if (home) {
-        home->setPopupMessage(message);
+    auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get());
+    if (mainMenu) {
+        mainMenu->setPopupMessage(message);
     }
 }
 

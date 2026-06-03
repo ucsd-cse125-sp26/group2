@@ -23,11 +23,11 @@ struct HostConfigUIInputs
 /// @brief User actions emitted by the host-configuration UI for one frame.
 struct HostConfigResult
 {
-    bool launchClicked = false;     ///< True if the user pressed "Launch" this frame.
-    bool updateClicked = false;     ///< True if the user pressed "Update Settings" this frame.
-    bool shutdownClicked = false;   ///< True if the user pressed "Shutdown" this frame.
-    bool goToLobbyClicked = false;  ///< True if the user wants to enter the lobby.
-    bool backToHomeClicked = false; ///< True if the user wants to return to the home screen.
+    bool launchClicked = false;         ///< True if the user pressed "Launch" this frame.
+    bool updateClicked = false;         ///< True if the user pressed "Update Settings" this frame.
+    bool shutdownClicked = false;       ///< True if the user pressed "Shutdown" this frame.
+    bool goToLobbyClicked = false;      ///< True if the user wants to enter the lobby.
+    bool backToMainMenuClicked = false; ///< True if the user wants to return to the main menu.
 };
 
 namespace host_config_ui

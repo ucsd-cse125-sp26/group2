@@ -37,8 +37,8 @@ public:
     /// @brief True if the user requested entering the hosted lobby, then clear that request.
     bool consumeGoToLobbyRequest();
 
-    /// @brief True if the user requested returning home, then clear that request.
-    bool consumeBackToHomeRequest();
+    /// @brief True if the user requested returning to the main menu, then clear that request.
+    bool consumeBackToMainMenuRequest();
 
     /// @brief Current host-screen draft settings.
     HostConfigState draftConfig() const;
@@ -79,8 +79,8 @@ private:
     std::optional<DiscoverySettings> lastSyncedDiscoverySettings; ///< Last discovery settings acknowledged locally.
     ConfirmModal confirm_; ///< Reusable confirmation modal for discarding unsaved changes.
     PendingConfirmAction pendingConfirmAction = PendingConfirmAction::None; ///< Action to run after modal confirm.
-    bool pendingLaunch = false;     ///< Set when the user clicks "Launch", cleared by App.
-    bool pendingShutdown = false;   ///< Set when the user clicks "Shutdown", cleared by App.
-    bool pendingGoToLobby = false;  ///< Set when the user clicks "Go to Lobby", cleared by App.
-    bool pendingBackToHome = false; ///< Set when the user clicks "Back to Home", cleared by App.
+    bool pendingLaunch = false;         ///< Set when the user clicks "Launch", cleared by App.
+    bool pendingShutdown = false;       ///< Set when the user clicks "Shutdown", cleared by App.
+    bool pendingGoToLobby = false;      ///< Set when the user clicks "Go to Lobby", cleared by App.
+    bool pendingBackToMainMenu = false; ///< Set when the user clicks "Back to Main Menu", cleared by App.
 };

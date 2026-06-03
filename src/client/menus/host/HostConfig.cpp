@@ -104,8 +104,8 @@ SDL_AppResult HostConfig::iterate()
             pendingGoToLobby = true;
         }
     }
-    if (result.backToHomeClicked) {
-        pendingBackToHome = true;
+    if (result.backToMainMenuClicked) {
+        pendingBackToMainMenu = true;
     }
 
     const ConfirmResult confirmResult = confirm_.drawAndPoll();
@@ -161,12 +161,12 @@ bool HostConfig::consumeGoToLobbyRequest()
     return true;
 }
 
-bool HostConfig::consumeBackToHomeRequest()
+bool HostConfig::consumeBackToMainMenuRequest()
 {
-    if (!pendingBackToHome)
+    if (!pendingBackToMainMenu)
         return false;
 
-    pendingBackToHome = false;
+    pendingBackToMainMenu = false;
     return true;
 }
 

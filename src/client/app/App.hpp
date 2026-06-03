@@ -19,7 +19,7 @@
 /// @brief Root application class; owns shared resources and manages screen transitions.
 ///
 /// Implements the SDL3 app-callback contract (init/event/iterate/quit).  Exactly
-/// one IScreen is active at a time; App drives transitions among Home, host
+/// one IScreen is active at a time; App drives transitions among TitleScreen, MainMenu, host
 /// configuration, Lobby, and InGame screens.
 class App
 {
@@ -42,11 +42,11 @@ public:
     /// @brief Named screens the application can display.
     enum class Screen
     {
-        MainMenu,   ///< Top-level landing menu.
-        Home,       ///< Join/server-browser screen.
-        HostConfig, ///< Local hosting configuration screen.
-        Lobby,      ///< Pre-match lobby waiting room.
-        InGame      ///< Active match session.
+        TitleScreen, ///< Top-level landing/title screen.
+        MainMenu,    ///< Join/server-browser main menu screen.
+        HostConfig,  ///< Local hosting configuration screen.
+        Lobby,       ///< Pre-match lobby waiting room.
+        InGame       ///< Active match session.
     };
 
     /// @brief Destroy the current screen and activate the requested one.
@@ -75,9 +75,9 @@ private:
         .maxPlayers = 8,
     }; ///< Persistent host screen draft state.
 
-    Screen current = Screen::MainMenu; ///< Which screen is currently active.
-    std::unique_ptr<IScreen> screen_;  ///< Active screen instance.
-    bool imguiContextOwned = false;    ///< True once App has created the ImGui context.
+    Screen current = Screen::TitleScreen; ///< Which screen is currently active.
+    std::unique_ptr<IScreen> screen_;     ///< Active screen instance.
+    bool imguiContextOwned = false;       ///< True once App has created the ImGui context.
 
     /// @brief Destroy all subsystems without asserting on partial-init state.
     void cleanup();
@@ -85,8 +85,8 @@ private:
     /// @brief Build a borrowed context for screen initialisation.
     AppContext screenContext();
 
-    /// @brief Show a modal message on the active home screen, if it is active.
-    void showHomePopupMessage(const std::string& message);
+    /// @brief Show a modal message on the active main menu screen, if it is active.
+    void showMainMenuPopupMessage(const std::string& message);
 
     /// @brief Ask a locally hosted server to shut down before falling back to process termination.
     bool shutdownHostedServerGracefully();
