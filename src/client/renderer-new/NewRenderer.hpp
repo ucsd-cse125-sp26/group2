@@ -405,7 +405,10 @@ private:
     void drawTonemapPass(SDL_GPUTexture* hdrSceneColor, SDL_GPUTexture* ldrColor, SDL_GPUCommandBuffer* cmd);
     void drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const;
     void drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
-    void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth, const FrustumPlanes& frustumPlanes);
+    void drawWorldModelInstances(SDL_GPURenderPass* renderPass,
+                                 SDL_GPUCommandBuffer* cmd,
+                                 bool depth,
+                                 const FrustumPlanes& frustumPlanes);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd, const FrustumPlanes& frustumPlanes);
     void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
 
@@ -415,19 +418,22 @@ private:
                    SDL_GPUCommandBuffer* cmd,
                    const FrustumPlanes& frustumPlanes);
 
-
     void drawModelDepth(ModelIdInt modelId,
                         const glm::mat4& modelTransform,
                         SDL_GPURenderPass* renderPass,
                         SDL_GPUCommandBuffer* cmd,
                         const FrustumPlanes& frustumPlanes);
 
-    void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth,const FrustumPlanes& frustumPlanes);
+    void drawEntityModels(SDL_GPURenderPass* renderPass,
+                          SDL_GPUCommandBuffer* cmd,
+                          bool depth,
+                          const FrustumPlanes& frustumPlanes);
 
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
     void drawHud(SDL_GPURenderPass* pass);
 
-    static bool inFrustum(const Asset::AABB &modelElementAABB,const FrustumPlanes &frustumPlanes,const glm::mat4 &modelMat);
+    static bool
+    inFrustum(const Asset::AABB& modelElementAABB, const FrustumPlanes& frustumPlanes, const glm::mat4& modelMat);
 
     // ─── Member state ────────────────────────────────────────────────────────
 
@@ -465,12 +471,11 @@ private:
     //  constexpr uint32_t shadowSize = 512;
     static const uint32_t shadowSize = 1024;
     static const uint32_t macShadowSize = 512;
-    static const uint32_t staticShadowSize = 2048;
+    static const uint32_t staticShadowSize = 1024;
     SDL_GPUTexture* dynamicShadowMaps_ = nullptr;
     SDL_GPUTexture* staticShadowMaps_ = nullptr;
     SDL_GPUSampler* staticDepthSampler_ = nullptr;
     SDL_GPUSampler* dynamicDepthSampler_ = nullptr;
-
 
     SDL_GPUTexture* movingLightShadowMaps_ = nullptr;
 
