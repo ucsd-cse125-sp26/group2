@@ -6,16 +6,19 @@
 #include "Asset.hpp"
 #include "glm/ext/scalar_common.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <glm/gtc/quaternion.hpp>
 #include <iostream>
 #include <stack>
 #include <stb_image.h>
+#include <unordered_map>
 #include <vector>
 
 namespace
 {
 bool g_loggedMissingTangents = false;
+constexpr float k_defaultPointLightRange = 12.5f;
 
 bool getMaterialTexturePath(aiMaterial& material, aiTextureType type, aiString& outPath)
 {
@@ -199,6 +202,7 @@ bool AssetLoader::loadModel(const ModelIdInt id,
 
     // std::cout << " Asset::Model &newModel = Asset::models_[id]; " << std::endl;
     Asset::Model& newModel = Asset::models_[id];
+    newModel.pointLights.clear();
 
     /////////////////////////////////////////////////// LOAD AISCENE ///////////////////////////////////////////////////
     // std::cout << "loadAsset" << std::endl;
@@ -221,6 +225,13 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     const aiScene& sceneAi = *asimpSceneStructurePtr;
     /////////////////////////////////////////////////// LOAD AISCENE ///////////////////////////////////////////////////
     newModel.modelElements_.reserve(sceneAi.mNumMeshes);
+
+    std::unordered_map<std::string, const aiLight*> pointLightsByNodeName;
+    for (unsigned int i = 0; i < sceneAi.mNumLights; ++i) {
+        const aiLight* light = sceneAi.mLights[i];
+        if (light && light->mType == aiLightSource_POINT)
+            pointLightsByNodeName.emplace(light->mName.C_Str(), light);
+    }
 
     std::cout << debugPrefix << "loadMeshes" << std::endl;
 
@@ -260,6 +271,18 @@ bool AssetLoader::loadModel(const ModelIdInt id,
 
         const std::string nodeName(currentNode.mName.C_Str());
         const glm::vec3 nodeModelPos = glm::vec3(nodeModelTransform * glm::vec4(0, 0, 0, 1));
+        if (const auto lightIt = pointLightsByNodeName.find(nodeName); lightIt != pointLightsByNodeName.end()) {
+            const aiLight& light = *lightIt->second;
+            const glm::vec3 diffuse{light.mColorDiffuse.r, light.mColorDiffuse.g, light.mColorDiffuse.b};
+            const float intensity = std::max({diffuse.r, diffuse.g, diffuse.b, 1.0f});
+            newModel.pointLights.push_back(Asset::PointLight{
+                .position = nodeModelPos,
+                .intensity = intensity,
+                .color = diffuse / intensity,
+                .range = k_defaultPointLightRange,
+            });
+        }
+
         if (isWeaponMountPointName(nodeName)) {
             newModel.mountPoints[nodeName] =
                 Asset::MountPoint{.position = nodeModelPos, .rotation = rotationFromTransform(nodeModelTransform)};
