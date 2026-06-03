@@ -6,6 +6,8 @@
 #include <entt/entt.hpp>
 #include <glm/vec3.hpp>
 
+#include "ecs/components/WeaponState.hpp"
+
 /// @brief Pending explosion to process this tick.
 struct Explosion
 {
@@ -19,4 +21,5 @@ struct Explosion
     float knockbackFalloffExponent = 1.0f;      ///< Knockback curve exponent (same form as damage falloff).
     entt::entity owner = entt::null;            ///< Entity that caused the explosion (for kill credit).
     entt::entity directKillTarget = entt::null; ///< If set, guaranteed lethal damage to this entity (stuck grenade).
+    WeaponType weaponType = WeaponType::Rocket; ///< Visual profile for the replicated explosion VFX.
 };

@@ -935,6 +935,9 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         {"Hitscan beams", ps.hitscanBeamCount(), 64},
         {"Arc verts", ps.arcVertexCount(), 2048},
         {"Smoke", ps.smokeCount(), 1024},
+        {"Explosion sprites", ps.explosionSpriteCount(), 2048},
+        {"Explosion debris", ps.explosionDebrisCount(), 1024},
+        {"Explosion decals", ps.explosionDecalCount(), 256},
         {"Decals", ps.decalCount(), 512},
     };
 
@@ -990,8 +993,16 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
     if (ImGui::Button("Smoke Cloud", {120.f, 0.f}))
         ps.spawnSmoke(spawnPos, 40.f);
     ImGui::SameLine();
-    if (ImGui::Button("Explosion", {100.f, 0.f}))
-        ps.spawnExplosion(spawnPos, 100.f);
+    if (ImGui::Button("Rocket VFX", {100.f, 0.f}))
+        ps.spawnExplosionVfx(spawnPos, wallNorm, 160.f, ExplosionVfxKind::Rocket);
+    ImGui::SameLine();
+    if (ImGui::Button("Frag VFX", {90.f, 0.f}))
+        ps.spawnExplosionVfx(spawnPos, wallNorm, 170.f, ExplosionVfxKind::Frag);
+    ImGui::SameLine();
+    if (ImGui::Button("Sticky VFX", {95.f, 0.f}))
+        ps.spawnExplosionVfx(spawnPos, wallNorm, 180.f, ExplosionVfxKind::Sticky);
+    if (ImGui::Button("Molotov VFX", {110.f, 0.f}))
+        ps.spawnExplosionVfx(spawnPos, {0.f, 1.f, 0.f}, 180.f, ExplosionVfxKind::Molotov);
 
     ImGui::Spacing();
     ImGui::SeparatorText("Keyboard Shortcuts");
