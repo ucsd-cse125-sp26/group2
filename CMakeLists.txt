@@ -736,7 +736,7 @@ set(SHADER_NEW_SOURCES
         geometry_shadowed.frag
         debug_depth.vert debug_depth.frag
         hud.vert hud.frag
-        fxaa.frag
+        fxaa.frag tonemap.frag
 )
 
 foreach(SHADER_SRC ${SHADER_NEW_SOURCES})

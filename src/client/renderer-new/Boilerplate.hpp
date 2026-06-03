@@ -67,7 +67,7 @@ struct PipelineDescription
     bool depthWrite = true;
 
     // SDL_GPUCullMode cullMode = SDL_GPU_CULLMODE_BACK;
-    SDL_GPURasterizerState rasterizer_state;
+    SDL_GPURasterizerState rasterizer_state{};
 };
 
 /// @brief Describes a pending CPU-to-GPU buffer upload: target buffer, source data, and byte size.

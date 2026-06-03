@@ -210,4 +210,7 @@ private:
 
     /// @brief Return a standard alpha blend state (src*alpha + dst*(1-srcAlpha)).
     static SDL_GPUColorTargetBlendState alphaBlend();
+
+    /// @brief Return a multiply blend state for darkening decals.
+    static SDL_GPUColorTargetBlendState multiplyBlend();
 };

@@ -61,6 +61,20 @@ SDL_GPUColorTargetBlendState ParticleRenderer::alphaBlend()
     return b;
 }
 
+SDL_GPUColorTargetBlendState ParticleRenderer::multiplyBlend()
+{
+    SDL_GPUColorTargetBlendState b{};
+    b.enable_blend = true;
+    b.src_color_blendfactor = SDL_GPU_BLENDFACTOR_DST_COLOR;
+    b.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    b.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    // Preserve destination alpha (weapon mask).
+    b.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    b.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    b.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+    return b;
+}
+
 // Pipeline factories
 
 SDL_GPUGraphicsPipeline* ParticleRenderer::makeStoragePipeline(const char* vertName,
@@ -573,8 +587,15 @@ bool ParticleRenderer::buildPipelines()
     // Smoke -- premul alpha, storage, 1 sampler (noise)
     smokePipeline_ = makeStoragePipeline("smoke.vert", "smoke.frag", 1, 1, premulAlphaBlend(), true, false, false);
 
-    // Decal -- alpha blend, depth bias, no depth write
-    decalPipeline_ = makeStoragePipeline("decal.vert", "decal.frag", 1, 1, alphaBlend(), true, false, true);
+    // Decal -- multiply blend, depth bias, no depth write
+    decalPipeline_ = makeStoragePipeline("decal.vert",
+                                          "decal.frag",
+                                          1,
+                                          1,
+                                          multiplyBlend(),
+                                          true,
+                                          false,
+                                          true);
 
     // SDF world text -- alpha blend, depth test
     sdfWorldPipeline_ = makeStoragePipeline("sdf_text.vert", "sdf_text.frag", 1, 1, alphaBlend(), true, false, false);

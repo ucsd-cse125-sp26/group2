@@ -12,7 +12,7 @@ void BulletHoleDecal::spawn(glm::vec3 pos, glm::vec3 normal, WeaponType wt)
 
     auto& d = slots_[idx];
     d.pos = pos;
-    d.size = (wt == WeaponType::Rocket) ? 30.f : 4.f;
+    d.size = (wt == WeaponType::Rocket) ? 15.f : 1.5f;
     d.opacity = 1.f;
 
     // Compute tangent/bitangent from normal
