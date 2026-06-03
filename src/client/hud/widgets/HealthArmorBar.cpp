@@ -11,8 +11,8 @@
 HealthArmorBar::HealthArmorBar()
 {
     anchor = HudAnchor::TopCenter;
-    offsetX = -250.f;
-    offsetY = 98.f;
+    offsetX = -315.f;
+    offsetY = 90.f;
     width = panelWidth;
     height = barHeight;
 }

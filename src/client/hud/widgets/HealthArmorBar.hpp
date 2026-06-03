@@ -7,8 +7,8 @@
 
 struct HealthArmorBar : HudWidget
 {
-    float panelWidth = 500.f; ///< Base SVG frame width.
-    float barHeight = 44.f;   ///< Base SVG frame height.
+    float panelWidth = 630.f; ///< Base SVG frame width.
+    float barHeight = 40.f;   ///< Base SVG frame height.
     float svgScale = 1.f;     ///< Extra scale applied to both SVG frame layers.
     float svgOffsetX = 0.f;   ///< SVG frame X adjustment.
     float svgOffsetY = 0.f;   ///< SVG frame Y adjustment.

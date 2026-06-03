@@ -45,7 +45,11 @@ std::optional<HudSvgSprite> HudSvgAtlas::sprite(HudIcon id, int width, int heigh
     if (filename.empty())
         return std::nullopt;
 
-    const std::optional<HudSvgSprite> allocated = allocate(id, safeW, safeH);
+    std::optional<HudSvgSprite> allocated = allocate(id, safeW, safeH);
+    if (!allocated) {
+        resetPacking();
+        allocated = allocate(id, safeW, safeH);
+    }
     if (!allocated)
         return std::nullopt;
 
@@ -91,6 +95,15 @@ bool HudSvgAtlas::createGpuResources()
     }
 
     return true;
+}
+
+void HudSvgAtlas::resetPacking()
+{
+    sprites_.clear();
+    cursorX_ = 0;
+    cursorY_ = 0;
+    rowH_ = 0;
+    SDL_Log("HudSvgAtlas: atlas cache reset after exhausting packed SVG slots");
 }
 
 std::optional<HudSvgSprite> HudSvgAtlas::allocate(HudIcon id, int width, int height)
