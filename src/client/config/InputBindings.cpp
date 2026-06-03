@@ -333,17 +333,19 @@ InputBindings InputBindings::defaults()
     b.rebind(Action::Jump, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_STICK), BindingDevice::Controller, 1);
     b.rebind(Action::ThrowGrenade, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_EAST), BindingDevice::Controller);
     b.rebind(Action::Reload, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_WEST), BindingDevice::Controller);
-    b.rebind(Action::NextWeapon, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_NORTH), BindingDevice::Controller);
+    // Y (North): tap = swap weapon, hold = pickup. The tap/hold split is done in
+    // runGamepadWeapon; the binding itself drives Pickup.
+    b.rebind(Action::Pickup, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_NORTH), BindingDevice::Controller);
     b.rebind(Action::Crouch, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_LEFT_STICK), BindingDevice::Controller);
     b.rebind(Action::Ability1, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER), BindingDevice::Controller);
     b.rebind(
         Action::Ability2, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), BindingDevice::Controller);
     // D-pad: Up = push-to-talk (voice), Down = ability menu, Left = cycle
-    // grenade, Right = pickup. (Weapon swap is the Y button.)
+    // grenade, Right = emote wheel. (Pickup is hold-Y; weapon swap is tap-Y.)
     b.rebind(Action::PushToTalk, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_UP), BindingDevice::Controller);
     b.rebind(Action::AbilityMenu, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_DOWN), BindingDevice::Controller);
     b.rebind(Action::CycleGrenade, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_LEFT), BindingDevice::Controller);
-    b.rebind(Action::Pickup, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_RIGHT), BindingDevice::Controller);
+    b.rebind(Action::Emote, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_DPAD_RIGHT), BindingDevice::Controller);
     b.rebind(Action::Scoreboard, Binding::bindGamepadButton(SDL_GAMEPAD_BUTTON_BACK), BindingDevice::Controller);
 
     return b;

@@ -1734,6 +1734,10 @@ void Game::clearGameplayInputForChat()
     systems::prevGrenadeThrowKey = false;
     systems::prevGamepadGrenadeCycleKey = false;
     systems::prevGamepadGrenadeThrowKey = false;
+    systems::prevGamepadPickupKey = false;
+    systems::gamepadPickupHoldFired = false;
+    systems::pendingGamepadWeaponSwap = false;
+    systems::gamepadLookAccel = 0.0f;
     systems::prevKillSelfKey = false;
     systems::prevAbilitySelectLeft = false;
     systems::prevAbilitySelectRight = false;
@@ -2612,7 +2616,12 @@ SDL_AppResult Game::iterate()
         if (emoteRequestThisFrame >= 0)
             localEmote_ = emoteRequestThisFrame;
 
-        // Apply scroll-wheel / button weapon switch (mouse wheel, gamepad Y),
+        // A quick tap of gamepad Y latches a weapon swap (hold-Y is pickup,
+        // handled in runGamepadWeapon). Fold it into the same scroll-switch path.
+        if (systems::consumePendingGamepadWeaponSwap())
+            pendingScrollSwitch_ = 1;
+
+        // Apply scroll-wheel / button weapon switch (mouse wheel, gamepad Y tap),
         // constrained to primary/secondary. Consumed HERE — inside the
         // physics-tick gate — rather than every iterate, so a press is only
         // cleared on a frame that actually stamps and sends input. Consuming it

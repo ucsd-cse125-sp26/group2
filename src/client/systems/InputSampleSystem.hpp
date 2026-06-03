@@ -47,6 +47,15 @@ inline bool prevAbilitySelectRight = false;
 inline bool prevGamepadAbilitySelectLeft = false;
 /// @brief Tracks previous-frame gamepad right ability-select chord for edge detection.
 inline bool prevGamepadAbilitySelectRight = false;
+/// @brief Gamepad Y (Pickup binding) tap-vs-hold state: tap swaps weapon, hold picks up.
+inline bool prevGamepadPickupKey = false;
+inline Uint64 gamepadPickupDownMs = 0;     ///< SDL_GetTicks at the Y press, for hold-duration timing.
+inline bool gamepadPickupHoldFired = false; ///< Set once the press crossed the hold threshold (suppresses tap-swap).
+/// @brief Latched tap-Y weapon swap, consumed once per frame by the game loop.
+inline bool pendingGamepadWeaponSwap = false;
+/// @brief COD-style look acceleration progress in [0, 1]; ramps while the look
+/// stick is held near full deflection and resets when it eases off.
+inline float gamepadLookAccel = 0.0f;
 
 // ─── Emote wheel state ───────────────────────────────────────────────────────
 //
@@ -121,6 +130,14 @@ inline bool consumePendingGrenadeCyclePrev()
 {
     const bool requested = pendingGrenadeCyclePrev;
     pendingGrenadeCyclePrev = false;
+    return requested;
+}
+
+/// @brief Consume and clear the latched tap-Y gamepad weapon swap request.
+inline bool consumePendingGamepadWeaponSwap()
+{
+    const bool requested = pendingGamepadWeaponSwap;
+    pendingGamepadWeaponSwap = false;
     return requested;
 }
 
@@ -453,37 +470,60 @@ inline void runGamepadLook(Registry& registry,
                            bool gravityFlipped = false,
                            bool swapSticks = false)
 {
-    if (!gamepadConnected(gamepad))
+    if (!gamepadConnected(gamepad)) {
+        gamepadLookAccel = 0.0f;
         return;
+    }
 
     // While the emote wheel is open the right stick selects a sector, so don't
     // also turn the camera with it.
-    if (emoteWheelOpen)
+    if (emoteWheelOpen) {
+        gamepadLookAccel = 0.0f;
         return;
+    }
 
     JoystickAxis lookAxis = getLookJoystickAxes(swapSticks);
 
     float rx = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.x), deadzone);
     float ry = gamepad::normaliseAxis(SDL_GetGamepadAxis(gamepad, lookAxis.y), deadzone);
 
-    if (rx == 0.0f && ry == 0.0f)
+    if (rx == 0.0f && ry == 0.0f) {
+        gamepadLookAccel = 0.0f; // stick centred — drop back to the base turn rate.
         return;
+    }
 
     if (gravityFlipped) {
         rx = -rx;
         ry = -ry;
     }
 
+    // COD-style view acceleration: while the look stick is held near full
+    // deflection the turn rate ramps from 1x up to (1 + k_accelMaxBoost)x over
+    // k_accelRampTime seconds, then snaps back to 1x once the stick eases off.
+    // This keeps the (now 30%-lower) base sensitivity precise for small
+    // corrections while still allowing fast full-stick spins. Tune the three
+    // constants to taste.
+    constexpr float k_accelEngageMag = 0.85f; ///< Stick deflection needed to start accelerating.
+    constexpr float k_accelRampTime = 0.5f;   ///< Seconds at full deflection to reach the max boost.
+    constexpr float k_accelMaxBoost = 1.0f;   ///< Extra turn-rate multiplier at full ramp (1.0 => up to 2x).
+    const float stickMag = std::max(std::fabs(rx), std::fabs(ry));
+    if (stickMag >= k_accelEngageMag)
+        gamepadLookAccel = std::min(1.0f, gamepadLookAccel + dt / k_accelRampTime);
+    else
+        gamepadLookAccel = 0.0f;
+    const float accelMult = 1.0f + k_accelMaxBoost * gamepadLookAccel;
+
     registry.view<InputSnapshot, LocalPlayer, Controllable>().each([&](InputSnapshot& snap) {
         // Sign convention matches runMouseLook: stick-right (positive rx)
         // should look right, which means yaw decreases (see runMouseLook
         // comment for why the negation is correct).
-        snap.yaw -= rx * yawSensitivity * dt;
+        snap.yaw -= rx * yawSensitivity * dt * accelMult;
         snap.yaw = std::remainder(snap.yaw, glm::radians(360.0f));
 
         // SDL gamepad Y axis is +down/-up (screen-coord convention) — same as
         // mouse mdy — so adding directly matches mouse-down = pitch+ behaviour.
-        snap.pitch = std::clamp(snap.pitch + ry * pitchSensitivity * dt, -glm::radians(89.0f), glm::radians(89.0f));
+        snap.pitch =
+            std::clamp(snap.pitch + ry * pitchSensitivity * dt * accelMult, -glm::radians(89.0f), glm::radians(89.0f));
     });
 }
 
@@ -599,7 +639,6 @@ inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const Inp
     const bool padShoot = bindings.controllerPressed(Action::Shoot, gamepad);
     const bool padScope = bindings.controllerPressed(Action::Scope, gamepad);
     const bool padReload = bindings.controllerPressed(Action::Reload, gamepad);
-    const bool padPickup = bindings.controllerPressed(Action::Pickup, gamepad);
     const bool padPrimary = bindings.controllerPressed(Action::SwitchToPrimary, gamepad);
     const bool padSecondary = bindings.controllerPressed(Action::SwitchToSecondary, gamepad);
     const bool selectLeftNow = abilityMenuHeld && padShoot;
@@ -624,6 +663,28 @@ inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const Inp
     }
     prevGamepadGrenadeThrowKey = padThrowGrenade;
 
+    // Y (Pickup binding): tap = swap weapon, hold = pick up. A press shorter than
+    // k_pickupHoldMs is treated as a tap and latches a weapon swap on release;
+    // holding past the threshold sets the pickup flag (and suppresses the swap).
+    constexpr Uint64 k_pickupHoldMs = 200;
+    const bool padPickupBtn = bindings.controllerPressed(Action::Pickup, gamepad);
+    bool padPickupHeld = false;
+    const Uint64 nowMs = SDL_GetTicks();
+    if (padPickupBtn && !prevGamepadPickupKey) {
+        gamepadPickupDownMs = nowMs;
+        gamepadPickupHoldFired = false;
+    }
+    if (padPickupBtn) {
+        if (nowMs - gamepadPickupDownMs >= k_pickupHoldMs) {
+            padPickupHeld = true;
+            gamepadPickupHoldFired = true;
+        }
+    } else if (prevGamepadPickupKey && !gamepadPickupHoldFired) {
+        // Released before the hold threshold → quick tap → swap weapon.
+        pendingGamepadWeaponSwap = true;
+    }
+    prevGamepadPickupKey = padPickupBtn;
+
     // Suppress fire/aim while the ability menu modifier is held.
     const bool fireSuppressed = abilityMenuHeld;
 
@@ -631,7 +692,7 @@ inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const Inp
         snap.shooting |= padShoot && !fireSuppressed;
         snap.scoped |= padScope && !fireSuppressed;
         snap.reload |= padReload;
-        snap.pickup |= padPickup;
+        snap.pickup |= padPickupHeld;
         snap.switchToPrimary |= padPrimary;
         snap.switchToSecondary |= padSecondary;
         snap.abilitySelectHeld |= abilityMenuHeld;
