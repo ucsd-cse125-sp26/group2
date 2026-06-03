@@ -114,6 +114,15 @@ EquipmentSlots::EquipmentSlots()
     offsetY = -40.f;
     width = iconFrameWidth * 2.f + barWidth * 2.f + iconBarGap * 2.f + centerGap;
     height = std::max(iconFrameHeight, barHeight);
+
+    abilityElements[0].bar.scale = 0.8f;
+    abilityElements[0].bar.offsetY = 9.f;
+    abilityElements[0].bar.stretchX = 1.25f;
+
+    abilityElements[1].bar.scale = 0.8f;
+    abilityElements[1].bar.offsetY = 17.f;
+    abilityElements[1].bar.stretchX = 1.25f;
+    abilityElements[1].flipBarY = true;
 }
 
 void EquipmentSlots::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)
