@@ -120,6 +120,11 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
+    if (!createTonemapPipeline()) {
+        SDL_Log("NewRenderer: failed to create tonemap pipeline: %s", SDL_GetError());
+        return false;
+    }
+
     sampler_ = Boilerplate::createLinearRepeatSampler(device_);
     if (!sampler_) {
         SDL_Log("NewRenderer: failed to create sampler: %s", SDL_GetError());
@@ -159,7 +164,8 @@ bool NewRenderer::init(SDL_Window* window)
 
     camera_ = NewCamera();
 
-    skinnedRenderer_.init(device_, colorTarget_, shaderFormat_);
+    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    skinnedRenderer_.init(device_, hdrFormat, shaderFormat_);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
     staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
@@ -275,6 +281,26 @@ bool NewRenderer::createFxaaPipeline()
     return fxaaPipeline_ != nullptr;
 }
 
+bool NewRenderer::createTonemapPipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/hud.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/tonemap.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = 1;
+    fragmentShader.uniformBufferCount = 1;
+
+    const Boilerplate::VertexInputLayout vertexLayout{};
+
+    tonemapPipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, colorTarget_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, false);
+
+    return tonemapPipeline_ != nullptr;
+}
+
 bool NewRenderer::createGeometryPipeline()
 {
     Boilerplate::ShaderInfo vertexShader{};
@@ -304,8 +330,9 @@ bool NewRenderer::createGeometryPipeline()
         Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Vertex, tangent)),
     };
 
+    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
     geometryPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, colorTarget_, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
+        device_, hdrFormat, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
 
     return geometryPipeline_ != nullptr;
 }
@@ -477,7 +504,8 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
 
     drawGeometryPass(sceneColor_, cmd);
     drawWeaponPass(sceneColor_, cmd);
-    drawFxaaPass(sceneColor_, swapchain, cmd);
+    drawTonemapPass(sceneColor_, tonemappedColor_, cmd);
+    drawFxaaPass(tonemappedColor_, swapchain, cmd);
     drawHudPass(swapchain, cmd);
     drawUIPass(swapchain, cmd);
 
@@ -686,6 +714,29 @@ void NewRenderer::drawFxaaPass(SDL_GPUTexture* sceneColor, SDL_GPUTexture* swapc
 
     SDL_DrawGPUPrimitives(fxaaPass, 6, 1, 0, 0);
     SDL_EndGPURenderPass(fxaaPass);
+}
+
+void NewRenderer::drawTonemapPass(SDL_GPUTexture* hdrSceneColor, SDL_GPUTexture* ldrColor, SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTarget =
+        Boilerplate::makeColorTargetClear(ldrColor, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f});
+
+    SDL_GPURenderPass* tonemapPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
+    SDL_BindGPUGraphicsPipeline(tonemapPass, tonemapPipeline_);
+
+    SDL_GPUTextureSamplerBinding sceneBinding = Boilerplate::makeTextureSamplerBinding(hdrSceneColor, fxaaSampler_);
+    SDL_BindGPUFragmentSamplers(tonemapPass, 0, &sceneBinding, 1);
+
+    const glm::vec4 params{
+        hdrExposure,
+        hdrWhitePoint,
+        0.0f,
+        0.0f,
+    };
+    SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
+
+    SDL_DrawGPUPrimitives(tonemapPass, 6, 1, 0, 0);
+    SDL_EndGPURenderPass(tonemapPass);
 }
 
 void NewRenderer::drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const
@@ -932,9 +983,14 @@ bool NewRenderer::ensureSceneTextureSize(Uint32 width, Uint32 height)
         SDL_ReleaseGPUTexture(device_, sceneColor_);
         sceneColor_ = nullptr;
     }
+    if (tonemappedColor_) {
+        SDL_ReleaseGPUTexture(device_, tonemappedColor_);
+        tonemappedColor_ = nullptr;
+    }
 
-    sceneColor_ = Boilerplate::createSampledColorTarget(device_, width, height, colorTarget_);
-    if (!sceneColor_)
+    sceneColor_ = Boilerplate::createSampledColorTarget(device_, width, height, getHdrFormat());
+    tonemappedColor_ = Boilerplate::createSampledColorTarget(device_, width, height, colorTarget_);
+    if (!sceneColor_ || !tonemappedColor_)
         return false;
 
     sceneWidth_ = width;
@@ -994,6 +1050,8 @@ void NewRenderer::quit()
             SDL_ReleaseGPUTexture(device_, depthTarget_.texture);
         if (sceneColor_)
             SDL_ReleaseGPUTexture(device_, sceneColor_);
+        if (tonemappedColor_)
+            SDL_ReleaseGPUTexture(device_, tonemappedColor_);
 
         for (auto& meshPair : Asset::meshes_) {
             Asset::Mesh& mesh = meshPair.second;
@@ -1015,6 +1073,8 @@ void NewRenderer::quit()
             SDL_ReleaseGPUGraphicsPipeline(device_, hudPipeline_);
         if (fxaaPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, fxaaPipeline_);
+        if (tonemapPipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(device_, tonemapPipeline_);
         if (sampler_)
             SDL_ReleaseGPUSampler(device_, sampler_);
         if (hudSampler_)
@@ -1042,8 +1102,10 @@ void NewRenderer::quit()
     geometryPipeline_ = nullptr;
     hudPipeline_ = nullptr;
     fxaaPipeline_ = nullptr;
+    tonemapPipeline_ = nullptr;
     depthTarget_.texture = nullptr;
     sceneColor_ = nullptr;
+    tonemappedColor_ = nullptr;
     texture_ = nullptr;
     sampler_ = nullptr;
     hudTexture_ = nullptr;

@@ -358,6 +358,8 @@ public:
                                                  ///< Game.cpp drives this each frame from the local player's ADS state.
     bool imguiEnabled = true;                    ///< Master toggle for the ImGui debug overlay.
     RenderToggles toggles{};                     ///< Per-pass on/off toggles (see RenderToggles in RendererTypes.hpp).
+    float hdrExposure = 1.0f;                    ///< Debug exposure multiplier used by the tonemap pass.
+    float hdrWhitePoint = 4.0f;                  ///< Debug white point for Extended Reinhard tonemapping.
     std::vector<std::string> availableHDRFiles;  ///< Filled by `scanHDRFiles()`; consumed by debug UI.
     std::string currentHDRName = "(procedural)"; ///< Display name of the currently-loaded HDR.
     bool useHDRSkybox = false;                   ///< True after a successful `loadHDRSkybox()`.
@@ -372,6 +374,7 @@ private:
     bool createDepthRes2Pipeline();
     bool createHudPipeline();
     bool createFxaaPipeline();
+    bool createTonemapPipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
     bool ensureSceneTextureSize(Uint32 width, Uint32 height);
     void createMeshBuffers(MeshIdInt meshId) const;
@@ -400,6 +403,7 @@ private:
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawHudPass(SDL_GPUTexture* target, SDL_GPUCommandBuffer* cmd);
     void drawFxaaPass(SDL_GPUTexture* sceneColor, SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
+    void drawTonemapPass(SDL_GPUTexture* hdrSceneColor, SDL_GPUTexture* ldrColor, SDL_GPUCommandBuffer* cmd);
     void drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const;
     void drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth, const FrustumPlanes& frustumPlanes);
@@ -435,6 +439,7 @@ private:
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* fxaaPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* tonemapPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* depthRes0Pipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* depthRes1Pipeline_ = nullptr;
@@ -442,6 +447,7 @@ private:
 
     SDL_GPUTextureFormat colorTarget_ = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUTexture* sceneColor_ = nullptr;
+    SDL_GPUTexture* tonemappedColor_ = nullptr;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
     Uint32 sceneWidth_ = 0;
     Uint32 sceneHeight_ = 0;

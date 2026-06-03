@@ -465,8 +465,7 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
     //   - 2 vertex storage buffers (BonePalette + Instances)
     //   - 1 vertex UBO at slot 0 (view-projection — pushed by NewRenderer)
     //   - depth test on, cull mode NONE (rig may be double-sided)
-    //   - colour target = same format as the geometry pass currently uses
-    //     (today: swapchain format; later: NewRenderer::getHdrFormat()).
+    //   - colour target = same HDR format as the geometry pass currently uses.
     //
     // Shader pseudocode (`shaders-new/geometry_skinned.vert`):
     //   InstanceData inst = instances[gl_InstanceIndex];

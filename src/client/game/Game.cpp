@@ -925,9 +925,9 @@ bool Game::init(AppContext& ctx)
     SDL_Log("[client] physics diagnostic %s", phaseDiagEnabled ? "ENABLED" : "disabled");
 
     // Particle pipelines must match the active render-pass color format.
-    // NewRenderer renders particles inside the swapchain pass, not an HDR
-    // intermediate, so use the renderer's current swapchain format here.
-    if (!particleSystem.init(renderer->getDevice(), renderer->getSwapchainColorFormat(), renderer->getShaderFormat())) {
+    // ParticleRenderer draws inside NewRenderer's scene color pass, so its
+    // pipeline color format must match that HDR target.
+    if (!particleSystem.init(renderer->getDevice(), NewRenderer::getHdrFormat(), renderer->getShaderFormat())) {
         SDL_Log("ParticleSystem init failed (non-fatal — particles disabled)");
     } else {
         renderer->setParticleSystem(&particleSystem);
@@ -5195,6 +5195,7 @@ SDL_AppResult Game::iterate()
             {"Grip Pose Tweaker", &showGripPoseUI_},
             {"Weapon Spawner Tweaker", &showWeaponSpawnerModelUI_},
             {"Dynamic Lighting", &showDynLightUI_},
+            {"HDR Debug", &showHdrDebugUI_},
             {"Animation Tester", &animUI_.show},
         });
         bool physicsCsvRecording = false;
@@ -6001,6 +6002,15 @@ SDL_AppResult Game::iterate()
                 ImGui::DragFloat("Beam Lt Range", &beamLightRange_, 10.0f, 50.0f, 3000.0f, "%.0f");
                 ImGui::DragFloat("Light Spacing", &beamLightSpacing_, 5.0f, 10.0f, 200.0f, "%.0f");
             }
+        }
+        ImGui::End();
+    }
+    if (showHdrDebugUI_) {
+        ImGui::SetNextWindowPos({300.f, 400.f}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize({260.f, 120.f}, ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("HDR Debug", &showHdrDebugUI_)) {
+            ImGui::SliderFloat("Exposure", &renderer->hdrExposure, 0.0f, 5.0f, "%.2f");
+            ImGui::SliderFloat("White Point", &renderer->hdrWhitePoint, 0.1f, 20.0f, "%.2f");
         }
         ImGui::End();
     }

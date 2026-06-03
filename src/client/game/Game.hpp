@@ -377,6 +377,7 @@ private:
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
+    bool showHdrDebugUI_ = false;                        ///< Show the HDR / tonemap debug panel.
     bool showHudDebug_ = false;                          ///< Show the HUD Tweaker panel.
     bool showMenuThemeUI_ = false;                       ///< Show the Menu Theme Tweaker panel.
     bool flashlightEnabled_ = false;                     ///< Point light at camera position.

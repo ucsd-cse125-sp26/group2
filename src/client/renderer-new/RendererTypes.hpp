@@ -39,7 +39,6 @@ struct RenderToggles
     bool bloom = true;       ///< Bloom downsample + upsample chain.
     bool ssr = true;         ///< Screen-space reflections.
     bool volumetrics = true; ///< Volumetric lighting / god rays.
-    bool tonemap = true;     ///< HDR → LDR tone mapping (disabling = raw HDR blit).
 
     // Effects
     bool particles = true; ///< GPU particle system.
