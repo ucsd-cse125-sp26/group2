@@ -586,8 +586,12 @@ bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, 
         Boilerplate::makeAttribute(5, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(BoneInfluence, boneWeights), 1),
     };
 
+    // overBlending = false: the character body is opaque. With blending enabled
+    // the fragment alpha (≈ lighting irradiance) made it render semi-transparent
+    // — visible once the normal-colour debug tint was removed. Depth test + cull
+    // NONE still handle the double-sided rig correctly.
     pipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, colorTarget, shaderFormat, vertexShader, fragmentShader, vertexLayout, true, true);
+        device_, colorTarget, shaderFormat, vertexShader, fragmentShader, vertexLayout, true, false);
 
     return pipeline_ != nullptr;
 }
