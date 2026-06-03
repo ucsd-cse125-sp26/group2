@@ -2144,9 +2144,13 @@ void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
     // scene's static point lights (shader attenuation is pure 1/r²), so it
     // needs to be large to noticeably light nearby surfaces.
     flash.color = glm::vec3(1.0f, 0.65f, 0.30f);
-    flash.intensity = 9000.0f;
+    flash.intensity = 4500.0f;
     flash.age = 0.0f;
-    flash.lifetime = 0.06f;
+    // ~200 ms total: a ~20 ms ease-in to full brightness then a gradual ~180 ms
+    // exponential die-out (see the attack-decay envelope in iterate()). Long
+    // enough that consecutive shots' flashes overlap into a continuous glow
+    // during rapid fire, while a single shot still reads as a quick flash.
+    flash.lifetime = 0.20f;
     muzzleFlashLights_.push_back(flash);
 }
 
@@ -4686,9 +4690,20 @@ SDL_AppResult Game::iterate()
         });
 
         // Muzzle-flash point lights — age out transient flashes and emit the
-        // survivors, fading intensity to zero over their lifetime so the flash
-        // pops bright and decays in a few frames.
+        // survivors with an attack-decay brightness envelope so the flash
+        // ignites and dissolves smoothly instead of snapping on/off:
+        //   • Attack  (first k_flashAttack seconds): a fast ease-out rise from 0
+        //     to full brightness — softens the hard "spawn at full" step that
+        //     made rapid fire look choppy between shots.
+        //   • Decay   (the rest of the lifetime): a normalized exponential
+        //     exp(-k·t) that reaches exactly 0 at the end (the "-floor" term
+        //     removes the step raw exp would leave). A gentle k gives a slow,
+        //     gradual die-out, and the long lifetime lets consecutive shots'
+        //     flashes overlap for a continuous glow.
         constexpr std::size_t k_maxDynLights = 32;
+        constexpr float k_flashAttack = 0.02f;            // rise-to-full time (seconds)
+        constexpr float k_flashDecay = 3.0f;              // decay steepness — smaller = more gradual
+        const float flashFloor = std::exp(-k_flashDecay); // exp value at decay end, subtracted so fade hits 0
         for (auto it = muzzleFlashLights_.begin(); it != muzzleFlashLights_.end();) {
             it->age += frameTime;
             if (it->age >= it->lifetime) {
@@ -4696,10 +4711,18 @@ SDL_AppResult Game::iterate()
                 continue;
             }
             if (dynLights.size() < k_maxDynLights) {
-                const float fade = 1.0f - (it->age / it->lifetime);
+                float env;
+                if (it->age < k_flashAttack) {
+                    const float x = it->age / k_flashAttack;     // [0, 1)
+                    env = 1.0f - (1.0f - x) * (1.0f - x);        // ease-out: fast rise, smooth into peak
+                } else {
+                    const float decayTime = std::max(1e-4f, it->lifetime - k_flashAttack);
+                    const float t = (it->age - k_flashAttack) / decayTime; // [0, 1)
+                    env = (std::exp(-k_flashDecay * t) - flashFloor) / (1.0f - flashFloor);
+                }
                 dynLights.push_back(PointLight{
                     .position = it->position,
-                    .intensity = it->intensity * fade,
+                    .intensity = it->intensity * env,
                     .color = it->color,
                     .range = 500.0f,
                 });
