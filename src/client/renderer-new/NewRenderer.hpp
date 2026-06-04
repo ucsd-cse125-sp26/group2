@@ -344,6 +344,24 @@ public:
     bool setRig(const std::vector<RigMeshSource>& meshes, int numJoints);
 
     void setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
+
+    /// @brief Install the animated first-person weapon viewmodel rig (separate
+    /// from the player skinned rig).  Call once after the viewmodel GLB loads.
+    bool setViewmodelRig(const std::vector<RigMeshSource>& meshes, int numJoints);
+
+    /// @brief Per-frame palette + instance for the animated weapon viewmodel.
+    /// Drawn on top of the scene (like the static weapon viewmodel).
+    void setViewmodelFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
+
+    /// @brief Bind the per-mesh diffuse textures of a loaded model instance to the
+    /// animated weapon viewmodel (so the skinned gun renders textured).
+    void setViewmodelTexture(int modelInstanceIndex);
+
+    /// @brief First-person arms (hands) rig — a second skinned viewmodel rig
+    /// driven by the same clips as the gun so the hands hold the weapon.
+    bool setViewmodelArmsRig(const std::vector<RigMeshSource>& meshes, int numJoints);
+    void setViewmodelArmsFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
+    void setViewmodelArmsTexture(int modelInstanceIndex);
     // ─── Public settings members (mutable directly from Game / debug UI) ─────
     //
     // The legacy renderer exposed these as direct member access.  Keep the
@@ -495,6 +513,14 @@ private:
 
     // Skinned-character subsystem (see SkinnedRenderer.hpp) ──────────────────
     SkinnedRenderer skinnedRenderer_;
+
+    // Animated first-person weapon viewmodel — own rig + palette, drawn on top.
+    SkinnedRenderer viewmodelSkinned_;
+    // First-person arms (hands) — second skinned viewmodel rig, same clips.
+    SkinnedRenderer viewmodelArmsSkinned_;
+    // Neutral 1x1 fallback bound when a viewmodel mesh has no diffuse texture
+    // so the previously equipped weapon's texture doesn't bleed onto it.
+    SDL_GPUTexture* viewmodelFallbackTex_ = nullptr;
 
     // Telemetry counters (filled by drawFrame) ────────────────────────────────
     float lastAcquireMs_ = 0.0f;
