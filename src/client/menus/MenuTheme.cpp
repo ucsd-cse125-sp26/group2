@@ -342,6 +342,16 @@ void endPanel()
     ImGui::End();
 }
 
+bool beginScrollBody(const char* id, float footerHeight)
+{
+    return ImGui::BeginChild(id, ImVec2(0.0f, -footerHeight), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
+}
+
+void endScrollBody()
+{
+    ImGui::EndChild();
+}
+
 void heading(const char* text)
 {
     const ThemeSettings& t = g_settings;

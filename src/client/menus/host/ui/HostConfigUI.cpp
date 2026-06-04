@@ -23,6 +23,13 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
 
     menu_theme::terminalStatusLine(inputs.serverRunning ? "SERVER SESSION ACTIVE" : "SERVER OFFLINE",
                                    inputs.hasUnsavedServerChanges ? "UNSAVED CHANGES" : "CONFIG CLEAN");
+
+    const float spacingY = ImGui::GetStyle().ItemSpacing.y;
+    const int footerRows = inputs.serverRunning ? 5 : 2;
+    const float footerHeight = static_cast<float>(footerRows) * 32.0f + spacingY * static_cast<float>(footerRows + 2) +
+                               ImGui::GetTextLineHeightWithSpacing();
+
+    menu_theme::beginScrollBody("##HostConfigBody", footerHeight);
     menu_theme::terminalSection("SETTINGS");
     if (ImGui::BeginTable("HostSettings", 2, ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, k_labelColumnWidth);
@@ -149,6 +156,7 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
                            static_cast<int>(inputs.errorMessage.size()),
                            inputs.errorMessage.data());
     }
+    menu_theme::endScrollBody();
 
     ImGui::Spacing();
     ImGui::BeginDisabled(inputs.serverRunning);

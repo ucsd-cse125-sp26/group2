@@ -146,6 +146,17 @@ bool beginPanel(
 /// @brief End a panel opened with beginPanel().
 void endPanel();
 
+/// @brief Begin a scrollable body region inside a panel that reserves `footerHeight` pixels at the bottom
+///        for sticky action buttons. Pair with endScrollBody(); content rendered between the calls
+///        scrolls vertically while callers can render footer widgets after endScrollBody().
+/// @param id            Unique child id.
+/// @param footerHeight  Height in pixels to reserve below the scroll body (button rows + spacing).
+/// @return True when the child is visible (always pair with endScrollBody regardless).
+bool beginScrollBody(const char* id, float footerHeight);
+
+/// @brief End a scroll body opened with beginScrollBody().
+void endScrollBody();
+
 /// @brief Accent section header with an underline rule (styled replacement for ImGui::SeparatorText).
 void heading(const char* text);
 

@@ -177,6 +177,10 @@ SettingsEditorResult SettingsEditor::render(UserSettings& settings, std::string_
     menu_theme::terminalStatusLine(dirty_ ? "SETTINGS DIRTY" : "SETTINGS CLEAN", "TAB TO CHANGE SECTION");
     menu_theme::terminalSection("SETTINGS");
 
+    const float spacingY = ImGui::GetStyle().ItemSpacing.y;
+    const float footerHeight = (30.0f + 34.0f + 34.0f + 34.0f) * uiScale + spacingY * 5.0f + ImGui::GetTextLineHeight();
+
+    menu_theme::beginScrollBody("##SettingsBody", footerHeight);
     if (ImGui::BeginTabBar("SettingsTabs")) {
         if (ImGui::BeginTabItem("General")) {
             activeTab_ = Tab::General;
@@ -200,6 +204,7 @@ SettingsEditorResult SettingsEditor::render(UserSettings& settings, std::string_
         ImGui::Spacing();
         ImGui::TextWrapped("%s", statusMessage_.c_str());
     }
+    menu_theme::endScrollBody();
 
     ImGui::Spacing();
     const float buttonWidth = ImGui::GetContentRegionAvail().x;
