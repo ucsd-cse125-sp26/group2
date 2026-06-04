@@ -207,6 +207,55 @@ bool NewRenderer::init(SDL_Window* window)
 
     firstFrame_ = true;
 
+    // Hardcoded static map point lights. (Restored after the main merge dropped
+    // them — main's NewRenderer only set static lights from glTF-embedded model
+    // lights, but the map relies on these authored positions.)
+    float globalIntensity = 50000;
+    std::vector<PointLight> sampleLights;
+    PointLight pl0{};
+    pl0.position = glm::vec3(300, 100.0f, 500);
+    pl0.intensity = globalIntensity;
+    pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl0.range = 500.0f;
+    sampleLights.push_back(pl0);
+
+    PointLight pl1{};
+    pl1.position = glm::vec3(1920.0f, 450.0f, 1209.0f);
+    pl1.intensity = globalIntensity;
+    pl1.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl1.range = 500.0f;
+    sampleLights.push_back(pl1);
+
+    PointLight pl2{};
+    pl2.position = glm::vec3(1315.0f, 450.0f, -651.0f);
+    pl2.intensity = globalIntensity;
+    pl2.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl2.range = 500.0f;
+    sampleLights.push_back(pl2);
+
+    PointLight pl3{};
+    pl3.position = glm::vec3(31.0f, 450.0f, -1302.0f);
+    pl3.intensity = globalIntensity;
+    pl3.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl3.range = 500.0f;
+    sampleLights.push_back(pl3);
+
+    PointLight pl4{};
+    pl4.position = glm::vec3(-1560.0f, -239.0f, 2079.0f);
+    pl4.intensity = globalIntensity;
+    pl4.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl4.range = 500.0f;
+    sampleLights.push_back(pl4);
+
+    PointLight pl5{};
+    pl5.position = glm::vec3(-292.0f, -239.0f, 854.0f);
+    pl5.intensity = globalIntensity;
+    pl5.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl5.range = 500.0f;
+    sampleLights.push_back(pl5);
+
+    setStaticPointLights(std::move(sampleLights));
+
     return true;
 }
 

@@ -817,6 +817,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionVfxEffect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionVfxEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/DeathDissolveEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/DeathDissolveEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfFont.hpp"
