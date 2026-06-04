@@ -1160,7 +1160,7 @@ void ServerGame::initAnimation()
     for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
         const ClipId id = static_cast<ClipId>(i);
         const std::string clipPath = assetsDir + clipFile(id);
-        if (!serverAnimLibrary_.loadClipFromFBX(serverRig_, id, clipPath)) {
+        if (!serverAnimLibrary_.loadClipFromFBX(serverRig_, id, clipPath, isUpperBodyOverlayClip(id))) {
             SDL_Log("[server] WARNING: failed to load clip '%s'", clipName(id));
             continue;
         }

@@ -1069,6 +1069,15 @@ bool Game::init(AppContext& ctx)
             }
         }
 
+        // Spent-casing prop (hidden static model; spawned + drawn via the entity
+        // render list on fire — see the casing sim and the R301 viewmodel
+        // fire-detect below). Ported from apex-anims-resources.
+        shellEjectModelIdx_ = renderer->loadSceneModel("shelleject_assault_rifle.glb", glm::vec3{0.0f}, 1.0f, true);
+        if (shellEjectModelIdx_ >= 0)
+            renderer->setModelScenePass(shellEjectModelIdx_, false);
+        else
+            SDL_Log("[client] note: shelleject_assault_rifle.glb not loaded — casings disabled");
+
         // Load Rocket Projectile
         {
             const int id = addAssetDefinition(assets_, kRocketProjectile);
@@ -1500,7 +1509,7 @@ bool Game::init(AppContext& ctx)
             for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
                 const ClipId id = static_cast<ClipId>(i);
                 const std::string clipPath = assetsDir + clipFile(id);
-                if (!animLibrary_.loadClipFromFBX(charRig_, id, clipPath)) {
+                if (!animLibrary_.loadClipFromFBX(charRig_, id, clipPath, isUpperBodyOverlayClip(id))) {
                     SDL_Log("[client] WARNING: failed to load clip '%s'", clipName(id));
                     continue;
                 }
@@ -2623,6 +2632,9 @@ SDL_AppResult Game::iterate()
             if (localWasDead_ && !vis.isDead) {
                 snap.yaw = vis.spawnViewYaw;
                 snap.pitch = 0.0f;
+                // Respawned this frame: arm the long takeout for the next time
+                // the rifle viewmodel re-appears (it's hidden during death).
+                justRespawnedViewmodel_ = true;
             }
             if (vis.isDead)
                 localEmote_ = -1; // No emoting while dead.
@@ -3997,9 +4009,32 @@ SDL_AppResult Game::iterate()
                         if (c.weaponType == WeaponType::Rifle && charPropGunIdx_ >= 0 && r301PropGunBindValid_ &&
                             charPropGunIdx_ < static_cast<int>(joints.size()))
                         {
-                            c.weaponWorld =
-                                c.worldTransform * joints[static_cast<size_t>(charPropGunIdx_)] *
-                                glm::inverse(r301PropGunBind_);
+                            // Align the weapon mesh's OWN ja_c_propGun bind frame
+                            // to the character's (animated) ja_c_propGun socket:
+                            // take position + orientation from the socket and
+                            // rebuild the bind frame at an explicit scale. This
+                            // pins the GRIP to the socket regardless of scale. The
+                            // raw composition both inherited the rig auto-scale +
+                            // viewmodel↔character bind-unit mismatch (mesh far too
+                            // small) AND, when rebuilt about the mesh ORIGIN, flung
+                            // the gun off the hand. Robust for ANY Apex weapon: it
+                            // uses that weapon's own propGun bind + a per-weapon
+                            // scale knob (c.weaponScale; Rifle = 1.0 = native).
+                            const glm::mat4 socketWorld =
+                                c.worldTransform * joints[static_cast<size_t>(charPropGunIdx_)];
+                            const glm::vec3 socketPos = glm::vec3(socketWorld[3]);
+                            const glm::mat3 socketRot(glm::normalize(glm::vec3(socketWorld[0])),
+                                                      glm::normalize(glm::vec3(socketWorld[1])),
+                                                      glm::normalize(glm::vec3(socketWorld[2])));
+                            const glm::mat3 bindRot(glm::normalize(glm::vec3(r301PropGunBind_[0])),
+                                                    glm::normalize(glm::vec3(r301PropGunBind_[1])),
+                                                    glm::normalize(glm::vec3(r301PropGunBind_[2])));
+                            const glm::mat4 bindFrame =
+                                glm::translate(glm::mat4(1.0f), glm::vec3(r301PropGunBind_[3])) * glm::mat4(bindRot);
+                            const glm::mat4 socketTarget = glm::translate(glm::mat4(1.0f), socketPos) *
+                                                           glm::mat4(socketRot) *
+                                                           glm::scale(glm::mat4(1.0f), glm::vec3(c.weaponScale));
+                            c.weaponWorld = socketTarget * glm::inverse(bindFrame);
                             weaponOrigin = glm::vec3(c.weaponWorld[3]);
                             weaponRot = glm::mat3(glm::normalize(glm::vec3(c.weaponWorld[0])),
                                                   glm::normalize(glm::vec3(c.weaponWorld[1])),
@@ -4124,6 +4159,77 @@ SDL_AppResult Game::iterate()
                 }
                 break;
             }
+        }
+
+        // Spent-casing ejection — driven by the LOCAL player's THIRD-PERSON gun
+        // so it works in EVERY view (the first-person viewmodel that previously
+        // hosted this is hidden in third-person / emote / spectator cameras). A
+        // shot is detected by the mag ammo dropping (reload raises it, so no
+        // false trigger). The chamber/muzzle come from apex_r301's bind bones
+        // queried off r301ViewmodelGun_ (same GLB as the 3p mesh) and are mapped
+        // to world through the attached weapon transform c.weaponWorld.
+        {
+            int localMag = -1;
+            registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+                const GunInstance& gun = getEquippedGun(ws);
+                if (gun.type == WeaponType::Rifle)
+                    localMag = gun.currentMagAmmo;
+            });
+            bool haveLocalRifle = false;
+            for (const auto& c : candidates) {
+                if (!c.isLocal || !c.hasWeapon || c.weaponType != WeaponType::Rifle)
+                    continue;
+                haveLocalRifle = true;
+                const bool fired = r301ViewmodelReady_ && weaponVmPrevMagAmmo_ >= 0 && localMag >= 0 &&
+                                   localMag < weaponVmPrevMagAmmo_;
+                if (fired) {
+                    r301ViewmodelGun_.triggerFire(); // FP bolt kick (cosmetic; consumed by the FP update)
+                    // Chamber from the BIND pose — valid even when the FP rig is
+                    // not update()'d this frame (it isn't in third-person), so
+                    // boneModelPos would return ~origin here. Mapped to world by
+                    // the third-person weapon transform.
+                    const glm::vec3 boltLocal = r301ViewmodelGun_.boneBindModelPos("def_c_bolt");
+                    if (casingDiagCount_ < 8) {
+                        ++casingDiagCount_;
+                        SDL_Log("[casing] fire prev=%d cur=%d shellIdx=%d boltLen=%.2f",
+                                weaponVmPrevMagAmmo_, localMag, shellEjectModelIdx_,
+                                static_cast<double>(glm::length(boltLocal)));
+                    }
+                    if (shellEjectModelIdx_ >= 0 && casings_.size() < 64 && glm::length(boltLocal) > 1e-5f) {
+                        // Chamber + barrel direction from the gun's bind bones,
+                        // mapped to world by the third-person weapon transform.
+                        const glm::vec3 chamberWorld = glm::vec3(c.weaponWorld * glm::vec4(boltLocal, 1.0f));
+                        const glm::vec3 muzzleWorld = glm::vec3(
+                            c.weaponWorld * glm::vec4(r301ViewmodelGun_.boneBindModelPos("muzzle_flash"), 1.0f));
+                        glm::vec3 barrelDir = muzzleWorld - chamberWorld;
+                        barrelDir =
+                            (glm::length(barrelDir) > 1e-4f) ? glm::normalize(barrelDir) : glm::vec3(0.0f, 0.0f, 1.0f);
+                        // Barrel-relative ejection frame (right + up of the barrel)
+                        // — self-contained, no camera angles needed.
+                        const glm::vec3 worldUp{0.0f, 1.0f, 0.0f};
+                        glm::vec3 rgt = glm::cross(barrelDir, worldUp);
+                        rgt = (glm::length(rgt) > 1e-4f) ? glm::normalize(rgt) : glm::vec3(1.0f, 0.0f, 0.0f);
+                        const glm::vec3 upv = glm::normalize(glm::cross(rgt, barrelDir));
+                        const float jitter =
+                            static_cast<float>((casingSpawnCounter_++ * 2654435761u) % 1000u) / 1000.0f - 0.5f;
+                        Casing cs;
+                        const glm::vec3 longAxis = -barrelDir; // casing local X points back from the muzzle
+                        const glm::vec3 refUp = (std::abs(longAxis.y) < 0.99f) ? worldUp : glm::vec3(1.0f, 0.0f, 0.0f);
+                        const glm::vec3 cz = glm::normalize(glm::cross(longAxis, refUp));
+                        const glm::vec3 cy = glm::cross(cz, longAxis);
+                        cs.orient = glm::mat3(longAxis, cy, cz);
+                        cs.pos = chamberWorld + rgt * 1.5f; // ejection port: just right of the chamber
+                        cs.vel = rgt * (150.0f + jitter * 40.0f) + upv * (120.0f + jitter * 30.0f) +
+                                 barrelDir * (jitter * 40.0f);
+                        cs.spin = 20.0f + jitter * 8.0f;
+                        casings_.push_back(cs);
+                    }
+                }
+                weaponVmPrevMagAmmo_ = localMag;
+                break;
+            }
+            if (!haveLocalRifle)
+                weaponVmPrevMagAmmo_ = -1; // not holding the rifle → forget ammo so re-equip doesn't false-fire
         }
 
         for (auto& c : candidates) {
@@ -4769,6 +4875,27 @@ SDL_AppResult Game::iterate()
         //         .worldTransform = cylinderTransform(beamOrigin, beamEnd, 2.0f),
         //     });
         // });
+
+        // Spent-casing physics + render (casings are spawned on fire in the
+        // R301 viewmodel step below). Plain Euler integration + tumble, no
+        // collision; drawn via the entity list using a shared static prop mesh.
+        if (shellEjectModelIdx_ >= 0 && !casings_.empty()) {
+            const glm::vec3 gravity{0.0f, -650.0f, 0.0f};
+            for (auto& cs : casings_) {
+                cs.vel += gravity * frameTime;
+                cs.pos += cs.vel * frameTime;
+                cs.angle += cs.spin * frameTime;
+                cs.age += frameTime;
+            }
+            casings_.erase(
+                std::remove_if(casings_.begin(), casings_.end(), [](const Casing& c) { return c.age > 1.3f; }),
+                casings_.end());
+            for (const auto& cs : casings_) {
+                const glm::mat4 m = glm::translate(glm::mat4(1.0f), cs.pos) * glm::mat4(cs.orient) *
+                                    glm::rotate(glm::mat4(1.0f), cs.angle, glm::vec3(0.0f, 0.0f, 1.0f));
+                entityCmds.push_back(EntityRenderCmd{.modelIndex = shellEjectModelIdx_, .worldTransform = m});
+            }
+        }
 
         if (collectPerf)
             phaseStats.entityRenderCmds = static_cast<std::uint32_t>(entityCmds.size());
@@ -5438,10 +5565,14 @@ SDL_AppResult Game::iterate()
                 };
 
                 if (!r301ViewmodelEquipped_) {
-                    const std::string drawClip = firstAvailableGunClip("drawfirst", "draw");
+                    // Long inspect-style "drawfirst" only right after a (re)spawn;
+                    // normal weapon swaps use the short "draw".
+                    const char* preferred = justRespawnedViewmodel_ ? "drawfirst" : "draw";
+                    const std::string drawClip = firstAvailableGunClip(preferred, "draw");
                     playGunAndArms(drawClip, false, 1.0f);
                     r301ViewmodelEquipped_ = true;
                     r301ViewmodelReloadActive_ = false;
+                    justRespawnedViewmodel_ = false; // consume the one-shot
                 }
 
                 if (localReloading && !r301ViewmodelReloadActive_) {

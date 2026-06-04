@@ -1,3 +1,4 @@
+#include "client/animation/AnimationLibrary.hpp"
 #include "client/animation/AnimationLocomotion.hpp"
 #include "ecs/physics/TitanfallConstants.hpp"
 

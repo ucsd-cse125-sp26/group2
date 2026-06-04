@@ -68,6 +68,18 @@ const char* clipName(ClipId id);
 /// @brief Filename (relative to assets/animations/) for a clip.
 const char* clipFile(ClipId id);
 
+/// @brief True for Apex-authored upper-body overlay clips that drive ONLY the
+/// grafted Apex arm subtree (the R301 idle/reload "upper" clips, and any future
+/// per-weapon equivalents). These MUST be loaded rotation-only
+/// (useRigRestTranslations=true) so the arm bones keep their baked-rest,
+/// socket-pinned translations while the clip drives only rotation — the runtime
+/// equivalent of the Blender COPY_LOCATION(socket)+COPY_ROTATION(driver) graft.
+/// Add new weapon upper-body clips here so they inherit the same handling.
+constexpr bool isUpperBodyOverlayClip(ClipId id) noexcept
+{
+    return id == ClipId::R301IdleUpper || id == ClipId::R301ReloadUpper;
+}
+
 /// @brief Map an emote wheel index (0..emotes::kEmoteCount-1) to its ClipId.
 /// Returns `ClipId::_Count` for out-of-range indices (treated as "no emote").
 ClipId emoteClipForIndex(int index);

@@ -445,6 +445,20 @@ glm::vec3 WeaponViewmodelAnim::boneModelPos(const std::string& name) const
     return glm::vec3(impl_->jointModelMats[static_cast<size_t>(idx)][3]);
 }
 
+glm::vec3 WeaponViewmodelAnim::boneBindModelPos(const std::string& name) const
+{
+    auto it = impl_->rig.jointMap().find(name);
+    if (it == impl_->rig.jointMap().end())
+        return glm::vec3(0.0f);
+    const int idx = it->second;
+    const auto& ibm = impl_->rig.inverseBindMatrices();
+    if (idx < 0 || idx >= static_cast<int>(ibm.size()))
+        return glm::vec3(0.0f);
+    // inverse(inverseBind) == bind (rest) model matrix; its translation is the
+    // bone's model-space rest position. Valid without an update() this frame.
+    return glm::vec3(glm::inverse(ibm[static_cast<size_t>(idx)])[3]);
+}
+
 bool WeaponViewmodelAnim::boneModelMatrix(const std::string& name, glm::mat4& out) const
 {
     auto it = impl_->rig.jointMap().find(name);

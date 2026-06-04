@@ -407,6 +407,31 @@ private:
     bool r301ViewmodelReady_ = false;
     bool r301ViewmodelEquipped_ = false;
     bool r301ViewmodelReloadActive_ = false;
+    /// One-shot: when true, the next viewmodel equip plays the long "drawfirst"
+    /// inspect-style takeout instead of the short "draw" swap. Set on every
+    /// (re)spawn — and true initially so the first life's takeout is the long
+    /// one — then consumed the moment the takeout plays.
+    bool justRespawnedViewmodel_ = true;
+
+    // ── Spent-casing ejection (ported from apex-anims-resources) ──
+    // A shot is detected via mag-ammo dropping; a casing is ejected from the
+    // chamber bone (def_c_bolt) and simulated in world space (gravity + tumble),
+    // drawn through the entity render list — NOT the particle system — using a
+    // single shared static prop mesh.
+    struct Casing
+    {
+        glm::vec3 pos{0.0f};
+        glm::vec3 vel{0.0f};
+        glm::mat3 orient{1.0f}; ///< Base orientation: casing long axis (local X) aligned to the barrel at spawn.
+        float angle = 0.0f;     ///< Tumble angle (about the casing's local Z).
+        float spin = 0.0f;      ///< Tumble rate.
+        float age = 0.0f;
+    };
+    std::vector<Casing> casings_;     ///< Live ejected casings (world space, gravity + spin + lifetime).
+    uint32_t casingSpawnCounter_ = 0; ///< Cheap deterministic jitter source for ejection.
+    int shellEjectModelIdx_ = -1;     ///< Spent-casing prop (hidden static; drawn via entity list).
+    int weaponVmPrevMagAmmo_ = -1;    ///< Tracks mag ammo to detect a shot fired this frame.
+    int casingDiagCount_ = 0;         ///< One-time diagnostic log budget for casing fire detection.
 
     // Sound state tracking
     bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.

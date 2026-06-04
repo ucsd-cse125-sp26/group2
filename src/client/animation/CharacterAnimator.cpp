@@ -502,15 +502,21 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
             }
         }
 
-        // R301 upper-body overlays: include the Mixamo torso chain plus the
-        // grafted Apex arm hierarchy. The stitched rig parents Apex arms to the
-        // body, but explicitly unioning the roots keeps the mask robust if the
-        // export hierarchy changes during prototype iteration.
+        // R301 upper-body overlay mask: the grafted Apex arm subtrees
+        // (def_l_clav / def_r_clav downward) PLUS the weapon socket ja_c_propGun
+        // so the held gun pivots with the reload/idle animation. This
+        // deliberately EXCLUDES the Apex hip/spine bridge (jx_c_delta,
+        // def_c_hip, def_c_spine*) — those must hold the baked rest pose so the
+        // arms + gun hang off a CONSTANT anchor. Combined with rotation-only
+        // clip loading (isUpperBodyOverlayClip), this reproduces the Blender
+        // graft: clavicle + propGun location pinned (rest), rotation animated,
+        // hip/spine bridge static. Because the anchor never moves, placement is
+        // identical for every clip, so any future Apex animation/weapon stays
+        // correct for free.
         {
             impl_->upperBodyMask.assign(static_cast<size_t>(numJoints), false);
             int upperRoots = 0;
-            for (const char* upperRootName :
-                 {"mixamorig:Spine", "jx_c_delta", "def_l_shoulder", "def_r_shoulder"})
+            for (const char* upperRootName : {"def_l_clav", "def_r_clav", "ja_c_propGun"})
             {
                 const auto it = jm.find(upperRootName);
                 if (it == jm.end())
