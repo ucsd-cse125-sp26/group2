@@ -35,6 +35,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/PowerupState.hpp"
+#include "ecs/components/Ragdoll.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/RespawnTimer.hpp"
@@ -64,7 +65,6 @@
 #include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
-#include "ecs/components/Ragdoll.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
 #include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
@@ -1533,11 +1533,10 @@ void ServerGame::resetPlayersForCountdown()
 bool ServerGame::isGameplayInputAllowed(MatchPhase phase) const
 {
     switch (phase) {
-    case MatchPhase::COUNTDOWN:
-    case MatchPhase::FINISHED:
-        return false;
-    default:
+    case MatchPhase::IN_PROGRESS:
         return true;
+    default:
+        return false;
     }
 }
 
