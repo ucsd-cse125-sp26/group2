@@ -40,12 +40,22 @@ constexpr HudSvgName kHudSvgNames[] = {
     {HudIcon::Grapple, "grapple.svg"},
     {HudIcon::Gravity, "gravity.svg"},
     {HudIcon::Grenade, "grenade.svg"},
+    {HudIcon::FragGrenadeIcon, "FragGrenadeIcon.svg"},
+    {HudIcon::MolotovGrenadeIcon, "MGrenadeIcon.svg"},
+    {HudIcon::StickyGrenadeIcon, "StickyGrenadeIcon.svg"},
     {HudIcon::Headshot, "headshot.svg"},
     {HudIcon::Hp, "hp.svg"},
     {HudIcon::PlayerArrow, "player_arrow.svg"},
     {HudIcon::Shield, "shield.svg"},
     {HudIcon::Skull, "skull.svg"},
     {HudIcon::Tactical, "tactical.svg"},
+    {HudIcon::TopDecal, "TopDecal.svg"},
+    {HudIcon::BottomDecal, "BottomDecal.svg"},
+    {HudIcon::WeaponFrame, "WeaponFrame.svg"},
+    {HudIcon::ARIcon, "ARIcon.svg"},
+    {HudIcon::RocketLauncherIcon, "RocketLauncherIcon.svg"},
+    {HudIcon::RailGunIcon, "RailGunIcon.svg"},
+    {HudIcon::TrackingGunIcon, "TrackingGunIcon.svg"},
 };
 
 void replaceAll(std::string& text, std::string_view from, std::string_view to)

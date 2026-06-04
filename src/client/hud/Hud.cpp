@@ -15,11 +15,13 @@
 #include "widgets/EmoteWheelWidget.hpp"
 #include "widgets/EnemyWorldHealthBar.hpp"
 #include "widgets/EquipmentSlots.hpp"
+#include "widgets/EquippedWeaponsWidget.hpp"
 #include "widgets/GrenadeSlotsWidget.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
 #include "widgets/KillcamBoxWidget.hpp"
 #include "widgets/KillFeed.hpp"
+#include "widgets/LevelBarWidget.hpp"
 #include "widgets/Minimap.hpp"
 #include "widgets/PickupNotification.hpp"
 #include "widgets/PickupPrompt.hpp"
@@ -28,7 +30,10 @@
 #include "widgets/RailgunScopeWidget.hpp"
 #include "widgets/Scoreboard.hpp"
 #include "widgets/ShotgunPelletWidget.hpp"
+#include "widgets/ScreenDecalWidget.hpp"
 #include "widgets/VignetteWidget.hpp"
+
+#include <algorithm>
 
 bool Hud::init(SDL_GPUDevice* device,
                SDL_GPUShaderFormat shaderFormat,
@@ -115,6 +120,19 @@ void Hud::render()
         w->visible = originalVisible;
     }
 
+    if (debugShowAlignmentBorder_) {
+        const float s = screenH_ / 1080.f;
+        const float thickness = std::max(1.f, 2.f * s);
+        const float maxOffsetX = std::max(0.f, screenW_ * 0.5f - thickness);
+        const float maxOffsetY = std::max(0.f, screenH_ * 0.5f - thickness);
+        const float offsetX = std::clamp(debugAlignmentBorderOffsetX_ * s, 0.f, maxOffsetX);
+        const float offsetY = std::clamp(debugAlignmentBorderOffsetY_ * s, 0.f, maxOffsetY);
+        const float borderW = screenW_ - offsetX * 2.f;
+        const float borderH = screenH_ - offsetY * 2.f;
+
+        context_.rectOutline(offsetX, offsetY, borderW, borderH, thickness, {0.22f, 0.9f, 1.f, 0.85f});
+    }
+
     // Flush any remaining unflushed vertices (e.g. minimap drawn after last clip pop).
     context_.endFrame();
 
@@ -184,6 +202,8 @@ void Hud::createWidgets()
 
     // Vignette goes first (full-screen overlay behind everything else).
     widgets_.push_back(std::make_unique<VignetteWidget>());
+    widgets_.push_back(std::make_unique<TopDecalWidget>());
+    widgets_.push_back(std::make_unique<BottomDecalWidget>());
 
     // World-space markers — drawn on top of the scene but before screen-space
     // chrome so the chrome can occlude them at edges.
@@ -212,8 +232,10 @@ void Hud::createWidgets()
     // Bottom-row chrome.
     widgets_.push_back(std::make_unique<HealthArmorBar>()); // Vitals (bottom-left)
     widgets_.push_back(std::make_unique<EquipmentSlots>()); // bottom-center
+    widgets_.push_back(std::make_unique<LevelBarWidget>());
     widgets_.push_back(std::make_unique<GrenadeSlotsWidget>());
     widgets_.push_back(std::make_unique<PopupNotification>());
+    widgets_.push_back(std::make_unique<EquippedWeaponsWidget>());
     widgets_.push_back(std::make_unique<AmmoCounter>()); // weapon panel (bottom-right)
     widgets_.push_back(std::make_unique<ChatWidget>());  // chat should sit above gameplay chrome
 

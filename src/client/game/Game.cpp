@@ -6039,6 +6039,8 @@ SDL_AppResult Game::iterate()
         // ── Weapon / ammo ──
         registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
             const GunInstance& gun = getEquippedGun(ws);
+            hudState.primaryWeaponId = static_cast<int>(getSlot(ws, WeaponSlot::PRIMARY).type);
+            hudState.secondarySlotWeaponId = static_cast<int>(getSlot(ws, WeaponSlot::SECONDARY).type);
             hudState.ammoClip = gun.currentMagAmmo;
             hudState.ammoReserve = gun.totalAmmo;
             hudState.weaponId = static_cast<int>(gun.type);
