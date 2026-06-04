@@ -5,6 +5,7 @@
 
 #include "menus/MenuTheme.hpp"
 
+#include <algorithm>
 #include <imgui.h>
 
 namespace title_screen_ui
@@ -18,20 +19,28 @@ TitleScreenResult buildTitleScreen()
     {
         menu_theme::terminalStatusLine("SYSTEM BOOT: ARENA FRONTEND", "NAV: ARROWS / ENTER");
         menu_theme::terminalSection("COMMANDS");
-        const ImVec2 rowSize(0.0f, 38.0f);
+
+        const float displayW = ImGui::GetIO().DisplaySize.x;
+        const float avail = ImGui::GetContentRegionAvail().x;
+        const float buttonW = std::min(displayW * 0.2f, avail);
+        const ImVec2 rowSize(buttonW, 38.0f);
+
+        auto drawRow = [&](const char* label, const char* desc, bool danger) {
+            return menu_theme::terminalActionRow(label, desc, rowSize, danger);
+        };
 
         if (ImGui::IsWindowAppearing())
             ImGui::SetKeyboardFocusHere();
-        if (menu_theme::terminalActionRow("PLAY", "open server browser", rowSize)) {
+        if (drawRow("PLAY", nullptr, false)) {
             result.playClicked = true;
         }
-        if (menu_theme::terminalActionRow("HOST", "configure local server", rowSize)) {
+        if (drawRow("HOST", nullptr, false)) {
             result.hostClicked = true;
         }
-        if (menu_theme::terminalActionRow("SETTINGS", "controls and video feel", rowSize)) {
+        if (drawRow("SETTINGS", nullptr, false)) {
             result.settingsClicked = true;
         }
-        if (menu_theme::terminalActionRow("EXIT", "close application", rowSize, true)) {
+        if (drawRow("EXIT", nullptr, true)) {
             result.exitClicked = true;
         }
 

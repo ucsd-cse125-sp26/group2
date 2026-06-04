@@ -178,7 +178,7 @@ SettingsEditorResult SettingsEditor::render(UserSettings& settings, std::string_
     menu_theme::terminalSection("SETTINGS");
 
     const float spacingY = ImGui::GetStyle().ItemSpacing.y;
-    const float footerHeight = (30.0f + 34.0f + 34.0f + 34.0f) * uiScale + spacingY * 5.0f + ImGui::GetTextLineHeight();
+    const float footerHeight = 34.0f * uiScale + spacingY * 4.0f + ImGui::GetTextLineHeight();
 
     menu_theme::beginScrollBody("##SettingsBody", footerHeight);
     if (ImGui::BeginTabBar("SettingsTabs")) {
@@ -207,18 +207,23 @@ SettingsEditorResult SettingsEditor::render(UserSettings& settings, std::string_
     menu_theme::endScrollBody();
 
     ImGui::Spacing();
-    const float buttonWidth = ImGui::GetContentRegionAvail().x;
-    if (menu_theme::terminalActionRow("RESET TO DEFAULTS", nullptr, {buttonWidth, 30.0f * uiScale})) {
+    const float fullWidth = ImGui::GetContentRegionAvail().x;
+    const float spacingX = ImGui::GetStyle().ItemSpacing.x;
+    const float colWidth = (fullWidth - spacingX * 3.0f) / 4.0f;
+    const ImVec2 btnSize(colWidth, 34.0f * uiScale);
+    if (menu_theme::terminalActionRow("RESET", nullptr, btnSize)) {
         resetToDefaults();
     }
-
-    if (menu_theme::terminalActionRow("APPLY", "save current settings", {buttonWidth, 34.0f * uiScale})) {
+    ImGui::SameLine();
+    if (menu_theme::terminalActionRow("APPLY", nullptr, btnSize)) {
         apply(settings, settingsPath, result);
     }
-    if (menu_theme::terminalActionRow("BACK", "leave settings", {buttonWidth, 34.0f * uiScale})) {
+    ImGui::SameLine();
+    if (menu_theme::terminalActionRow("BACK", nullptr, btnSize)) {
         result.closeRequested = requestClose(settings);
     }
-    if (menu_theme::terminalActionRow("CANCEL", "discard prompt if needed", {buttonWidth, 34.0f * uiScale}, true)) {
+    ImGui::SameLine();
+    if (menu_theme::terminalActionRow("CANCEL", nullptr, btnSize, true)) {
         result.closeRequested = requestClose(settings);
     }
 

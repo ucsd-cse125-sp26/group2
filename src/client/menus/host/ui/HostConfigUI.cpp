@@ -25,7 +25,7 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
                                    inputs.hasUnsavedServerChanges ? "UNSAVED CHANGES" : "CONFIG CLEAN");
 
     const float spacingY = ImGui::GetStyle().ItemSpacing.y;
-    const int footerRows = inputs.serverRunning ? 5 : 2;
+    const int footerRows = 2;
     const float footerHeight = static_cast<float>(footerRows) * 32.0f + spacingY * static_cast<float>(footerRows + 2) +
                                ImGui::GetTextLineHeightWithSpacing();
 
@@ -159,23 +159,32 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
     menu_theme::endScrollBody();
 
     ImGui::Spacing();
-    ImGui::BeginDisabled(inputs.serverRunning);
-    if (menu_theme::terminalActionRow("LAUNCH SERVER", "start local host process", ImVec2(0.0f, 32.0f))) {
-        result.launchClicked = true;
-    }
-    ImGui::EndDisabled();
+    {
+        const float fullW = ImGui::GetContentRegionAvail().x;
+        const float spacingX = ImGui::GetStyle().ItemSpacing.x;
+        const float colW = (fullW - spacingX * 3.0f) / 4.0f;
+        const ImVec2 btnSize(colW, 32.0f);
 
-    if (inputs.serverRunning) {
-        ImGui::BeginDisabled(!inputs.canManageServer || !inputs.hasUnsavedServerChanges);
-        if (menu_theme::terminalActionRow("UPDATE SETTINGS", "push draft to server", ImVec2(0.0f, 32.0f))) {
+        ImGui::BeginDisabled(inputs.serverRunning);
+        if (menu_theme::terminalActionRow("LAUNCH", nullptr, btnSize)) {
+            result.launchClicked = true;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!inputs.serverRunning || !inputs.canManageServer || !inputs.hasUnsavedServerChanges);
+        if (menu_theme::terminalActionRow("UPDATE", nullptr, btnSize)) {
             result.updateClicked = true;
         }
         ImGui::EndDisabled();
-        if (menu_theme::terminalActionRow("GO TO LOBBY", "enter pre-match room", ImVec2(0.0f, 32.0f))) {
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!inputs.serverRunning);
+        if (menu_theme::terminalActionRow("GO TO LOBBY", nullptr, btnSize)) {
             result.goToLobbyClicked = true;
         }
-        ImGui::BeginDisabled(!inputs.canManageServer);
-        if (menu_theme::terminalActionRow("SHUTDOWN", "stop hosted server", ImVec2(0.0f, 32.0f), true)) {
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!inputs.serverRunning || !inputs.canManageServer);
+        if (menu_theme::terminalActionRow("SHUTDOWN", nullptr, btnSize, true)) {
             result.shutdownClicked = true;
         }
         ImGui::EndDisabled();

@@ -213,11 +213,11 @@ void applyStyle()
     c[ImGuiCol_TableBorderLight] = t.tableBorderLight;
     c[ImGuiCol_TableRowBg] = t.tableRowBg;
     c[ImGuiCol_TableRowBgAlt] = t.tableRowBgAlt;
-    c[ImGuiCol_Tab] = t.button;
-    c[ImGuiCol_TabHovered] = t.buttonHover;
-    c[ImGuiCol_TabActive] = t.header;
-    c[ImGuiCol_TabUnfocused] = t.frameBg;
-    c[ImGuiCol_TabUnfocusedActive] = t.header;
+    c[ImGuiCol_Tab] = ImVec4(0.18f, 0.18f, 0.17f, 1.0f);
+    c[ImGuiCol_TabHovered] = ImVec4(0.34f, 0.34f, 0.31f, 1.0f);
+    c[ImGuiCol_TabActive] = ImVec4(0.52f, 0.52f, 0.48f, 1.0f);
+    c[ImGuiCol_TabUnfocused] = ImVec4(0.14f, 0.14f, 0.13f, 1.0f);
+    c[ImGuiCol_TabUnfocusedActive] = ImVec4(0.46f, 0.46f, 0.42f, 1.0f);
     c[ImGuiCol_NavHighlight] = t.accent;
     c[ImGuiCol_TextSelectedBg] = ImVec4(t.accent.x, t.accent.y, t.accent.z, t.textSelectedAlpha);
 }

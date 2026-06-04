@@ -7,8 +7,8 @@
 
 namespace
 {
-constexpr float k_rootWindowBaseWidth = 420.0f;
-constexpr float k_rootWindowBaseHeight = 250.0f;
+constexpr float k_rootWindowBaseWidth = 640.0f;
+constexpr float k_rootWindowBaseHeight = 420.0f;
 constexpr float k_settingsWindowBaseWidth = 900.0f;
 constexpr float k_settingsWindowBaseHeight = 760.0f;
 constexpr float k_viewportWindowMargin = 0.94f;
@@ -105,19 +105,16 @@ SystemMenuOverlayResult SystemMenuOverlay::render(UserSettings& settings, std::s
             const SettingsEditorResult settingsResult = settingsEditor_.render(settings, settingsPath, uiScale);
             result.settingsApplied = settingsResult.applied;
         } else {
-            menu_theme::terminalStatusLine("SYSTEM MENU", "ESC CLOSES");
-            menu_theme::terminalSection("COMMANDS");
+            menu_theme::terminalSection("SYSTEM MENU");
             const float buttonWidth = ImGui::GetContentRegionAvail().x;
-            if (menu_theme::terminalActionRow("BACK", "return to previous screen", {buttonWidth, 36.0f * uiScale})) {
+            const float rowHeight = 64.0f * uiScale;
+            if (menu_theme::terminalActionRow("BACK", nullptr, {buttonWidth, rowHeight})) {
                 close();
             }
-            if (menu_theme::terminalActionRow("SETTINGS", "open controls and options", {buttonWidth, 36.0f * uiScale}))
-            {
+            if (menu_theme::terminalActionRow("SETTINGS", nullptr, {buttonWidth, rowHeight})) {
                 settingsEditor_.open(settings);
             }
-            if (menu_theme::terminalActionRow(
-                    "EXIT TO DESKTOP", "close application", {buttonWidth, 36.0f * uiScale}, true))
-            {
+            if (menu_theme::terminalActionRow("EXIT TO DESKTOP", nullptr, {buttonWidth, rowHeight}, true)) {
                 confirm_.open({.title = "Exit to Desktop?",
                                .message = "Exit the game and close the application?",
                                .confirmText = "Exit",
