@@ -528,6 +528,11 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         firstFrame_ = false;
     }
 
+    // Set the main camera BEFORE the shadow passes so they can frustum-cull
+    // shadow-casting lights against the current view (camera_.getViewProjectionFrustumPlane()).
+    float fov = 60.0f;
+    setMainCamera(eye, yaw, pitch, roll, width, height, fov);
+
     drawToShadowMap(cmd, dynamicShadowMaps_,1, false, true, true,STATIC);
 
     Uint8 movingRes = 1;
@@ -535,9 +540,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     movingRes = 2;
 #endif
     drawToShadowMap(cmd, movingLightShadowMaps_,movingRes, true, true, true,MOVING);
-
-    float fov = 60.0f;
-    setMainCamera(eye, yaw, pitch, roll, width, height, fov);
 
     drawGeometryPass(sceneColor_, cmd);
     drawWeaponPass(sceneColor_, cmd);
@@ -620,7 +622,8 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
                                   bool staticGeometry,
                                   bool entityGeometry,
                                   bool skinnedGeometry,
-                                  PointLightType lightType)
+                                  PointLightType lightType,
+                                  bool cullByCamera)
 {
 
     Uint32 lightCount = 0;
@@ -642,8 +645,33 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
         glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
     shadowProjection[1][1] *= -1;
 
+    // Cull shadow-casting lights against the current camera frustum. A light
+    // whose influence sphere (position, range) lies entirely outside the view
+    // cannot affect any visible pixel — and the fragment shader range-culls it
+    // too — so skipping its 6-face cubemap render is free of visible artifacts.
+    const FrustumPlanes camFrustum = camera_.getViewProjectionFrustumPlane();
+    auto lightSphereInView = [&](const PointLight& l) -> bool {
+        if (l.range <= 0.0f)
+            return true; // unbounded light: never cull
+        const glm::vec4 sides[NUM_FRUSTUM_PLANES] = {camFrustum.left,   camFrustum.right,
+                                                     camFrustum.bottom, camFrustum.top,
+                                                     camFrustum.near,   camFrustum.far};
+        for (const glm::vec4& pl : sides) {
+            const glm::vec3 n(pl);
+            const float len = glm::length(n);
+            if (len < 1e-8f)
+                continue;
+            if ((glm::dot(n, l.position) + pl.w) / len < -l.range)
+                return false; // sphere fully behind this plane → outside frustum
+        }
+        return true;
+    };
+
     for (Uint8 iLight = 0; iLight < std::min(lightCount,maxLightCount); iLight++) {
         PointLight& light = pointLightArray[iLight];
+
+        if (cullByCamera && !lightSphereInView(light))
+            continue;
 
         for (int face = 0; face < NUM_CUBE_FACES; face++) {
             glm::vec3& iCubeFaceTarget = cubeFaceTargets_[face];
@@ -667,7 +695,10 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
 
 void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
 {
-    drawToShadowMap(cmd, staticShadowMaps_,0, true, false, false,STATIC);
+    // One-time bake of static-world shadows for ALL static lights. Must NOT be
+    // camera-frustum-culled: a light off-screen at startup would otherwise be
+    // permanently missing its baked world shadow (this pass never runs again).
+    drawToShadowMap(cmd, staticShadowMaps_,0, true, false, false,STATIC, /*cullByCamera=*/false);
 }
 
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)

@@ -105,18 +105,32 @@ void main()
         vec3 lightToWorldPos = frag_worldPos - pLight_i.pos;
         float r = length(lightToWorldPos);
 
-        vec3 absDir = abs(lightToWorldPos);
-        float dominantAxis = max(absDir.x, max(absDir.y, absDir.z));
-        float depth = depthA - depthB / dominantAxis;
-
-        float staticShadow_i = texture(staticPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
-        float dynamicShadow_i = texture(dynamicPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
-
-        float shadow_i = dynamicShadow_i * staticShadow_i;
+        // Back-face cull (exact): a surface facing away from the light receives
+        // zero diffuse, so skip it AND its shadow-cubemap samples entirely. This
+        // removes ~half of all per-pixel shadow lookups with no visual change.
+        float cosT_i = max(0.0f, dot(-lightToWorldPos / max(r, 1e-4), normal));
+        if (cosT_i <= 0.0)
+            continue;
 
         float attenutaion = 1.0f / (r * r);
 
-        float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
+        // Shadowing is the dominant per-pixel cost. Sample the shadow cubemaps
+        // only for lights whose authored `range` reaches this fragment; past the
+        // range the light still contributes (unchanged brightness) but is treated
+        // as unshadowed — distant point-light shadows are imperceptible. range<=0
+        // keeps the legacy always-shadowed behaviour.
+        float shadow_i = 1.0f;
+        float range = pLight_i.range;
+        if (range <= 0.0 || r < range) {
+            vec3 absDir = abs(lightToWorldPos);
+            float dominantAxis = max(absDir.x, max(absDir.y, absDir.z));
+            float depth = depthA - depthB / dominantAxis;
+
+            float staticShadow_i = texture(staticPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
+            float dynamicShadow_i = texture(dynamicPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
+            shadow_i = dynamicShadow_i * staticShadow_i;
+        }
+
         irradiance += shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion * cosT_i;
 
     }
@@ -126,15 +140,21 @@ void main()
         vec3 lightToWorldPos = frag_worldPos - pLight_i.pos;
         float r = length(lightToWorldPos);
 
-        vec3 absDir = abs(lightToWorldPos);
-        float dominantAxis = max(absDir.x, max(absDir.y, absDir.z));
-        float depth = depthA - depthB / dominantAxis;
-
-        float shadow_i = texture(movingPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
+        float cosT_i = max(0.0f, dot(-lightToWorldPos / max(r, 1e-4), normal));
+        if (cosT_i <= 0.0)
+            continue;
 
         float attenutaion = 1.0f / (r * r);
 
-        float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
+        float shadow_i = 1.0f;
+        float range = pLight_i.range;
+        if (range <= 0.0 || r < range) {
+            vec3 absDir = abs(lightToWorldPos);
+            float dominantAxis = max(absDir.x, max(absDir.y, absDir.z));
+            float depth = depthA - depthB / dominantAxis;
+            shadow_i = texture(movingPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
+        }
+
         irradiance += shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion * cosT_i;
 
     }
