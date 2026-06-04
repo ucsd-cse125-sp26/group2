@@ -992,16 +992,47 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyGun);
     }
 
-    if (ImGui::Button("Energy Tesla Straight", {160.f, 0.f})) {
-        const glm::vec3 guidePoint = hipfireOrigin + forward * particleSpawnDist_;
-        ps.debugEnergyTeslaArc(hipfireOrigin, guidePoint, guidePoint, false, 0.0f);
+    ImGui::SeparatorText("Energy Gun Tesla");
+    ImGui::Checkbox("Live Tesla Preview", &energyTeslaPreviewLive_);
+    ImGui::SameLine();
+    ImGui::Checkbox("Locked", &energyTeslaPreviewLocked_);
+    ImGui::SliderFloat("Guide distance", &energyTeslaGuideDist_, 30.f, 350.f, "%.0f");
+    ImGui::SliderFloat("Endpoint forward", &energyTeslaEndpointForward_, 20.f, 350.f, "%.0f");
+    ImGui::SliderFloat("Endpoint right", &energyTeslaEndpointRight_, -180.f, 180.f, "%.0f");
+    ImGui::SliderFloat("Endpoint up", &energyTeslaEndpointUp_, -120.f, 160.f, "%.0f");
+    ImGui::SliderFloat("Lock strength", &energyTeslaPreviewLockStrength_, 0.f, 1.f, "%.2f");
+
+    auto buildEnergyTeslaPreview = [&]() {
+        const glm::vec3 guidePoint = hipfireOrigin + forward * energyTeslaGuideDist_;
+        const glm::vec3 targetPoint = energyTeslaPreviewLocked_
+                                          ? hipfireOrigin + forward * energyTeslaEndpointForward_ +
+                                                camRight * energyTeslaEndpointRight_ + worldUp * energyTeslaEndpointUp_
+                                          : guidePoint;
+        return std::array<glm::vec3, 2>{guidePoint, targetPoint};
+    };
+
+    const auto previewPoints = buildEnergyTeslaPreview();
+    if (energyTeslaPreviewLive_) {
+        ps.debugEnergyTeslaPreview(hipfireOrigin,
+                                   previewPoints[0],
+                                   previewPoints[1],
+                                   energyTeslaPreviewLocked_,
+                                   energyTeslaPreviewLocked_ ? energyTeslaPreviewLockStrength_ : 0.0f);
+    }
+    if (ImGui::Button("Spawn Tesla Preview", {160.f, 0.f})) {
+        ps.debugEnergyTeslaArc(hipfireOrigin,
+                               previewPoints[0],
+                               previewPoints[1],
+                               energyTeslaPreviewLocked_,
+                               energyTeslaPreviewLocked_ ? energyTeslaPreviewLockStrength_ : 0.0f);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Energy Tesla Locked", {155.f, 0.f})) {
-        const glm::vec3 guidePoint = hipfireOrigin + forward * particleSpawnDist_;
-        const glm::vec3 targetPoint = hipfireOrigin + forward * (particleSpawnDist_ * 0.68f) + camRight * 95.0f +
-                                      worldUp * 32.0f;
-        ps.debugEnergyTeslaArc(hipfireOrigin, guidePoint, targetPoint, true, 1.0f);
+    if (ImGui::Button("Reset Tesla Endpoint", {165.f, 0.f})) {
+        energyTeslaGuideDist_ = 200.f;
+        energyTeslaEndpointForward_ = 136.f;
+        energyTeslaEndpointRight_ = 95.f;
+        energyTeslaEndpointUp_ = 32.f;
+        energyTeslaPreviewLockStrength_ = 1.f;
     }
 
     if (ImGui::Button("Smoke Cloud", {120.f, 0.f}))

@@ -233,6 +233,15 @@ void ParticleSystem::debugEnergyTeslaArc(glm::vec3 origin,
     energyTesla_.debugPulse(origin, guidePoint, hitPoint, locked, lockStrength);
 }
 
+void ParticleSystem::debugEnergyTeslaPreview(glm::vec3 origin,
+                                             glm::vec3 guidePoint,
+                                             glm::vec3 hitPoint,
+                                             bool locked,
+                                             float lockStrength)
+{
+    energyTesla_.debugPreview(origin, guidePoint, hitPoint, locked, lockStrength);
+}
+
 // SDF text
 
 void ParticleSystem::drawWorldText(glm::vec3 worldPos, std::string_view text, glm::vec4 color, float worldHeight)

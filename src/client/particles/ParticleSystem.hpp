@@ -89,6 +89,11 @@ public:
 
     /// @brief Spawn a short debug preview of the sustained EnergyGun Tesla arc.
     void debugEnergyTeslaArc(glm::vec3 origin, glm::vec3 guidePoint, glm::vec3 hitPoint, bool locked, float lockStrength);
+    void debugEnergyTeslaPreview(glm::vec3 origin,
+                                  glm::vec3 guidePoint,
+                                  glm::vec3 hitPoint,
+                                  bool locked,
+                                  float lockStrength);
 
     // SDF text (queued per frame, flushed in render)
 

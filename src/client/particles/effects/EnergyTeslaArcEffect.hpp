@@ -26,6 +26,7 @@ public:
                glm::vec3 hitPoint,
                bool locked,
                float lockStrength);
+    void debugPreview(glm::vec3 origin, glm::vec3 guidePoint, glm::vec3 hitPoint, bool locked, float lockStrength);
     void debugPulse(glm::vec3 origin, glm::vec3 guidePoint, glm::vec3 hitPoint, bool locked, float lockStrength);
     void update(float dt, glm::vec3 camForward);
 
@@ -83,6 +84,7 @@ private:
     std::array<Beam, k_maxBeams> beams_{};
     std::vector<ArcVertex> mainArcVerts_;
     std::vector<ArcVertex> detailArcVerts_;
+    uint32_t debugPreviewKey_ = 0xEA10u;
     uint32_t debugKey_ = 0xEA11u;
 
     [[nodiscard]] static float hash01(uint32_t n);

@@ -101,28 +101,19 @@ EnergyTeslaArcEffect::PathSample EnergyTeslaArcEffect::buildGuidePath(glm::vec3 
     const glm::vec3 guideN = safeNormalize(guideAxis, hitPoint - origin);
     const float guideLen = glm::max(glm::length(guideAxis), 1.0f);
     (void)lockStrength;
-    const float bend = locked ? 1.0f : 0.0f;
-    constexpr float kBendStart = 0.58f;
-
-    const glm::vec3 bendStart = origin + guideAxis * kBendStart;
-    const glm::vec3 toTarget = hitPoint - bendStart;
+    const glm::vec3 toTarget = hitPoint - origin;
     const float tailLen = glm::max(glm::length(toTarget), guideLen * 0.12f);
     const glm::vec3 targetN = safeNormalize(toTarget, guideN);
-    const glm::vec3 cp1 = bendStart + guideN * tailLen * 0.36f;
-    const glm::vec3 cp2 = hitPoint - targetN * tailLen * 0.24f;
+    const glm::vec3 cp1 = origin + guideN * guideLen * 0.38f;
+    const glm::vec3 cp2 = hitPoint - targetN * tailLen * 0.28f;
 
     for (int i = 0; i <= k_mainSegs; ++i) {
         const float t = static_cast<float>(i) / static_cast<float>(k_mainSegs);
-        const glm::vec3 straight = glm::mix(origin, guidePoint, t);
-        glm::vec3 bent = straight;
-        if (t > kBendStart) {
-            const float u = (t - kBendStart) / (1.0f - kBendStart);
-            bent = cubic(bendStart, cp1, cp2, hitPoint, u);
-        }
-        path.points[static_cast<size_t>(i)] = glm::mix(straight, bent, bend);
+        path.points[static_cast<size_t>(i)] = locked ? cubic(origin, cp1, cp2, hitPoint, t)
+                                                     : glm::mix(origin, guidePoint, t);
     }
     path.points.front() = origin;
-    path.points[static_cast<size_t>(path.count - 1)] = glm::mix(guidePoint, hitPoint, bend);
+    path.points[static_cast<size_t>(path.count - 1)] = locked ? hitPoint : guidePoint;
     return path;
 }
 
@@ -207,6 +198,15 @@ void EnergyTeslaArcEffect::debugPulse(glm::vec3 origin,
                                       float lockStrength)
 {
     drive(debugKey_++, origin, guidePoint, hitPoint, locked, lockStrength);
+}
+
+void EnergyTeslaArcEffect::debugPreview(glm::vec3 origin,
+                                        glm::vec3 guidePoint,
+                                        glm::vec3 hitPoint,
+                                        bool locked,
+                                        float lockStrength)
+{
+    drive(debugPreviewKey_, origin, guidePoint, hitPoint, locked, lockStrength);
 }
 
 void EnergyTeslaArcEffect::appendArcStrip(std::vector<ArcVertex>& out,
@@ -371,8 +371,8 @@ void EnergyTeslaArcEffect::update(float dt, glm::vec3 camForward)
 
         const float fadeIn = std::min(1.0f, beam.age / k_fadeTime);
         const float fade = fadeIn;
-        const float baseAmp = len * (beam.locked ? (0.010f + beam.displayedLock * 0.018f) : 0.008f);
-        const int strandCount = beam.locked ? 1 : k_maxStrands;
+        const float baseAmp = len * (beam.locked ? (0.007f + beam.displayedLock * 0.012f) : 0.0055f);
+        const int strandCount = k_maxStrands;
         const uint32_t crackleFrame = static_cast<uint32_t>(std::floor(beam.time * 34.0f));
         const uint32_t sparkFrame = static_cast<uint32_t>(std::floor(beam.time * 71.0f));
 
@@ -391,19 +391,19 @@ void EnergyTeslaArcEffect::update(float dt, glm::vec3 camForward)
                 const uint32_t seedBits = static_cast<uint32_t>(strandSeed * 4096.0f);
                 const uint32_t cell = seedBits ^ (i * 2246822519u) ^ (crackleFrame * 3266489917u);
                 const uint32_t sparkCell = seedBits ^ (i * 668265263u) ^ (sparkFrame * 374761393u);
-                const float zigzag = ((i & 1u) != 0u ? 1.0f : -1.0f) * (0.45f + hash01(cell + 17u) * 0.95f);
-                const float hardStepU = signedHash(cell + 101u) * 1.25f + zigzag;
-                const float hardStepV = signedHash(cell + 211u) * 0.92f +
-                                        ((i % 3u) == 0u ? signedHash(sparkCell + 37u) * 0.85f : 0.0f);
-                const float waveU = std::sin(t * 46.0f + beam.time * 42.0f + strandSeed) * 0.55f;
-                const float waveV = std::sin(t * 31.0f - beam.time * 35.0f + strandSeed * 0.73f) * 0.36f;
+                const float zigzag = ((i & 1u) != 0u ? 1.0f : -1.0f) * (0.28f + hash01(cell + 17u) * 0.46f);
+                const float hardStepU = signedHash(cell + 101u) * 0.62f + zigzag;
+                const float hardStepV = signedHash(cell + 211u) * 0.42f +
+                                        ((i % 4u) == 0u ? signedHash(sparkCell + 37u) * 0.30f : 0.0f);
+                const float waveU = std::sin(t * 42.0f + beam.time * 36.0f + strandSeed) * 0.34f;
+                const float waveV = std::sin(t * 27.0f - beam.time * 30.0f + strandSeed * 0.73f) * 0.22f;
                 glm::vec3 p = path.points[i];
                 p += perp * strandOffset * env;
-                p += perp * ((hardStepU + waveU + wfbm(t, strandSeed, beam.warpSeed, beam.time, 3) * 0.42f) *
+                p += perp * ((hardStepU + waveU + wfbm(t, strandSeed, beam.warpSeed, beam.time, 3) * 0.26f) *
                              baseAmp * env * tailBoost);
                 p += perp2 * ((hardStepV + waveV + wfbm(t, strandSeed + 33.0f, beam.warpSeed + 19.0f, beam.time, 2) *
-                                           0.35f) *
-                              baseAmp * 0.58f * env * tailBoost);
+                                           0.22f) *
+                              baseAmp * 0.46f * env * tailBoost);
                 pts.push_back(p);
             }
             appendLayeredBolt(pts, fade * (strand == 0 ? 1.0f : 0.56f), strand == 0 ? 1.0f : 0.72f, strand == 0,
