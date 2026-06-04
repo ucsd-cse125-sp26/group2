@@ -274,15 +274,30 @@ void EnergyTeslaArcEffect::appendBranches(const Beam& beam,
                        static_cast<int>(mainPts.size() - 1));
         const glm::vec3 root = mainPts[static_cast<size_t>(rootIdx)];
         const float branchLen = len * branch.length * (beam.locked ? (0.8f + beam.displayedLock * 0.65f) : 0.7f);
-        const glm::vec3 dir = safeNormalize(axisN * 0.34f + perp * branch.side + perp2 * std::sin(branch.angle), perp);
+        const int prevIdx = std::max(rootIdx - 1, 0);
+        const int nextIdx = std::min(rootIdx + 1, static_cast<int>(mainPts.size() - 1));
+        glm::vec3 tangent = safeNormalize(mainPts[static_cast<size_t>(nextIdx)] - mainPts[static_cast<size_t>(prevIdx)],
+                                          axisN);
+        if (glm::dot(tangent, axisN) < 0.0f)
+            tangent = -tangent;
+
+        const float sideNoise = hash01(static_cast<uint32_t>(branch.seed * 1009.0f) + 17u) - 0.5f;
+        const glm::vec3 sideVec =
+            safeNormalize(perp * branch.side + perp2 * (std::sin(branch.angle) * 0.55f + sideNoise * 0.45f), perp);
+        const float sidePush = branchLen * (0.18f + hash01(static_cast<uint32_t>(branch.seed * 1597.0f) + 83u) * 0.14f);
         std::vector<glm::vec3> pts;
         pts.reserve(k_branchSegs + 1);
         for (int j = 0; j <= k_branchSegs; ++j) {
             const float t = static_cast<float>(j) / static_cast<float>(k_branchSegs);
             const float env = std::sin(t * glm::pi<float>());
-            glm::vec3 p = root + dir * branchLen * t;
-            p += perp * (fbm(t, branch.seed, beam.time * 1.8f, 2) * branchLen * 0.045f * env);
-            p += perp2 * (fbm(t, branch.seed + 7.3f, beam.time * 1.8f, 2) * branchLen * 0.025f * env);
+            const float splay = std::pow(t, 0.86f);
+            const uint32_t cell = static_cast<uint32_t>(branch.seed * 4096.0f) ^
+                                  (static_cast<uint32_t>(j) * 2246822519u) ^
+                                  (static_cast<uint32_t>(std::floor(beam.time * 37.0f)) * 3266489917u);
+            glm::vec3 p = root + tangent * branchLen * t + sideVec * sidePush * splay;
+            p += sideVec * (signedHash(cell + 101u) * branchLen * 0.045f * env);
+            p += perp2 * ((signedHash(cell + 211u) + fbm(t, branch.seed + 7.3f, beam.time * 1.8f, 2) * 0.6f) *
+                          branchLen * 0.026f * env);
             pts.push_back(p);
         }
         appendArcStrip(detailArcVerts_, pts, 0.54f, {0.28f, 0.82f, 1.00f, 0.20f * fade}, camForward);
