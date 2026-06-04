@@ -120,6 +120,39 @@ constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponD
 struct DroppedWeaponRenderableTag
 {};
 
+struct CameraBasis
+{
+    glm::vec3 forward{0.0f, 0.0f, 1.0f};
+    glm::vec3 right{1.0f, 0.0f, 0.0f};
+    glm::vec3 up{0.0f, 1.0f, 0.0f};
+};
+
+CameraBasis buildCameraBasis(float yaw, float pitch, float roll)
+{
+    if (!std::isfinite(yaw))
+        yaw = 0.0f;
+    if (!std::isfinite(pitch))
+        pitch = 0.0f;
+    if (!std::isfinite(roll))
+        roll = 0.0f;
+
+    constexpr float kPitchLimit = 1.5620697f; // 89.5 degrees in radians.
+    pitch = std::clamp(pitch, -kPitchLimit, kPitchLimit);
+
+    const float cosPitch = std::cos(pitch);
+    const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
+    const glm::vec3 worldUp{0.0f, 1.0f, 0.0f};
+
+    const glm::vec3 rightRaw = glm::cross(forward, worldUp);
+    const float rightLen = glm::length(rightRaw);
+    const glm::vec3 preRollRight = (rightLen > 1e-4f) ? (rightRaw / rightLen) : glm::vec3{1.0f, 0.0f, 0.0f};
+    const glm::vec3 preRollUp = glm::normalize(glm::cross(preRollRight, forward));
+    const glm::vec3 up = preRollUp * std::cos(roll) + preRollRight * std::sin(roll);
+    const glm::vec3 right = glm::normalize(glm::cross(forward, up));
+
+    return {.forward = forward, .right = right, .up = up};
+}
+
 // (kThirdPersonWeaponPitchMax was used by the removed buildThirdPersonWeaponAttachment;
 // the bone-parented weapon path doesn't pitch-clamp the weapon — the spine bend
 // max-pitch in CharacterAnimator handles that.)
@@ -3319,8 +3352,13 @@ SDL_AppResult Game::iterate()
         particleSystem.driveGroundFire(e, field.position, field.radius, field.remaining, field.remaining);
     });
 
-    // Update particle system (render-rate, not physics-rate)
-    particleSystem.update(frameTime, renderer->getCamera(), registry);
+    // Update particle system (render-rate, not physics-rate) from the camera
+    // pose this frame will render with. renderer->getCamera() is refreshed in
+    // drawFrame(), which happens later, so using it here makes muzzle-attached
+    // particles visibly trail behind fast player movement.
+    const CameraBasis particleCamera = buildCameraBasis(renderYaw, renderPitch, currentCameraRoll_);
+    particleSystem.update(
+        frameTime, renderEye, particleCamera.forward, particleCamera.right, particleCamera.up, registry);
     phaseSnap(phaseStats.particlesMs);
 
     audio::ListenerState audioListener;
@@ -4683,33 +4721,66 @@ SDL_AppResult Game::iterate()
 
             glm::vec3 lightStart = beam.origin;
             glm::vec3 lightEnd = beam.hitPoint;
+            glm::vec3 guideEnd = (glm::length(beam.guidePoint - beam.origin) > 0.5f) ? beam.guidePoint : beam.hitPoint;
 
-            // The auto-lock Tesla beam endpoint is server-authoritative (the
-            // locked target, or a forward point capped at maxRange), so the
-            // lights follow it directly. Other beams (none today) keep the
-            // zero-lag local raycast prediction.
+            // Local beam lights use current-frame prediction so the glow stays
+            // pinned to the weapon while the player is moving.
             if (registry.all_of<LocalPlayer>(e) && beam.type != WeaponType::EnergyGun) {
-                const float cosPitch = std::cos(renderPitch);
-                const glm::vec3 fwd{
-                    std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
                 lightStart = renderEye;
-                const auto predictedHit = physics::raycastWorld(renderEye, fwd, physics::activeWorld());
-                lightEnd = predictedHit.hit ? predictedHit.point : (renderEye + fwd * 5000.0f);
+                const auto predictedHit = physics::raycastWorld(renderEye, particleCamera.forward, physics::activeWorld());
+                lightEnd = predictedHit.hit ? predictedHit.point : (renderEye + particleCamera.forward * 5000.0f);
+            } else if (registry.all_of<LocalPlayer>(e) && beam.type == WeaponType::EnergyGun) {
+                float guideLen = glm::length(beam.guidePoint - beam.origin);
+                if (guideLen < 0.5f)
+                    guideLen = glm::length(beam.hitPoint - beam.origin);
+                if (guideLen < 0.5f)
+                    guideLen = 140.0f;
+                lightStart =
+                    renderEye + particleCamera.forward * 6.0f + particleCamera.right * 5.0f - particleCamera.up * 5.0f;
+                guideEnd = lightStart + particleCamera.forward * guideLen;
+                if (beam.locked == 0)
+                    lightEnd = guideEnd;
+            }
+
+            const glm::vec3 lightColor = (beam.type == WeaponType::EnergyGun) ? glm::vec3{0.16f, 0.78f, 1.0f}
+                                                                              : glm::vec3{0.3f, 1.0f, 0.2f};
+            if (beam.type == WeaponType::EnergyGun && beam.locked == 0) {
+                if (dynLights.size() < 14) {
+                    dynLights.push_back(PointLight{
+                        .position = lightStart,
+                        .intensity = 1.2f,
+                        .color = lightColor,
+                        .range = 40.0f,
+                    });
+                    ++beamPointLights;
+                }
+                return;
             }
 
             const glm::vec3 delta = lightEnd - lightStart;
             const float len = glm::length(delta);
             if (len < 1.0f)
                 return;
-            const int numLights = std::max(2, static_cast<int>(len / 80.0f) + 1);
-            const glm::vec3 lightColor{0.3f, 1.0f, 0.2f};
+            const int numLights = (beam.type == WeaponType::EnergyGun)
+                                      ? std::max(2, static_cast<int>(len / 130.0f) + 1)
+                                      : std::max(2, static_cast<int>(len / 80.0f) + 1);
             for (int i = 0; i < numLights && dynLights.size() < 14; ++i) {
                 const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
+                glm::vec3 lightPos = lightStart + delta * t;
+                float intensity = 3.0f;
+                float range = 200.0f;
+                if (beam.type == WeaponType::EnergyGun) {
+                    const float tail = (beam.locked != 0) ? std::clamp((t - 0.62f) / 0.38f, 0.0f, 1.0f) : 0.0f;
+                    const glm::vec3 straightPos = glm::mix(lightStart, guideEnd, t);
+                    lightPos = glm::mix(straightPos, lightStart + delta * t, tail * beam.lockStrength);
+                    intensity = (beam.locked != 0 && t > 0.75f) ? 3.2f : 2.0f;
+                    range = (beam.locked != 0 && t > 0.75f) ? 190.0f : 155.0f;
+                }
                 dynLights.push_back(PointLight{
-                    .position = lightStart + delta * t,
-                    .intensity = 3.0f,
+                    .position = lightPos,
+                    .intensity = intensity,
                     .color = lightColor,
-                    .range = 200.0f,
+                    .range = range,
                 });
                 ++beamPointLights;
             }

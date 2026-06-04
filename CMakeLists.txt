@@ -811,6 +811,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/HitscanEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TeslaBeamEffect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TeslaBeamEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/EnergyTeslaArcEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/EnergyTeslaArcEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.cpp"
@@ -1284,6 +1286,11 @@ target_precompile_headers(group2 PRIVATE
 # PCH_NO_TIMESTAMP_TARGETS — see note near top of file.
 if(PCH_NO_TIMESTAMP_FLAG)
     target_compile_options(group2 PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+if(MSVC)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.cpp"
+        PROPERTIES COMPILE_OPTIONS "/bigobj")
 endif()
 
 # Copy assets (models, textures, …) next to the binary so the renderer can
@@ -2078,6 +2085,25 @@ endif()
 set_compiler_warnings(explosion_vfx_tests)
 enable_sanitizers(explosion_vfx_tests)
 add_test(NAME explosion_vfx_tests COMMAND explosion_vfx_tests)
+
+add_executable(energy_tesla_arc_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/energy_tesla_arc_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/EnergyTeslaArcEffect.cpp"
+)
+target_include_directories(energy_tesla_arc_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+)
+target_link_libraries(energy_tesla_arc_tests PRIVATE
+    EnTT::EnTT
+    glm::glm
+)
+if(MSVC AND PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(energy_tesla_arc_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(energy_tesla_arc_tests)
+enable_sanitizers(energy_tesla_arc_tests)
+add_test(NAME energy_tesla_arc_tests COMMAND energy_tesla_arc_tests)
 
 add_executable(hud_svg_raster_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/hud_svg_raster_tests.cpp"
