@@ -1,7 +1,7 @@
 /// @file MenuTheme.hpp
 /// @brief Shared visual theme + helpers for the front-end ImGui menus (home/host/lobby/pause).
 ///
-/// All front-end menus share one cohesive dark/cyan look.  Call applyStyle() and
+/// All front-end menus share one cohesive white terminal look.  Call applyStyle() and
 /// loadFonts() once after ImGui::CreateContext(); call drawBackground() each frame
 /// from a menu screen (after ImGui::NewFrame()) to paint the responsive backdrop.
 #pragma once
@@ -14,52 +14,52 @@ namespace menu_theme
 {
 struct ThemeSettings
 {
-    ImVec4 accent{0.20f, 0.80f, 0.94f, 1.00f};
-    ImVec4 accentHover{0.38f, 0.90f, 1.00f, 1.00f};
-    ImVec4 accentActive{0.12f, 0.55f, 0.66f, 1.00f};
-    ImVec4 accentText{0.03f, 0.09f, 0.12f, 1.00f};
-    ImVec4 text{0.88f, 0.93f, 0.97f, 1.00f};
-    ImVec4 textDim{0.55f, 0.62f, 0.70f, 1.00f};
-    ImVec4 windowBg{0.05f, 0.07f, 0.10f, 0.97f};
-    ImVec4 childBg{0.08f, 0.11f, 0.15f, 0.85f};
-    ImVec4 popupBg{0.06f, 0.08f, 0.12f, 0.98f};
-    ImVec4 frameBg{0.12f, 0.16f, 0.21f, 1.00f};
-    ImVec4 frameHover{0.16f, 0.22f, 0.28f, 1.00f};
-    ImVec4 frameActive{0.20f, 0.28f, 0.35f, 1.00f};
-    ImVec4 button{0.14f, 0.19f, 0.25f, 1.00f};
-    ImVec4 buttonHover{0.20f, 0.42f, 0.50f, 1.00f};
-    ImVec4 buttonActive{0.12f, 0.30f, 0.37f, 1.00f};
-    ImVec4 header{0.16f, 0.30f, 0.38f, 1.00f};
-    ImVec4 border{0.22f, 0.34f, 0.42f, 0.55f};
-    ImVec4 danger{0.62f, 0.16f, 0.16f, 1.00f};
-    ImVec4 dangerHover{0.78f, 0.20f, 0.20f, 1.00f};
-    ImVec4 dangerActive{0.48f, 0.10f, 0.10f, 1.00f};
-    ImVec4 titleBg{0.04f, 0.06f, 0.09f, 1.00f};
-    ImVec4 titleBgActive{0.07f, 0.11f, 0.15f, 1.00f};
-    ImVec4 titleBgCollapsed{0.04f, 0.06f, 0.09f, 0.80f};
-    ImVec4 menuBarBg{0.08f, 0.11f, 0.15f, 1.00f};
-    ImVec4 scrollbarBg{0.04f, 0.06f, 0.09f, 0.60f};
-    ImVec4 tableHeaderBg{0.10f, 0.14f, 0.19f, 1.00f};
-    ImVec4 tableBorderLight{0.18f, 0.24f, 0.30f, 0.40f};
+    ImVec4 accent{0.96f, 0.96f, 0.92f, 1.00f};
+    ImVec4 accentHover{1.00f, 1.00f, 1.00f, 1.00f};
+    ImVec4 accentActive{0.72f, 0.72f, 0.68f, 1.00f};
+    ImVec4 accentText{0.02f, 0.02f, 0.02f, 1.00f};
+    ImVec4 text{0.96f, 0.96f, 0.92f, 1.00f};
+    ImVec4 textDim{0.58f, 0.60f, 0.58f, 1.00f};
+    ImVec4 windowBg{0.01f, 0.01f, 0.01f, 0.92f};
+    ImVec4 childBg{0.02f, 0.02f, 0.02f, 0.72f};
+    ImVec4 popupBg{0.01f, 0.01f, 0.01f, 0.98f};
+    ImVec4 frameBg{0.02f, 0.02f, 0.02f, 0.96f};
+    ImVec4 frameHover{0.10f, 0.10f, 0.10f, 1.00f};
+    ImVec4 frameActive{0.18f, 0.18f, 0.17f, 1.00f};
+    ImVec4 button{0.02f, 0.02f, 0.02f, 0.96f};
+    ImVec4 buttonHover{0.13f, 0.13f, 0.12f, 1.00f};
+    ImVec4 buttonActive{0.22f, 0.22f, 0.20f, 1.00f};
+    ImVec4 header{0.08f, 0.08f, 0.08f, 0.98f};
+    ImVec4 border{0.88f, 0.88f, 0.82f, 0.72f};
+    ImVec4 danger{0.36f, 0.04f, 0.04f, 1.00f};
+    ImVec4 dangerHover{0.58f, 0.08f, 0.08f, 1.00f};
+    ImVec4 dangerActive{0.86f, 0.18f, 0.16f, 1.00f};
+    ImVec4 titleBg{0.01f, 0.01f, 0.01f, 1.00f};
+    ImVec4 titleBgActive{0.03f, 0.03f, 0.03f, 1.00f};
+    ImVec4 titleBgCollapsed{0.01f, 0.01f, 0.01f, 0.86f};
+    ImVec4 menuBarBg{0.02f, 0.02f, 0.02f, 1.00f};
+    ImVec4 scrollbarBg{0.01f, 0.01f, 0.01f, 0.70f};
+    ImVec4 tableHeaderBg{0.04f, 0.04f, 0.04f, 1.00f};
+    ImVec4 tableBorderLight{0.72f, 0.72f, 0.68f, 0.42f};
     ImVec4 tableRowBg{0.00f, 0.00f, 0.00f, 0.00f};
-    ImVec4 tableRowBgAlt{1.00f, 1.00f, 1.00f, 0.025f};
-    float textSelectedAlpha = 0.35f;
+    ImVec4 tableRowBgAlt{1.00f, 1.00f, 1.00f, 0.045f};
+    float textSelectedAlpha = 0.28f;
 
-    float windowRounding = 6.0f;
-    float childRounding = 2.0f;
-    float frameRounding = 2.0f;
-    float popupRounding = 6.0f;
-    float grabRounding = 1.0f;
-    float scrollbarRounding = 2.0f;
+    float windowRounding = 0.0f;
+    float childRounding = 0.0f;
+    float frameRounding = 0.0f;
+    float popupRounding = 0.0f;
+    float grabRounding = 0.0f;
+    float scrollbarRounding = 0.0f;
     float windowBorderSize = 1.0f;
-    float frameBorderSize = 0.0f;
+    float frameBorderSize = 1.0f;
     float popupBorderSize = 1.0f;
-    ImVec2 windowPadding{22.0f, 20.0f};
-    ImVec2 framePadding{12.0f, 7.0f};
-    ImVec2 itemSpacing{10.0f, 9.0f};
+    ImVec2 windowPadding{24.0f, 20.0f};
+    ImVec2 framePadding{12.0f, 8.0f};
+    ImVec2 itemSpacing{10.0f, 10.0f};
     ImVec2 itemInnerSpacing{8.0f, 6.0f};
     ImVec2 cellPadding{8.0f, 6.0f};
-    float scrollbarSize = 14.0f;
+    float scrollbarSize = 12.0f;
     float grabMinSize = 12.0f;
     ImVec2 windowTitleAlign{0.5f, 0.5f};
 
@@ -71,27 +71,44 @@ struct ThemeSettings
     float panelTitleScale = 1.9f;
     float panelTitleRuleOffsetY = 3.0f;
     float panelTitleRuleThickness = 2.0f;
-    float panelTitleRuleRounding = 2.0f;
+    float panelTitleRuleRounding = 0.0f;
     float panelTitleBottomSpacing = 14.0f;
     float headingTopSpacing = 4.0f;
     float headingRuleOffsetY = 1.0f;
     float headingRuleThickness = 1.0f;
     float headingBottomSpacing = 6.0f;
 
-    ImVec4 backgroundTop{18.0f / 255.0f, 26.0f / 255.0f, 38.0f / 255.0f, 1.0f};
-    ImVec4 backgroundBottom{6.0f / 255.0f, 8.0f / 255.0f, 12.0f / 255.0f, 1.0f};
-    float backgroundImageAlpha = 205.0f / 255.0f;
-    ImVec4 backgroundImageOverlay{6.0f / 255.0f, 8.0f / 255.0f, 12.0f / 255.0f, 120.0f / 255.0f};
-    ImVec4 backgroundGlow{22.0f / 255.0f, 92.0f / 255.0f, 112.0f / 255.0f, 70.0f / 255.0f};
-    float backgroundGlowHeight = 0.45f;
+    ImVec4 backgroundTop{0.03f, 0.03f, 0.03f, 1.0f};
+    ImVec4 backgroundBottom{0.0f, 0.0f, 0.0f, 1.0f};
+    float backgroundImageAlpha = 0.35f;
+    ImVec4 backgroundImageOverlay{0.0f, 0.0f, 0.0f, 0.78f};
+    ImVec4 backgroundGlow{0.96f, 0.96f, 0.92f, 0.0f};
+    float backgroundGlowHeight = 0.0f;
 };
 
 /// @brief Mutable live menu theme settings used by applyStyle() and helpers.
 ThemeSettings& settings();
 
-/// @brief Apply the cohesive dark/cyan style (colors + rounding + spacing).
+/// @brief Front-end white terminal menu defaults.
+const ThemeSettings& terminalSettings();
+
+/// @brief In-game bluish menu defaults that match the current HUD palette.
+const ThemeSettings& gameplaySettings();
+
+/// @brief Apply the cohesive white terminal style (colors + rounding + spacing).
 /// @note Call once after ImGui::CreateContext() (and after ImGui::StyleColorsDark()).
 void applyStyle();
+
+/// @brief Temporarily replace the live menu theme and restore it when leaving scope.
+struct ScopedTheme
+{
+    ThemeSettings previous;
+
+    explicit ScopedTheme(const ThemeSettings& theme);
+    ~ScopedTheme();
+    ScopedTheme(const ScopedTheme&) = delete;
+    ScopedTheme& operator=(const ScopedTheme&) = delete;
+};
 
 /// @brief Load the UI font (terminal font if present, otherwise SpaceGrotesk) and set it as the default.
 ///        Safe (no-op) if no font file is found.

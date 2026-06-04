@@ -35,8 +35,10 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
         }
         if (!errorMessage.empty()) {
             ImGui::Spacing();
-            ImGui::TextColored(
-                ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "%.*s", static_cast<int>(errorMessage.size()), errorMessage.data());
+            ImGui::TextColored(menu_theme::settings().dangerActive,
+                               "%.*s",
+                               static_cast<int>(errorMessage.size()),
+                               errorMessage.data());
         }
 
         menu_theme::heading("Local Servers");
@@ -77,7 +79,7 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
         if (!browserError.empty()) {
             ImGui::SameLine();
             ImGui::TextColored(
-                ImVec4(1.0f, 0.45f, 0.2f, 1.0f), "%.*s", static_cast<int>(browserError.size()), browserError.data());
+                menu_theme::settings().textDim, "%.*s", static_cast<int>(browserError.size()), browserError.data());
         }
 
         if (ImGui::BeginTable("GlobalServerTable", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {

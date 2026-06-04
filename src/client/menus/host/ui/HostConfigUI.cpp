@@ -140,7 +140,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
         if (!inputs.errorMessage.empty()) {
             ImGui::Spacing();
-            ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f),
+            ImGui::TextColored(menu_theme::settings().dangerActive,
                                "%.*s",
                                static_cast<int>(inputs.errorMessage.size()),
                                inputs.errorMessage.data());

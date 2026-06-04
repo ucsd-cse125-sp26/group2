@@ -85,6 +85,8 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
     if (!menuOpen)
         return result;
 
+    menu_theme::ScopedTheme gameplayTheme(menu_theme::gameplaySettings());
+
     ImGuiIO& io = ImGui::GetIO();
     const ImVec2 display = io.DisplaySize;
     ImDrawList* background = ImGui::GetBackgroundDrawList();
@@ -132,10 +134,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
                                .confirmIsDanger = true});
             }
             ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.58f, 0.12f, 0.12f, 1.0f});
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{0.72f, 0.16f, 0.16f, 1.0f});
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{0.45f, 0.08f, 0.08f, 1.0f});
-            if (ImGui::Button("Exit to Desktop", {halfWidth, 36.0f})) {
+            if (menu_theme::dangerButton("Exit to Desktop", {halfWidth, 36.0f})) {
                 pendingConfirm_ = PendingConfirm::ExitDesktop;
                 confirm_.open({.title = "Exit to Desktop?",
                                .message = "Exit the game and close the application?",
@@ -143,7 +142,6 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
                                .cancelText = "Stay",
                                .confirmIsDanger = true});
             }
-            ImGui::PopStyleColor(3);
         } else {
             const SettingsEditorResult settingsResult = settingsEditor_.render(settings, settingsPath, settingsUiScale);
             if (settingsResult.applied) {

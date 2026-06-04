@@ -75,8 +75,9 @@ SDL_AppResult PostMatchScoreboard::iterate()
     if (menu_theme::beginPanel("Match Complete", 700.0f, 520.0f, false)) {
         const ImGuiIO& io = ImGui::GetIO();
         const float scale = menu_theme::scaleFor(io.DisplaySize);
+        const menu_theme::ThemeSettings& theme = menu_theme::settings();
         const char* resultText = result_.won ? "VICTORY" : "DEFEAT";
-        const ImVec4 resultColor = result_.won ? ImVec4(0.35f, 0.95f, 0.50f, 1.0f) : ImVec4(0.95f, 0.22f, 0.20f, 1.0f);
+        const ImVec4 resultColor = result_.won ? theme.accent : theme.dangerActive;
 
         ImGui::SetWindowFontScale(scale * 2.3f);
         const ImVec2 titleSize = ImGui::CalcTextSize(resultText);

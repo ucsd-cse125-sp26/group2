@@ -15,8 +15,64 @@
 
 namespace
 {
-const menu_theme::ThemeSettings k_defaultSettings{};
-menu_theme::ThemeSettings g_settings = k_defaultSettings;
+menu_theme::ThemeSettings makeGameplaySettings()
+{
+    menu_theme::ThemeSettings t;
+    t.accent = ImVec4{0.20f, 0.80f, 0.94f, 1.00f};
+    t.accentHover = ImVec4{0.38f, 0.90f, 1.00f, 1.00f};
+    t.accentActive = ImVec4{0.12f, 0.55f, 0.66f, 1.00f};
+    t.accentText = ImVec4{0.03f, 0.09f, 0.12f, 1.00f};
+    t.text = ImVec4{0.88f, 0.93f, 0.97f, 1.00f};
+    t.textDim = ImVec4{0.55f, 0.62f, 0.70f, 1.00f};
+    t.windowBg = ImVec4{0.05f, 0.07f, 0.10f, 0.97f};
+    t.childBg = ImVec4{0.08f, 0.11f, 0.15f, 0.85f};
+    t.popupBg = ImVec4{0.06f, 0.08f, 0.12f, 0.98f};
+    t.frameBg = ImVec4{0.12f, 0.16f, 0.21f, 1.00f};
+    t.frameHover = ImVec4{0.16f, 0.22f, 0.28f, 1.00f};
+    t.frameActive = ImVec4{0.20f, 0.28f, 0.35f, 1.00f};
+    t.button = ImVec4{0.14f, 0.19f, 0.25f, 1.00f};
+    t.buttonHover = ImVec4{0.20f, 0.42f, 0.50f, 1.00f};
+    t.buttonActive = ImVec4{0.12f, 0.30f, 0.37f, 1.00f};
+    t.header = ImVec4{0.16f, 0.30f, 0.38f, 1.00f};
+    t.border = ImVec4{0.22f, 0.34f, 0.42f, 0.55f};
+    t.danger = ImVec4{0.62f, 0.16f, 0.16f, 1.00f};
+    t.dangerHover = ImVec4{0.78f, 0.20f, 0.20f, 1.00f};
+    t.dangerActive = ImVec4{0.48f, 0.10f, 0.10f, 1.00f};
+    t.titleBg = ImVec4{0.04f, 0.06f, 0.09f, 1.00f};
+    t.titleBgActive = ImVec4{0.07f, 0.11f, 0.15f, 1.00f};
+    t.titleBgCollapsed = ImVec4{0.04f, 0.06f, 0.09f, 0.80f};
+    t.menuBarBg = ImVec4{0.08f, 0.11f, 0.15f, 1.00f};
+    t.scrollbarBg = ImVec4{0.04f, 0.06f, 0.09f, 0.60f};
+    t.tableHeaderBg = ImVec4{0.10f, 0.14f, 0.19f, 1.00f};
+    t.tableBorderLight = ImVec4{0.18f, 0.24f, 0.30f, 0.40f};
+    t.tableRowBgAlt = ImVec4{1.00f, 1.00f, 1.00f, 0.025f};
+    t.textSelectedAlpha = 0.35f;
+
+    t.windowRounding = 6.0f;
+    t.childRounding = 2.0f;
+    t.frameRounding = 2.0f;
+    t.popupRounding = 6.0f;
+    t.grabRounding = 1.0f;
+    t.scrollbarRounding = 2.0f;
+    t.frameBorderSize = 0.0f;
+    t.windowPadding = ImVec2{22.0f, 20.0f};
+    t.framePadding = ImVec2{12.0f, 7.0f};
+    t.itemSpacing = ImVec2{10.0f, 9.0f};
+    t.scrollbarSize = 14.0f;
+    t.panelTitleRuleRounding = 2.0f;
+
+    t.backgroundTop = ImVec4{18.0f / 255.0f, 26.0f / 255.0f, 38.0f / 255.0f, 1.0f};
+    t.backgroundBottom = ImVec4{6.0f / 255.0f, 8.0f / 255.0f, 12.0f / 255.0f, 1.0f};
+    t.backgroundImageAlpha = 205.0f / 255.0f;
+    t.backgroundImageOverlay = ImVec4{6.0f / 255.0f, 8.0f / 255.0f, 12.0f / 255.0f, 120.0f / 255.0f};
+    t.backgroundGlow = ImVec4{22.0f / 255.0f, 92.0f / 255.0f, 112.0f / 255.0f, 70.0f / 255.0f};
+    t.backgroundGlowHeight = 0.45f;
+    return t;
+}
+
+const menu_theme::ThemeSettings k_terminalSettings{};
+const menu_theme::ThemeSettings k_gameplaySettings = makeGameplaySettings();
+menu_theme::ThemeSettings g_settings = k_terminalSettings;
 
 struct BgResources
 {
@@ -85,6 +141,16 @@ ThemeSettings& settings()
     return g_settings;
 }
 
+const ThemeSettings& terminalSettings()
+{
+    return k_terminalSettings;
+}
+
+const ThemeSettings& gameplaySettings()
+{
+    return k_gameplaySettings;
+}
+
 void applyStyle()
 {
     const ThemeSettings& t = g_settings;
@@ -146,7 +212,25 @@ void applyStyle()
     c[ImGuiCol_TableBorderLight] = t.tableBorderLight;
     c[ImGuiCol_TableRowBg] = t.tableRowBg;
     c[ImGuiCol_TableRowBgAlt] = t.tableRowBgAlt;
+    c[ImGuiCol_Tab] = t.button;
+    c[ImGuiCol_TabHovered] = t.buttonHover;
+    c[ImGuiCol_TabActive] = t.header;
+    c[ImGuiCol_TabUnfocused] = t.frameBg;
+    c[ImGuiCol_TabUnfocusedActive] = t.header;
+    c[ImGuiCol_NavHighlight] = t.accent;
     c[ImGuiCol_TextSelectedBg] = ImVec4(t.accent.x, t.accent.y, t.accent.z, t.textSelectedAlpha);
+}
+
+ScopedTheme::ScopedTheme(const ThemeSettings& theme) : previous(g_settings)
+{
+    g_settings = theme;
+    applyStyle();
+}
+
+ScopedTheme::~ScopedTheme()
+{
+    g_settings = previous;
+    applyStyle();
 }
 
 void loadFonts()
@@ -303,7 +387,7 @@ void drawBackground(SDL_GPUDevice* device)
     const ThemeSettings& t = g_settings;
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
 
-    // Base diagonal gradient: deep navy at the top fading to near-black at the bottom.
+    // Base gradient: almost black, with just enough lift for white panel outlines.
     const ImU32 top = ImGui::ColorConvertFloat4ToU32(t.backgroundTop);
     const ImU32 bottom = ImGui::ColorConvertFloat4ToU32(t.backgroundBottom);
     dl->AddRectFilledMultiColor(ImVec2(0.0f, 0.0f), disp, top, top, bottom, bottom);
@@ -322,18 +406,20 @@ void drawBackground(SDL_GPUDevice* device)
                      ImVec2(0.0f, 0.0f),
                      ImVec2(1.0f, 1.0f),
                      ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, t.backgroundImageAlpha)));
-        // Darken slightly so panel text stays legible over the photo.
+        // Darken heavily so white panel chrome dominates over any loaded image.
         dl->AddRectFilled(ImVec2(0.0f, 0.0f), disp, ImGui::GetColorU32(t.backgroundImageOverlay));
     }
 
-    // Cyan glow band fading down from the top edge for a little depth.
-    dl->AddRectFilledMultiColor(
-        ImVec2(0.0f, 0.0f),
-        ImVec2(disp.x, disp.y * std::clamp(t.backgroundGlowHeight, 0.0f, 1.0f)),
-        ImGui::GetColorU32(t.backgroundGlow),
-        ImGui::GetColorU32(t.backgroundGlow),
-        ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)),
-        ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)));
+    const float glowHeight = std::clamp(t.backgroundGlowHeight, 0.0f, 1.0f);
+    if (glowHeight > 0.0f && t.backgroundGlow.w > 0.0f) {
+        dl->AddRectFilledMultiColor(
+            ImVec2(0.0f, 0.0f),
+            ImVec2(disp.x, disp.y * glowHeight),
+            ImGui::GetColorU32(t.backgroundGlow),
+            ImGui::GetColorU32(t.backgroundGlow),
+            ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)),
+            ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)));
+    }
 }
 
 void buildTweaker(bool* open)
@@ -360,7 +446,7 @@ void buildTweaker(bool* open)
     };
 
     if (ImGui::Button("Reset to defaults")) {
-        t = k_defaultSettings;
+        t = k_terminalSettings;
         changed = true;
     }
     ImGui::SameLine();
