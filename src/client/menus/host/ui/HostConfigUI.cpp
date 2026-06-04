@@ -9,6 +9,8 @@
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
 
+#include <cstdio>
+
 namespace host_config_ui
 {
 namespace
@@ -21,7 +23,16 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
     HostConfigResult result{};
     HostConfigState& draft = inputs.draft;
 
-    menu_theme::terminalStatusLine(inputs.serverRunning ? "SERVER SESSION ACTIVE" : "SERVER OFFLINE",
+    char statusLeft[96];
+    if (inputs.serverRunning && inputs.boundPort != 0) {
+        std::snprintf(statusLeft, sizeof(statusLeft), "SERVER SESSION ACTIVE ON PORT %u",
+                      static_cast<unsigned>(inputs.boundPort));
+    } else if (inputs.serverRunning) {
+        std::snprintf(statusLeft, sizeof(statusLeft), "SERVER SESSION ACTIVE");
+    } else {
+        std::snprintf(statusLeft, sizeof(statusLeft), "SERVER OFFLINE");
+    }
+    menu_theme::terminalStatusLine(statusLeft,
                                    inputs.hasUnsavedServerChanges ? "UNSAVED CHANGES" : "CONFIG CLEAN");
 
     const float spacingY = ImGui::GetStyle().ItemSpacing.y;
@@ -128,25 +139,6 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
         ImGui::TextDisabled("UDP session only");
 
         ImGui::EndTable();
-    }
-
-    menu_theme::terminalSection("SERVER");
-    if (inputs.serverRunning) {
-        if (inputs.boundPort != 0) {
-            ImGui::Text("Connected on port %u", static_cast<unsigned>(inputs.boundPort));
-        } else {
-            ImGui::TextUnformatted("Connected to server");
-        }
-        if (inputs.ownsLocalProcess) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("local process");
-        }
-        if (inputs.hasUnsavedServerChanges) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("Unsaved changes");
-        }
-    } else {
-        ImGui::TextUnformatted("Not running");
     }
 
     if (!inputs.errorMessage.empty()) {
