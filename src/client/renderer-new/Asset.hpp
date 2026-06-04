@@ -117,10 +117,19 @@ struct MountPoint
     glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
 };
 
+struct PointLight
+{
+    glm::vec3 position{0.0f};
+    float intensity = 1.0f;
+    glm::vec3 color{1.0f};
+    float range = 12.5f;
+};
+
 struct Model
 {
     std::vector<ModelNode> modelNodes_;
     std::vector<ModelElement> modelElements_;
+    std::vector<PointLight> pointLights;
     std::unordered_map<std::string, MountPoint> mountPoints;
     bool hasMuzzle = false;
     glm::vec3 muzzleLocalPos{};

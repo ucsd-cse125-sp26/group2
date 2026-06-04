@@ -207,52 +207,6 @@ bool NewRenderer::init(SDL_Window* window)
 
     firstFrame_ = true;
 
-    float globalIntensity = 50000;
-    std::vector<PointLight> sampleLights;
-    PointLight pl0{};
-    pl0.position = glm::vec3(300, 100.0f, 500);
-    pl0.intensity = globalIntensity;
-    pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl0.range = 500.0f;
-    sampleLights.push_back(pl0);
-
-    PointLight pl1{};
-    pl1.position = glm::vec3(1920.0f, 450.0f, 1209.0f);
-    pl1.intensity = globalIntensity;
-    pl1.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl1.range = 500.0f;
-    sampleLights.push_back(pl1);
-
-    PointLight pl2{};
-    pl2.position = glm::vec3(1315.0f, 450.0f, -651.0f);
-    pl2.intensity = globalIntensity;
-    pl2.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl2.range = 500.0f;
-    sampleLights.push_back(pl2);
-
-    PointLight pl3{};
-    pl3.position = glm::vec3(31.0f, 450.0f, -1302.0f);
-    pl3.intensity = globalIntensity;
-    pl3.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl3.range = 500.0f;
-    sampleLights.push_back(pl3);
-
-    PointLight pl4{};
-    pl4.position = glm::vec3(-1560.0f, -239.0f, 2079.0f);
-    pl4.intensity = globalIntensity;
-    pl4.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl4.range = 500.0f;
-    sampleLights.push_back(pl4);
-
-    PointLight pl5{};
-    pl5.position = glm::vec3(-292.0f, -239.0f, 854.0f);
-    pl5.intensity = globalIntensity;
-    pl5.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl5.range = 500.0f;
-    sampleLights.push_back(pl5);
-
-    setStaticPointLights(std::move(sampleLights));
-
     return true;
 }
 
@@ -508,7 +462,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         firstFrame_ = false;
     }
 
-    // setSampleStaticPointLights();
     drawToShadowMap(cmd, dynamicShadowMaps_,1, false, true, true,STATIC);
 
     Uint8 movingRes = 1;
@@ -1168,6 +1121,20 @@ int NewRenderer::loadSceneModel(
 
     Asset::modelInstances_.push_back(sceneInstance);
 
+    if (!model.pointLights.empty()) {
+        std::vector<PointLight> pointLights;
+        pointLights.reserve(model.pointLights.size());
+        for (const Asset::PointLight& light : model.pointLights) {
+            PointLight pointLight{};
+            pointLight.position = glm::vec3(modelTransform * glm::vec4(light.position, 1.0f));
+            pointLight.intensity = light.intensity;
+            pointLight.color = light.color;
+            pointLight.range = light.range * scale;
+            pointLights.push_back(pointLight);
+        }
+        setStaticPointLights(std::move(pointLights));
+    }
+
     std::vector<Boilerplate::BufferUpload> uploads;
     auto uploadTexture = [&](TexIdInt texId, SDL_GPUTextureFormat format) {
         if (texId == 0 || !Asset::textures_.contains(texId))
@@ -1233,25 +1200,6 @@ void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
         std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_MOVING_POINT_LIGHTS));
 
     memcpy(sceneLightInfo_.movingPointLights, pointLights.data(), sceneLightInfo_.numMovingPointLights * sizeof(PointLight));
-}
-
-void NewRenderer::setSampleStaticPointLights()
-{
-
-    float globalIntensity = 50000;
-    std::vector<PointLight> sampleLights;
-
-    for (int i = 0; i < MAX_MOVING_POINT_LIGHTS; i++) {}
-    PointLight pl0{};
-    pl0.position = glm::linearRand(glm::vec3(0.0f),glm::vec3(2000.0f));
-    pl0.intensity = globalIntensity;
-    pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
-    pl0.range = 500.0f;
-
-
-    sampleLights.push_back(pl0);
-
-    setPointLights(std::move(sampleLights));
 }
 
 void NewRenderer::setStaticPointLights(std::vector<PointLight> &&pointLights)

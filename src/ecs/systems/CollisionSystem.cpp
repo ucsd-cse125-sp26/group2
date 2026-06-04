@@ -71,7 +71,8 @@ void detonateGrenade(Registry& registry, const Projectile& projectile, glm::vec3
                        cfg.selfDamageMult,
                        cfg.maxKnockback,
                        cfg.knockbackFalloffExp,
-                       projectile.stuckTo);
+                       projectile.stuckTo,
+                       projectile.type);
         break;
     case GrenadeDetonationKind::FireField:
         spawnFireField(registry, position, cfg.fireRadius, cfg.fireDuration, cfg.fireDps, projectile.owner);
@@ -469,7 +470,9 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                                    projConfig.explosionFalloffExponent,
                                    projConfig.selfDamageMultiplier,
                                    projConfig.maxKnockback,
-                                   projConfig.knockbackFalloffExponent);
+                                   projConfig.knockbackFalloffExponent,
+                                   entt::null,
+                                   projectile.type);
                 }
                 if (registry.valid(e)) {
                     registry.destroy(e);
@@ -648,7 +651,9 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                                    projConfig.explosionFalloffExponent,
                                    projConfig.selfDamageMultiplier,
                                    projConfig.maxKnockback,
-                                   projConfig.knockbackFalloffExponent);
+                                   projConfig.knockbackFalloffExponent,
+                                   entt::null,
+                                   projectile.type);
                 } else if (isGrenadeType(projectile.type)) {
                     detonateGrenade(registry, projectile, pos.value);
                 }

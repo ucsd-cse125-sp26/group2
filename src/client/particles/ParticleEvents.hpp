@@ -33,5 +33,7 @@ struct ProjectileImpactEvent
 struct ExplosionEvent
 {
     glm::vec3 pos{};
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};
     float blastRadius = 100.f;
+    WeaponType weaponType = WeaponType::Rocket;
 };

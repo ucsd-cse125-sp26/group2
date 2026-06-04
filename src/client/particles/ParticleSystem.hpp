@@ -9,7 +9,7 @@
 #include "ecs/registry/Registry.hpp"
 #include "effects/BulletHoleDecal.hpp"
 #include "effects/DeathDissolveEffect.hpp"
-#include "effects/ExplosionEffect.hpp"
+#include "effects/ExplosionVfxEffect.hpp"
 #include "effects/HitscanEffect.hpp"
 #include "effects/ImpactEffect.hpp"
 #include "effects/RibbonTrail.hpp"
@@ -84,6 +84,15 @@ public:
     /// @param color       Particle tint (mesh has no texture; ~light grey).
     void spawnDeathDissolve(const std::vector<glm::vec3>& worldPoints, glm::vec3 center, glm::vec4 color);
 
+    /// @brief Spawn a fresh typed explosion VFX profile at pos.
+    void spawnExplosionVfx(glm::vec3 pos,
+                           glm::vec3 normal,
+                           float blastRadius,
+                           ExplosionVfxKind kind = ExplosionVfxKind::Rocket);
+
+    /// @brief Drive molotov ground-fire visuals from a replicated FireField entity.
+    void driveGroundFire(entt::entity fieldEntity, glm::vec3 pos, float radius, float remaining, float duration);
+
     // SDF text (queued per frame, flushed in render)
 
     /// @brief Queue world-space SDF text for this frame.
@@ -135,6 +144,8 @@ public:
     [[nodiscard]] uint32_t hitscanBeamCount() const { return hitscan_.activeBeamCount(); }
     [[nodiscard]] uint32_t arcVertexCount() const { return hitscan_.arcCount() + tesla_.arcCount(); }
     [[nodiscard]] uint32_t smokeCount() const { return smoke_.count(); }
+    [[nodiscard]] uint32_t explosionSpriteCount() const { return explosionVfx_.spriteCount(); }
+    [[nodiscard]] uint32_t explosionDebrisCount() const { return explosionVfx_.debrisCount(); }
     [[nodiscard]] uint32_t decalCount() const { return decals_.count(); }
     [[nodiscard]] bool sdfReady() const { return sdf_.ready(); }
 
@@ -150,7 +161,7 @@ private:
     SmokeEffect smoke_;
     ImpactEffect impact_;
     BulletHoleDecal decals_;
-    ExplosionEffect explosions_;
+    ExplosionVfxEffect explosionVfx_;
     DeathDissolveEffect death_;
     SdfRenderer sdf_;
 

@@ -7,6 +7,15 @@
 
 #include <glm/glm.hpp>
 
+/// @brief Distinct explosion VFX profiles authored by weapon family.
+enum class ExplosionVfxKind : uint32_t
+{
+    Rocket,
+    Frag,
+    Sticky,
+    Molotov,
+};
+
 /// @brief Single billboard particle (sparks, impact flash, shockwave ring).
 struct BillboardParticle
 {
@@ -74,6 +83,36 @@ struct SmokeParticle
     float kind;          ///< CPU-side only: 0 = smoke, 1 = fire; shader ignores it.
 };
 static_assert(sizeof(SmokeParticle) == 48);
+
+/// @brief Animated textured sprite used by the fresh explosion VFX path.
+///
+/// The shader reads this as 24 floats from a storage buffer.
+struct VfxSpriteParticle
+{
+    glm::vec3 pos;
+    float size;
+    glm::vec3 vel;
+    float rotation;
+    glm::vec4 color;
+    glm::vec4 age;   ///< x=age, y=maxLifetime, z=growthRate, w=spinRate.
+    glm::vec4 anim;  ///< x=startFrame, y=frameCount, z=fps, w=material mode.
+    glm::vec4 shape; ///< x=stretch, y=seed, z=softness, w=priority.
+};
+static_assert(sizeof(VfxSpriteParticle) == 96);
+
+/// @brief Tiny shard/spark particle used by explosion debris and embers.
+///
+/// The shader reads this as 16 floats from a storage buffer.
+struct VfxDebrisParticle
+{
+    glm::vec3 pos;
+    float size;
+    glm::vec3 vel;
+    float stretch;
+    glm::vec4 color;
+    glm::vec4 sim; ///< x=age, y=maxLifetime, z=gravity, w=drag.
+};
+static_assert(sizeof(VfxDebrisParticle) == 64);
 
 /// @brief World-space decal instance (bullet hole, scorch mark).
 struct DecalInstance

@@ -76,6 +76,12 @@ public:
     /// @param count Number of instances to upload.
     void uploadDecals(SDL_GPUCommandBuffer* cmd, const DecalInstance* data, uint32_t count);
 
+    /// @brief Upload fresh explosion animated sprite data to the GPU.
+    void uploadExplosionSprites(SDL_GPUCommandBuffer* cmd, const VfxSpriteParticle* data, uint32_t count);
+
+    /// @brief Upload fresh explosion debris/spark data to the GPU.
+    void uploadExplosionDebris(SDL_GPUCommandBuffer* cmd, const VfxDebrisParticle* data, uint32_t count);
+
     /// @brief Upload world-space SDF glyph data to the GPU.
     /// @param cmd   Active command buffer.
     /// @param data  Pointer to SDF glyph array.
@@ -123,6 +129,8 @@ private:
     SDL_GPUGraphicsPipeline* arcPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* smokePipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* decalPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* explosionSpritePipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* explosionDebrisPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* sdfWorldPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* sdfHudPipeline_ = nullptr;
 
@@ -139,6 +147,8 @@ private:
     GpuParticleBuffer arcBuf_;       // vertex
     GpuParticleBuffer smokeBuf_;     // storage
     GpuParticleBuffer decalBuf_;     // storage
+    GpuParticleBuffer explosionSpriteBuf_; // storage
+    GpuParticleBuffer explosionDebrisBuf_; // storage
     GpuParticleBuffer sdfWorldBuf_;  // storage
     GpuParticleBuffer sdfHudBuf_;    // storage
 
@@ -149,6 +159,10 @@ private:
     // Bullet hole / decal atlas (R8G8B8A8, procedural)
     SDL_GPUTexture* decalTex_ = nullptr;
     SDL_GPUSampler* decalSamp_ = nullptr;
+
+    // Fresh explosion flipbook/scorch atlas (R8G8B8A8, procedural)
+    SDL_GPUTexture* explosionAtlasTex_ = nullptr;
+    SDL_GPUSampler* explosionAtlasSamp_ = nullptr;
 
     // SDF atlas (registered from outside after SdfAtlas::init)
     SDL_GPUTexture* sdfAtlasTex_ = nullptr;
@@ -206,6 +220,9 @@ private:
 
     /// @brief Generate and upload the procedural bullet-hole decal texture.
     void buildDecalTexture();
+
+    /// @brief Generate and upload the procedural explosion flipbook atlas.
+    void buildExplosionAtlasTexture();
 
     /// @brief Return an additive blend state (src*alpha + dst*1).
     static SDL_GPUColorTargetBlendState additiveBlend();

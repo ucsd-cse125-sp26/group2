@@ -687,6 +687,8 @@ set(SHADER_SOURCES
     tracer.vert tracer.frag
     ribbon.vert ribbon.frag
     smoke.vert smoke.frag
+    explosion_sprite.vert explosion_sprite.frag
+    explosion_debris.vert explosion_debris.frag
     lightning_arc.vert lightning_arc.frag
     hitscan_beam.vert hitscan_beam.frag
     decal.vert decal.frag
@@ -813,8 +815,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionEffect.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionVfxEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionVfxEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/DeathDissolveEffect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/DeathDissolveEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.cpp"
@@ -2028,6 +2030,25 @@ endif()
 set_compiler_warnings(tracer_effect_tests)
 enable_sanitizers(tracer_effect_tests)
 add_test(NAME tracer_effect_tests COMMAND tracer_effect_tests)
+
+add_executable(explosion_vfx_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/explosion_vfx_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionVfxEffect.cpp"
+)
+target_include_directories(explosion_vfx_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+)
+target_link_libraries(explosion_vfx_tests PRIVATE
+    EnTT::EnTT
+    glm::glm
+)
+if(MSVC AND PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(explosion_vfx_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(explosion_vfx_tests)
+enable_sanitizers(explosion_vfx_tests)
+add_test(NAME explosion_vfx_tests COMMAND explosion_vfx_tests)
 
 add_executable(hud_svg_raster_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/hud_svg_raster_tests.cpp"

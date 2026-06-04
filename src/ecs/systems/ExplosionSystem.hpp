@@ -38,7 +38,8 @@ void queueExplosion(Registry& registry,
                     float selfDamageMultiplier = 1.0f,
                     float maxKnockback = 0.0f,
                     float knockbackFalloffExponent = 1.0f,
-                    entt::entity directKillTarget = entt::null);
+                    entt::entity directKillTarget = entt::null,
+                    WeaponType weaponType = WeaponType::Rocket);
 
 /// @brief Process all pending explosions: apply radial damage and emit particle events.
 ///
