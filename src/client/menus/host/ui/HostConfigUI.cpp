@@ -6,10 +6,9 @@
 #include "menus/MenuTheme.hpp"
 #include "network/ServerName.hpp"
 
+#include <cstdio>
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
-
-#include <cstdio>
 
 namespace host_config_ui
 {
@@ -25,15 +24,16 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
 
     char statusLeft[96];
     if (inputs.serverRunning && inputs.boundPort != 0) {
-        std::snprintf(statusLeft, sizeof(statusLeft), "SERVER SESSION ACTIVE ON PORT %u",
+        std::snprintf(statusLeft,
+                      sizeof(statusLeft),
+                      "SERVER SESSION ACTIVE ON PORT %u",
                       static_cast<unsigned>(inputs.boundPort));
     } else if (inputs.serverRunning) {
         std::snprintf(statusLeft, sizeof(statusLeft), "SERVER SESSION ACTIVE");
     } else {
         std::snprintf(statusLeft, sizeof(statusLeft), "SERVER OFFLINE");
     }
-    menu_theme::terminalStatusLine(statusLeft,
-                                   inputs.hasUnsavedServerChanges ? "UNSAVED CHANGES" : "CONFIG CLEAN");
+    menu_theme::terminalStatusLine(statusLeft, inputs.hasUnsavedServerChanges ? "UNSAVED CHANGES" : "CONFIG CLEAN");
 
     const float spacingY = ImGui::GetStyle().ItemSpacing.y;
     const int footerRows = 2;
@@ -151,11 +151,14 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
     menu_theme::endScrollBody();
 
     ImGui::Spacing();
+    // Scale row height with the current font so buttons remain centered on
+    // high-DPI / larger panels where SetWindowFontScale enlarges glyphs.
+    const float btnHeight = std::max(32.0f, ImGui::GetFontSize() + 16.0f);
     {
         const float fullW = ImGui::GetContentRegionAvail().x;
         const float spacingX = ImGui::GetStyle().ItemSpacing.x;
         const float colW = (fullW - spacingX * 3.0f) / 4.0f;
-        const ImVec2 btnSize(colW, 32.0f);
+        const ImVec2 btnSize(colW, btnHeight);
 
         ImGui::BeginDisabled(inputs.serverRunning);
         if (menu_theme::terminalActionRow("LAUNCH", nullptr, btnSize)) {
@@ -184,7 +187,7 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
 
     menu_theme::terminalStatusLine("HOST CONFIG READY", "ARROWS / ENTER");
     ImGui::BeginDisabled(inputs.serverRunning);
-    if (menu_theme::terminalActionRow("BACK", "return to main menu", ImVec2(0.0f, 32.0f))) {
+    if (menu_theme::terminalActionRow("BACK", "return to main menu", ImVec2(0.0f, btnHeight))) {
         result.backToMainMenuClicked = true;
     }
     ImGui::EndDisabled();

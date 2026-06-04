@@ -113,19 +113,20 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
         ImGui::SetWindowFontScale(settingsEditor_.isOpen() ? settingsUiScale : 1.0f);
 
         const float buttonWidth = settingsEditor_.isOpen() ? ImGui::GetContentRegionAvail().x : 360.0f;
+        const float btnH = std::max(36.0f, ImGui::GetFontSize() + 16.0f);
         if (!settingsEditor_.isOpen()) {
-            if (menu_theme::accentButton("Resume", {buttonWidth, 36.0f})) {
+            if (menu_theme::accentButton("Resume", {buttonWidth, btnH})) {
                 result.resumeGame = true;
             }
 
             ImGui::Spacing();
-            if (ImGui::Button("Settings", {buttonWidth, 36.0f})) {
+            if (ImGui::Button("Settings", {buttonWidth, btnH})) {
                 openSettings(settings);
             }
 
             ImGui::Spacing();
             const float halfWidth = (buttonWidth - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-            if (ImGui::Button("Leave Match", {halfWidth, 36.0f})) {
+            if (ImGui::Button("Leave Match", {halfWidth, btnH})) {
                 pendingConfirm_ = PendingConfirm::LeaveMatch;
                 confirm_.open({.title = "Leave Match?",
                                .message = "Leave the current match and return to the main menu?",
@@ -134,7 +135,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
                                .confirmIsDanger = true});
             }
             ImGui::SameLine();
-            if (menu_theme::dangerButton("Exit to Desktop", {halfWidth, 36.0f})) {
+            if (menu_theme::dangerButton("Exit to Desktop", {halfWidth, btnH})) {
                 pendingConfirm_ = PendingConfirm::ExitDesktop;
                 confirm_.open({.title = "Exit to Desktop?",
                                .message = "Exit the game and close the application?",

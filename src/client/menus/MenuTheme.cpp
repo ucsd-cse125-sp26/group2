@@ -173,6 +173,10 @@ void applyStyle()
     s.ScrollbarSize = t.scrollbarSize;
     s.GrabMinSize = t.grabMinSize;
     s.WindowTitleAlign = t.windowTitleAlign;
+    // Terminal pixel font glyphs sit visually low relative to em box; bias
+    // upward so buttons across all menus read as vertically centered.
+    s.ButtonTextAlign = ImVec2(0.5f, 0.35f);
+    s.SelectableTextAlign = ImVec2(0.0f, 0.35f);
 
     ImVec4* c = s.Colors;
     c[ImGuiCol_Text] = t.text;
@@ -398,10 +402,15 @@ bool terminalActionRow(const char* command, const char* description, const ImVec
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, danger ? t.dangerActive : t.buttonActive);
     ImGui::PushStyleColor(ImGuiCol_Text, danger ? ImVec4{1.0f, 0.82f, 0.78f, 1.0f} : t.text);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.35f));
     ImVec2 rowSize = size;
     if (rowSize.x <= 0.0f)
         rowSize.x = ImGui::GetContentRegionAvail().x;
+    // Ensure the button is tall enough for the (possibly scaled) font so text
+    // is not clipped/anchored to the bottom on larger panels.
+    const float minRowHeight = ImGui::GetFontSize() + 16.0f;
+    if (rowSize.y > 0.0f && rowSize.y < minRowHeight)
+        rowSize.y = minRowHeight;
     const bool pressed = ImGui::Button(label, rowSize);
     ImGui::PopStyleVar();
     ImGui::PopStyleVar();
@@ -444,7 +453,13 @@ bool accentButton(const char* label, const ImVec2& size)
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, t.accentHover);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, t.accentActive);
     ImGui::PushStyleColor(ImGuiCol_Text, t.accentText);
-    const bool pressed = ImGui::Button(label, size);
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.35f));
+    ImVec2 sz = size;
+    const float minH = ImGui::GetFontSize() + 16.0f;
+    if (sz.y > 0.0f && sz.y < minH)
+        sz.y = minH;
+    const bool pressed = ImGui::Button(label, sz);
+    ImGui::PopStyleVar();
     ImGui::PopStyleColor(4);
     return pressed;
 }
@@ -455,7 +470,13 @@ bool dangerButton(const char* label, const ImVec2& size)
     ImGui::PushStyleColor(ImGuiCol_Button, t.danger);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, t.dangerHover);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, t.dangerActive);
-    const bool pressed = ImGui::Button(label, size);
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.35f));
+    ImVec2 sz = size;
+    const float minH = ImGui::GetFontSize() + 16.0f;
+    if (sz.y > 0.0f && sz.y < minH)
+        sz.y = minH;
+    const bool pressed = ImGui::Button(label, sz);
+    ImGui::PopStyleVar();
     ImGui::PopStyleColor(3);
     return pressed;
 }
