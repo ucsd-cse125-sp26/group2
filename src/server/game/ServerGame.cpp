@@ -35,6 +35,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/PowerupState.hpp"
+#include "ecs/components/Ragdoll.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/RespawnTimer.hpp"
@@ -60,11 +61,10 @@
 #include "ecs/systems/KillzoneSystem.hpp"
 #include "ecs/systems/MatchSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
-#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
-#include "ecs/components/Ragdoll.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
 #include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
@@ -1064,12 +1064,6 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
         .currentMagAmmo = rifleConfig.magazineSize,
         .fireCooldown = 0.0f,
     };
-    getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
-        .type = WeaponType::RailGun,
-        .totalAmmo = railConfig.defaultAmmoCapacity,
-        .currentMagAmmo = railConfig.magazineSize,
-        .fireCooldown = 0.0f,
-    };
     registry.emplace<WeaponState>(player, weaponState);
     registry.emplace<GrenadeState>(player, makeDefaultGrenadeState());
 
@@ -1504,12 +1498,6 @@ void ServerGame::resetPlayersForCountdown()
                 .type = WeaponType::Rifle,
                 .totalAmmo = rifleConfig.defaultAmmoCapacity,
                 .currentMagAmmo = rifleConfig.magazineSize,
-                .fireCooldown = 0.0f,
-            };
-            getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
-                .type = WeaponType::RailGun,
-                .totalAmmo = railConfig.defaultAmmoCapacity,
-                .currentMagAmmo = railConfig.magazineSize,
                 .fireCooldown = 0.0f,
             };
 

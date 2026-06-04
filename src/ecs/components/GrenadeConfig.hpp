@@ -119,7 +119,7 @@ inline constexpr const char* grenadeTypeName(WeaponType type)
 /// reject grenade types.
 inline bool canAcceptType(WeaponSlot /*slot*/, WeaponType type)
 {
-    return !isGrenadeType(type);
+    return !isGrenadeType(type) && type != WeaponType::None;
 }
 
 /// @brief Returns the config for a grenade WeaponType.

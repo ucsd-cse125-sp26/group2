@@ -147,7 +147,7 @@ struct ProjectileConfig
 /// @brief Returns the gameplay config for a weapon type.
 inline const WeaponConfig& getWeaponConfig(WeaponType type)
 {
-    static constexpr std::array<WeaponConfig, 8> k_kWeaponConfigs{{
+    static constexpr std::array<WeaponConfig, 9> k_kWeaponConfigs{{
         WeaponConfig{
             .fireCooldown = 0.10f,
             .magazineSize = 50,
@@ -261,7 +261,8 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .hitscan = false,
             .initialProjectileSpeed = 1500.0f,
             .explosive = false,
-        }, // Sticky
+        },              // Sticky
+        WeaponConfig{}, // None
     }};
 
     return k_kWeaponConfigs[static_cast<std::size_t>(type)];
@@ -270,7 +271,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
 /// @brief Returns the projectile config for a weapon type.
 inline const ProjectileConfig& getProjectileConfig(WeaponType type)
 {
-    static constexpr std::array<ProjectileConfig, 8> k_kProjectileConfigs{{
+    static constexpr std::array<ProjectileConfig, 9> k_kProjectileConfigs{{
         ProjectileConfig{}, // Rifle
         ProjectileConfig{
             .modelId = 1,
@@ -290,6 +291,7 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
         ProjectileConfig{},                   // HEGrenade — flight params come from GrenadeConfig
         ProjectileConfig{},                   // Molotov
         ProjectileConfig{},                   // Sticky
+        ProjectileConfig{},                   // None
     }};
 
     return k_kProjectileConfigs[static_cast<std::size_t>(type)];

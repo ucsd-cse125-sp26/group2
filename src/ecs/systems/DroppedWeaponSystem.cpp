@@ -78,15 +78,9 @@ inline bool tryPickup(Registry& registry,
         // player already holds tops that slot up using the snapshot ammo. No
         // interaction needed, and never creates a duplicate.
         if (overlapsAABB(dropPos.value, dropShape.halfExtents, pos.value, shape.halfExtents)) {
-            if (primary.type == dw.type) {
-                primary.totalAmmo = calcPickupReserve(
-                    primary.totalAmmo, primary.currentMagAmmo, dw.totalAmmo, dw.currentMagAmmo, dw.type);
-                consumed = true;
-                return;
-            }
-            if (secondary.type == dw.type) {
-                secondary.totalAmmo = calcPickupReserve(
-                    secondary.totalAmmo, secondary.currentMagAmmo, dw.totalAmmo, dw.currentMagAmmo, dw.type);
+            if (auto* match = findSlotWithType(weapon, dw.type)) {
+                match->totalAmmo = calcPickupReserve(
+                    match->totalAmmo, match->currentMagAmmo, dw.totalAmmo, dw.currentMagAmmo, dw.type);
                 consumed = true;
                 return;
             }
@@ -102,20 +96,18 @@ inline bool tryPickup(Registry& registry,
         if (input.pickup && isPlayerLookingAtPickup(eye, viewFwd, dropPos.value)) {
             // Never hold two of the same gun: if either slot already has this
             // type, top it up instead of placing a duplicate.
-            if (primary.type == dw.type) {
-                primary.totalAmmo = calcPickupReserve(
-                    primary.totalAmmo, primary.currentMagAmmo, dw.totalAmmo, dw.currentMagAmmo, dw.type);
-                consumed = true;
-                return;
-            }
-            if (secondary.type == dw.type) {
-                secondary.totalAmmo = calcPickupReserve(
-                    secondary.totalAmmo, secondary.currentMagAmmo, dw.totalAmmo, dw.currentMagAmmo, dw.type);
+            if (auto* match = findSlotWithType(weapon, dw.type)) {
+                match->totalAmmo = calcPickupReserve(
+                    match->totalAmmo, match->currentMagAmmo, dw.totalAmmo, dw.currentMagAmmo, dw.type);
                 consumed = true;
                 return;
             }
 
-            const WeaponSlot targetSlot = canAcceptType(weapon.current, dw.type) ? weapon.current : WeaponSlot::PRIMARY;
+            WeaponSlot targetSlot = canAcceptType(weapon.current, dw.type) ? weapon.current : WeaponSlot::PRIMARY;
+            if (primary.type == WeaponType::None)
+                targetSlot = WeaponSlot::PRIMARY;
+            else if (secondary.type == WeaponType::None)
+                targetSlot = WeaponSlot::SECONDARY;
             if (!canAcceptType(targetSlot, dw.type))
                 return;
             GunInstance& slot = getSlot(weapon, targetSlot);
@@ -124,12 +116,14 @@ inline bool tryPickup(Registry& registry,
             // brief pickup-immunity so it is not instantly re-grabbed.
             const glm::vec3 rightAxis{std::cos(input.yaw), 0.0f, -std::sin(input.yaw)};
             const glm::vec3 dropFrom = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.4f * eyeDir, 0.0f};
-            pendingDrops.push_back(PendingWeaponDrop{
-                .pos = dropFrom,
-                .vel = rightAxis * 180.0f + glm::vec3{0.0f, 120.0f * eyeDir, 0.0f},
-                .gun = slot,
-                .pickupDelay = k_swapDropPickupDelay,
-            });
+            if (slot.type != WeaponType::None) {
+                pendingDrops.push_back(PendingWeaponDrop{
+                    .pos = dropFrom,
+                    .vel = rightAxis * 180.0f + glm::vec3{0.0f, 120.0f * eyeDir, 0.0f},
+                    .gun = slot,
+                    .pickupDelay = k_swapDropPickupDelay,
+                });
+            }
             slot = GunInstance{
                 .type = dw.type,
                 .totalAmmo = dw.totalAmmo,
