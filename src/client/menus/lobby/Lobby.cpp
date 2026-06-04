@@ -9,6 +9,8 @@
 #include "util/InputCapture.hpp"
 #include "util/LocalAddress.hpp"
 
+#include <SDL3/SDL_keycode.h>
+
 #include <algorithm>
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlgpu3.h>
@@ -20,6 +22,8 @@ bool Lobby::init(AppContext& ctx)
     renderer = &ctx.renderer;
     window = &ctx.window;
     client = &ctx.client;
+    settings = &ctx.userSettings;
+    settingsPath = ctx.userSettingsPath;
 
     // Defensive: a prior Game screen should have released mouse capture in
     // its quit(), but enforcing it here means the lobby cursor is always free
@@ -132,6 +136,20 @@ SDL_AppResult Lobby::event(SDL_Event* event)
     ImGui_ImplSDL3_ProcessEvent(event);
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
+
+    if (settings != nullptr && event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat && event->key.key == SDLK_ESCAPE)
+    {
+        if (systemMenu_.isOpen()) {
+            systemMenu_.handleEscape(*settings);
+        } else {
+            systemMenu_.open();
+        }
+        return SDL_APP_CONTINUE;
+    }
+
+    if (systemMenu_.consumeEvent(*event))
+        return SDL_APP_CONTINUE;
+
     return SDL_APP_CONTINUE;
 }
 
@@ -180,6 +198,13 @@ SDL_AppResult Lobby::iterate()
     }
     if (result.returnToHostConfigClicked) {
         returnToHostConfig = true;
+    }
+
+    if (settings != nullptr) {
+        const SystemMenuOverlayResult menuResult = systemMenu_.render(*settings, settingsPath);
+        if (menuResult.exitToDesktop) {
+            exitRequested = true;
+        }
     }
 
     ImGui::Render();
@@ -274,5 +299,14 @@ bool Lobby::consumeServerShutdownNotice()
         return false;
 
     serverShutdownNotice = false;
+    return true;
+}
+
+bool Lobby::consumeExitRequest()
+{
+    if (!exitRequested)
+        return false;
+
+    exitRequested = false;
     return true;
 }

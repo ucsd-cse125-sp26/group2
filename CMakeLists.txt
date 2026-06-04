@@ -1132,6 +1132,12 @@ add_executable(group2
         src/client/menus/main/MainMenu.cpp
         src/client/menus/main/ui/MainMenuUI.hpp
         src/client/menus/main/ui/MainMenuUI.cpp
+        src/client/menus/settings/SettingsEditor.hpp
+        src/client/menus/settings/SettingsEditor.cpp
+        src/client/menus/settings/SystemMenuOverlay.hpp
+        src/client/menus/settings/SystemMenuOverlay.cpp
+        src/client/menus/settings/SettingsScreen.hpp
+        src/client/menus/settings/SettingsScreen.cpp
         src/client/menus/MenuTheme.hpp
         src/client/menus/MenuTheme.cpp
         src/ecs/components/PowerupSpawner.hpp

@@ -48,6 +48,9 @@ SDL_AppResult TitleScreen::iterate()
     if (result.hostClicked) {
         pendingHost = true;
     }
+    if (result.settingsClicked) {
+        pendingSettings = true;
+    }
     if (result.exitClicked) {
         pendingExit = true;
     }
@@ -74,6 +77,15 @@ bool TitleScreen::consumeHostRequest()
         return false;
 
     pendingHost = false;
+    return true;
+}
+
+bool TitleScreen::consumeSettingsRequest()
+{
+    if (!pendingSettings)
+        return false;
+
+    pendingSettings = false;
     return true;
 }
 

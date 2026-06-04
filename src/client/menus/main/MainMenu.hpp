@@ -6,6 +6,7 @@
 #include "IScreen.hpp"
 #include "app/AppContext.hpp"
 #include "menus/main/ui/MainMenuUI.hpp"
+#include "menus/settings/SystemMenuOverlay.hpp"
 #include "network/DiscoveryClient.hpp"
 #include "network/NetworkConfig.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
@@ -16,6 +17,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -52,6 +54,9 @@ public:
     /// @return True if a title-screen request was pending.
     bool consumeReturnToTitleScreenRequest();
 
+    /// @brief True if the user requested closing the application, then clear that request.
+    bool consumeExitRequest();
+
     /// @brief Display an error string on the join form (e.g. from a failed connection attempt).
     void setJoinError(const std::string& error);
 
@@ -59,18 +64,22 @@ public:
     void setPopupMessage(const std::string& message);
 
 private:
-    NewRenderer* renderer = nullptr; ///< Renderer; not owned.
-    SDL_Window* window = nullptr;    ///< Application window; not owned.
+    NewRenderer* renderer = nullptr;  ///< Renderer; not owned.
+    SDL_Window* window = nullptr;     ///< Application window; not owned.
+    UserSettings* settings = nullptr; ///< Live user settings; not owned.
+    std::string_view settingsPath;    ///< Save path for user settings.
+    SystemMenuOverlay systemMenu_;    ///< Shared Escape menu for front-end screens.
     GlobalDiscoveryConfig discoveryConfig;
-    JoinMenuState joinMenuState;     ///< Mutable state backing the join form widgets.
+    JoinMenuState joinMenuState;      ///< Mutable state backing the join form widgets.
     std::optional<JoinRequest>
-        pendingJoinRequest;          ///< Set when the user clicks "Join", cleared on App transition to Lobby.
-    bool pendingHostRequest = false; ///< Set when the user clicks "Host", cleared on App transition.
+        pendingJoinRequest;           ///< Set when the user clicks "Join", cleared on App transition to Lobby.
+    bool pendingHostRequest = false;  ///< Set when the user clicks "Host", cleared on App transition.
     bool pendingReturnToTitleScreenRequest =
-        false;                       ///< Set when the user clicks "Return to Title Screen", cleared on transition.
-    std::string joinError;           ///< Error message shown on the join form; empty when no error.
-    std::string popupMessage;        ///< Modal message shown once after returning to the main menu.
-    bool openPopupMessage = false;   ///< True when the modal should be opened next frame.
+        false;                        ///< Set when the user clicks "Return to Title Screen", cleared on transition.
+    bool pendingExitRequest = false;  ///< Set when the user confirms "Exit to Desktop", cleared by App.
+    std::string joinError;            ///< Error message shown on the join form; empty when no error.
+    std::string popupMessage;         ///< Modal message shown once after returning to the main menu.
+    bool openPopupMessage = false;    ///< True when the modal should be opened next frame.
 
     std::unique_ptr<DiscoveryClient> localDiscoveryClient = std::make_unique<DiscoveryClient>();
 

@@ -1849,7 +1849,7 @@ SDL_AppResult Game::event(SDL_Event* event)
     if (event->type == SDL_EVENT_KEY_DOWN) {
         if (event->key.key == SDLK_ESCAPE && !event->key.repeat) {
             if (pauseMenu.isOpen()) {
-                if (pauseMenu.handleEscape()) {
+                if (userSettings == nullptr || pauseMenu.handleEscape(*userSettings)) {
                     pauseMenu.close();
                     mouseCaptured = true;
                     SDL_SetWindowRelativeMouseMode(window, true);
@@ -2009,7 +2009,7 @@ SDL_AppResult Game::event(SDL_Event* event)
     // Gamepad Start (right menu button) toggles the pause menu, mirroring ESC.
     if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && event->gbutton.button == SDL_GAMEPAD_BUTTON_START) {
         if (pauseMenu.isOpen()) {
-            if (pauseMenu.handleEscape()) {
+            if (userSettings == nullptr || pauseMenu.handleEscape(*userSettings)) {
                 pauseMenu.close();
                 mouseCaptured = true;
                 SDL_SetWindowRelativeMouseMode(window, true);

@@ -24,9 +24,9 @@ TitleScreenResult buildTitleScreen()
         if (ImGui::Button("Host", buttonSize)) {
             result.hostClicked = true;
         }
-        ImGui::BeginDisabled();
-        ImGui::Button("Settings", buttonSize);
-        ImGui::EndDisabled();
+        if (ImGui::Button("Settings", buttonSize)) {
+            result.settingsClicked = true;
+        }
         if (menu_theme::dangerButton("Exit", buttonSize)) {
             result.exitClicked = true;
         }

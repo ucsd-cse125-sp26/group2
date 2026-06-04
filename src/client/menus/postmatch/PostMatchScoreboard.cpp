@@ -6,6 +6,8 @@
 #include "menus/MenuTheme.hpp"
 #include "util/InputCapture.hpp"
 
+#include <SDL3/SDL_keycode.h>
+
 #include <algorithm>
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlgpu3.h>
@@ -17,6 +19,8 @@ bool PostMatchScoreboard::init(AppContext& ctx, PostMatchResult result)
     renderer = &ctx.renderer;
     window = &ctx.window;
     client = &ctx.client;
+    settings = &ctx.userSettings;
+    settingsPath = ctx.userSettingsPath;
     result_ = std::move(result);
 
     input_capture::releaseGameplayInputCapture(window);
@@ -37,6 +41,20 @@ SDL_AppResult PostMatchScoreboard::event(SDL_Event* event)
     ImGui_ImplSDL3_ProcessEvent(event);
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
+
+    if (settings != nullptr && event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat && event->key.key == SDLK_ESCAPE)
+    {
+        if (systemMenu_.isOpen()) {
+            systemMenu_.handleEscape(*settings);
+        } else {
+            systemMenu_.open();
+        }
+        return SDL_APP_CONTINUE;
+    }
+
+    if (systemMenu_.consumeEvent(*event))
+        return SDL_APP_CONTINUE;
+
     return SDL_APP_CONTINUE;
 }
 
@@ -106,6 +124,13 @@ SDL_AppResult PostMatchScoreboard::iterate()
     }
     menu_theme::endPanel();
 
+    if (settings != nullptr) {
+        const SystemMenuOverlayResult menuResult = systemMenu_.render(*settings, settingsPath);
+        if (menuResult.exitToDesktop) {
+            exitRequested_ = true;
+        }
+    }
+
     ImGui::Render();
     renderer->drawFrame(glm::vec3(0.0f), 0.0f, 0.0f, 0.0f);
     return SDL_APP_CONTINUE;
@@ -134,5 +159,13 @@ bool PostMatchScoreboard::consumeServerShutdownNotice()
     if (!serverShutdownNotice_)
         return false;
     serverShutdownNotice_ = false;
+    return true;
+}
+
+bool PostMatchScoreboard::consumeExitRequest()
+{
+    if (!exitRequested_)
+        return false;
+    exitRequested_ = false;
     return true;
 }

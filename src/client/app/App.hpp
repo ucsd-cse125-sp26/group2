@@ -45,6 +45,7 @@ public:
     enum class Screen
     {
         TitleScreen, ///< Top-level landing/title screen.
+        Settings,    ///< Dedicated front-end settings screen.
         MainMenu,    ///< Join/server-browser main menu screen.
         HostConfig,  ///< Local hosting configuration screen.
         Lobby,       ///< Pre-match lobby waiting room.
@@ -79,6 +80,7 @@ private:
     }; ///< Persistent host screen draft state.
 
     Screen current = Screen::TitleScreen;                   ///< Which screen is currently active.
+    Screen settingsReturnScreen_ = Screen::TitleScreen;     ///< Front-end screen to restore after Settings closes.
     std::unique_ptr<IScreen> screen_;                       ///< Active screen instance.
     bool imguiContextOwned = false;                         ///< True once App has created the ImGui context.
     std::optional<PostMatchResult> pendingPostMatchResult_; ///< Result data used to open the post-match screen.

@@ -7,12 +7,14 @@
 #include "app/AppContext.hpp"
 #include "host/HostedServer.hpp"
 #include "menus/pause/ConfirmModal.hpp"
+#include "menus/settings/SystemMenuOverlay.hpp"
 #include "network/DiscoverySettings.hpp"
 #include "network/MatchConfig.hpp"
 #include "renderer-new/NewRenderer.hpp"
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 /// @brief IScreen implementation for local server launch settings.
 class HostConfig : public IScreen
@@ -39,6 +41,9 @@ public:
 
     /// @brief True if the user requested returning to the main menu, then clear that request.
     bool consumeBackToMainMenuRequest();
+
+    /// @brief True if the user requested closing the application, then clear that request.
+    bool consumeExitRequest();
 
     /// @brief Current host-screen draft settings.
     HostConfigState draftConfig() const;
@@ -74,6 +79,9 @@ private:
     Client* client = nullptr;                         ///< Network client owned by App; not owned.
     HostedServer* hostedServer = nullptr;             ///< Hosted server owned by App; not owned.
     HostConfigState* draft = nullptr;                 ///< Persistent draft state owned by App; not owned.
+    UserSettings* settings = nullptr;                 ///< Live user settings; not owned.
+    std::string_view settingsPath;                    ///< Save path for user settings.
+    SystemMenuOverlay systemMenu_;                    ///< Shared Escape menu for front-end screens.
     std::string lastError;                            ///< Error message shown on the host form; empty when no error.
     std::optional<MatchConfig> lastSyncedMatchConfig; ///< Last match config acknowledged locally as server state.
     std::optional<DiscoverySettings> lastSyncedDiscoverySettings; ///< Last discovery settings acknowledged locally.
@@ -83,4 +91,5 @@ private:
     bool pendingShutdown = false;       ///< Set when the user clicks "Shutdown", cleared by App.
     bool pendingGoToLobby = false;      ///< Set when the user clicks "Go to Lobby", cleared by App.
     bool pendingBackToMainMenu = false; ///< Set when the user clicks "Back to Main Menu", cleared by App.
+    bool pendingExitRequest = false;    ///< Set when the user confirms "Exit to Desktop", cleared by App.
 };

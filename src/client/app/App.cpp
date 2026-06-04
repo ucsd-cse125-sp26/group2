@@ -11,6 +11,7 @@
 #include "menus/lobby/Lobby.hpp"
 #include "menus/main/MainMenu.hpp"
 #include "menus/postmatch/PostMatchScoreboard.hpp"
+#include "menus/settings/SettingsScreen.hpp"
 #include "menus/title/TitleScreen.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
@@ -216,6 +217,22 @@ SDL_AppResult App::iterate()
             transitionTo(Screen::HostConfig);
             break;
         }
+        if (titleScreen->consumeSettingsRequest()) {
+            settingsReturnScreen_ = Screen::TitleScreen;
+            transitionTo(Screen::Settings);
+            break;
+        }
+        break;
+    }
+    case Screen::Settings: {
+        auto* settings = dynamic_cast<SettingsScreen*>(screen_.get());
+        if (!settings)
+            break;
+
+        if (settings->consumeBackRequest()) {
+            transitionTo(settingsReturnScreen_);
+            break;
+        }
         break;
     }
     case Screen::MainMenu: {
@@ -225,6 +242,9 @@ SDL_AppResult App::iterate()
         if (mainMenu->consumeReturnToTitleScreenRequest()) {
             transitionTo(Screen::TitleScreen);
             break;
+        }
+        if (mainMenu->consumeExitRequest()) {
+            return SDL_APP_SUCCESS;
         }
         if (auto joinRequest = mainMenu->consumeJoinRequest()) {
             std::string serverIp = joinRequest->serverIp;
@@ -352,6 +372,10 @@ SDL_AppResult App::iterate()
             client.shutdown();
         }
 
+        if (hostConfig->consumeExitRequest()) {
+            return SDL_APP_SUCCESS;
+        }
+
         if (hostConfig->consumeGoToLobbyRequest() && (hostedServer.isRunning() || client.isConnected())) {
             transitionTo(Screen::Lobby);
             break;
@@ -374,6 +398,10 @@ SDL_AppResult App::iterate()
         if (lobby->consumeReturnToHostConfig()) {
             transitionTo(Screen::HostConfig);
             break;
+        }
+
+        if (lobby->consumeExitRequest()) {
+            return SDL_APP_SUCCESS;
         }
 
         if (lobby->consumeReturnToMenu()) {
@@ -416,6 +444,10 @@ SDL_AppResult App::iterate()
                 transitionTo(Screen::MainMenu);
             }
             break;
+        }
+
+        if (postMatch->consumeExitRequest()) {
+            return SDL_APP_SUCCESS;
         }
 
         if (postMatch->consumeReturnToLobby()) {
@@ -531,6 +563,16 @@ void App::transitionTo(Screen next)
         } else {
             pendingPostMatchResult_.reset();
             postMatch->quit();
+        }
+        break;
+    }
+    case Screen::Settings: {
+        auto settings = std::make_unique<SettingsScreen>();
+        if (settings->init(ctx)) {
+            screen_ = std::move(settings);
+            current = next;
+        } else {
+            settings->quit();
         }
         break;
     }

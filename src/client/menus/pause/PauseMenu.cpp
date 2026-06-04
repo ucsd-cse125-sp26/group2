@@ -2,77 +2,14 @@
 
 #include "menus/MenuTheme.hpp"
 
-#include <SDL3/SDL_keyboard.h>
-
 #include <algorithm>
 #include <imgui.h>
 
 namespace
 {
-constexpr float k_minFovDegrees = 50.0f;
-constexpr float k_maxFovDegrees = 120.0f;
-constexpr float k_minGamepadSensitivity = 1.0f;
-constexpr float k_maxGamepadSensitivity = 10.0f;
-constexpr float k_minGamepadLookDeadzone = 0.0f;
-constexpr float k_maxGamepadLookDeadzone = 0.4f;
-constexpr float k_minGamepadMoveDeadzone = 0.0f;
-constexpr float k_maxGamepadMoveDeadzone = 0.5f;
-constexpr float k_minAimAssistStrength = 0.0f;
-constexpr float k_maxAimAssistStrength = 1.0f;
-constexpr float k_settingsWindowBaseWidth = 740.0f;
+constexpr float k_settingsWindowBaseWidth = 900.0f;
 constexpr float k_settingsWindowBaseHeight = 860.0f;
 constexpr float k_viewportWindowMargin = 0.94f;
-
-MouseButton mouseButtonFromSdl(uint8_t button)
-{
-    switch (button) {
-    case SDL_BUTTON_LEFT:
-        return MouseButton::Left;
-    case SDL_BUTTON_MIDDLE:
-        return MouseButton::Middle;
-    case SDL_BUTTON_RIGHT:
-        return MouseButton::Right;
-    case SDL_BUTTON_X1:
-        return MouseButton::X1;
-    case SDL_BUTTON_X2:
-        return MouseButton::X2;
-    default:
-        return MouseButton::None;
-    }
-}
-
-std::optional<Binding> keyboardMouseBindingFromEvent(const SDL_Event& event)
-{
-    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
-        return Binding::bindKeyboard(event.key.scancode);
-    if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-        const MouseButton button = mouseButtonFromSdl(event.button.button);
-        if (button != MouseButton::None)
-            return Binding::bindMouse(button);
-    }
-    if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-        if (event.wheel.y > 0.0f)
-            return Binding::bindMouseWheel(MouseWheelDirection::Up);
-        if (event.wheel.y < 0.0f)
-            return Binding::bindMouseWheel(MouseWheelDirection::Down);
-    }
-    return std::nullopt;
-}
-
-std::optional<Binding> controllerBindingFromEvent(const SDL_Event& event)
-{
-    if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
-        return Binding::bindGamepadButton(static_cast<SDL_GamepadButton>(event.gbutton.button));
-    if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
-        if (event.gaxis.value < 16384)
-            return std::nullopt;
-        if (event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER)
-            return Binding::bindGamepadAxis(GamepadAxisBinding::LeftTrigger);
-        if (event.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)
-            return Binding::bindGamepadAxis(GamepadAxisBinding::RightTrigger);
-    }
-    return std::nullopt;
-}
 } // namespace
 
 void PauseMenu::open()
@@ -83,10 +20,7 @@ void PauseMenu::open()
 void PauseMenu::close()
 {
     menuOpen = false;
-    settingsOpen = false;
-    listeningBinding.reset();
-    dirty = false;
-    statusMessage.clear();
+    settingsEditor_.close();
     pendingConfirm_ = PendingConfirm::None;
     confirm_.cancel();
 }
@@ -98,26 +32,18 @@ bool PauseMenu::isOpen() const
 
 bool PauseMenu::isSettingsOpen() const
 {
-    return menuOpen && settingsOpen;
+    return menuOpen && settingsEditor_.isOpen();
 }
 
-bool PauseMenu::handleEscape()
+bool PauseMenu::handleEscape(const UserSettings& settings)
 {
     if (confirm_.isOpen()) {
         confirm_.cancel();
         pendingConfirm_ = PendingConfirm::None;
         return false;
     }
-    if (listeningBinding) {
-        listeningBinding.reset();
-        return false;
-    }
-    if (settingsOpen) {
-        if (dirty) {
-            requestDiscardSettingsConfirm();
-        } else {
-            closeSettingsPage();
-        }
+    if (settingsEditor_.isOpen()) {
+        settingsEditor_.handleEscape(settings);
         return false;
     }
     return true;
@@ -125,41 +51,7 @@ bool PauseMenu::handleEscape()
 
 void PauseMenu::openSettings(const UserSettings& settings)
 {
-    settingsOpen = true;
-    draftBindings = settings.inputBindings;
-    draftMouseSensitivity = settings.mouseSensitivity;
-    draftHorizontalFovDegrees = settings.horizontalFovDegrees;
-    draftShowControllerBindings = settings.showControllerBindings;
-    draftGamepadYawSensitivity = settings.gamepadYawSensitivity;
-    draftGamepadPitchSensitivity = settings.gamepadPitchSensitivity;
-    draftGamepadLookDeadzone = settings.gamepadLookDeadzone;
-    draftGamepadMoveDeadzone = settings.gamepadMoveDeadzone;
-    draftAimAssistEnabled = settings.aimAssistEnabled;
-    draftAimAssistStrength = settings.aimAssistStrength;
-    draftGamepadSwapSticks = settings.gamepadSwapSticks;
-    draftMuzzleFlashEnabled = settings.muzzleFlashEnabled;
-    dirty = false;
-    listeningBinding.reset();
-    statusMessage.clear();
-}
-
-void PauseMenu::closeSettingsPage()
-{
-    settingsOpen = false;
-    listeningBinding.reset();
-    statusMessage.clear();
-    dirty = false;
-}
-
-void PauseMenu::requestDiscardSettingsConfirm()
-{
-    listeningBinding.reset();
-    pendingConfirm_ = PendingConfirm::DiscardSettings;
-    confirm_.open({.title = "Discard Settings?",
-                   .message = "You have unsaved settings changes. Discard them?",
-                   .confirmText = "Discard",
-                   .cancelText = "Keep Editing",
-                   .confirmIsDanger = true});
+    settingsEditor_.open(settings);
 }
 
 bool PauseMenu::consumeEvent(const SDL_Event& event)
@@ -167,49 +59,8 @@ bool PauseMenu::consumeEvent(const SDL_Event& event)
     if (!menuOpen)
         return false;
 
-    if (listeningBinding) {
-        if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
-            if (event.key.key == SDLK_ESCAPE) {
-                listeningBinding.reset();
-            } else if (event.key.key == SDLK_BACKSPACE || event.key.key == SDLK_DELETE) {
-                draftBindings.rebind(
-                    listeningBinding->action, Binding::unbound(), listeningBinding->device, listeningBinding->slot);
-                listeningBinding.reset();
-                dirty = true;
-            } else {
-                if (listeningBinding->device == BindingDevice::KeyboardMouse) {
-                    draftBindings.rebind(listeningBinding->action,
-                                         Binding::bindKeyboard(event.key.scancode),
-                                         listeningBinding->device,
-                                         listeningBinding->slot);
-                    listeningBinding.reset();
-                    dirty = true;
-                }
-            }
-            return true;
-        }
-
-        const std::optional<Binding> candidate = listeningBinding->device == BindingDevice::Controller
-                                                     ? controllerBindingFromEvent(event)
-                                                     : keyboardMouseBindingFromEvent(event);
-        if (candidate) {
-            draftBindings.rebind(
-                listeningBinding->action, *candidate, listeningBinding->device, listeningBinding->slot);
-            listeningBinding.reset();
-            dirty = true;
-            return true;
-        }
-
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_WHEEL ||
-            event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION)
-        {
-            return true;
-        }
-        return event.type == SDL_EVENT_KEY_UP || event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
-               event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL ||
-               event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_GAMEPAD_BUTTON_UP ||
-               event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION;
-    }
+    if (settingsEditor_.isOpen())
+        return settingsEditor_.consumeEvent(event);
 
     switch (event.type) {
     case SDL_EVENT_KEY_DOWN:
@@ -243,7 +94,7 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
 
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
     float settingsUiScale = 1.0f;
-    if (settingsOpen) {
+    if (settingsEditor_.isOpen()) {
         flags |= ImGuiWindowFlags_NoResize;
         const float scaled = std::min(menu_theme::scaleFor(display), 1.0f);
         ImVec2 settingsSize{k_settingsWindowBaseWidth * scaled, k_settingsWindowBaseHeight * scaled};
@@ -253,14 +104,14 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
         settingsUiScale = std::clamp(settingsSize.x / k_settingsWindowBaseWidth, 0.5f, 1.0f);
         ImGui::SetNextWindowSize(settingsSize, ImGuiCond_Always);
     } else {
-        // Auto-fit the compact pause page so it always fits its buttons and never scrolls.
         flags |= ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
     }
-    if (ImGui::Begin("Paused", nullptr, flags)) {
-        ImGui::SetWindowFontScale(settingsOpen ? settingsUiScale : 1.0f);
 
-        const float buttonWidth = settingsOpen ? ImGui::GetContentRegionAvail().x : 360.0f;
-        if (!settingsOpen) {
+    if (ImGui::Begin("Paused", nullptr, flags)) {
+        ImGui::SetWindowFontScale(settingsEditor_.isOpen() ? settingsUiScale : 1.0f);
+
+        const float buttonWidth = settingsEditor_.isOpen() ? ImGui::GetContentRegionAvail().x : 360.0f;
+        if (!settingsEditor_.isOpen()) {
             if (menu_theme::accentButton("Resume", {buttonWidth, 36.0f})) {
                 result.resumeGame = true;
             }
@@ -294,207 +145,9 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             }
             ImGui::PopStyleColor(3);
         } else {
-            menu_theme::heading("Settings");
-
-            const float previousSensitivity = draftMouseSensitivity;
-            float displayedMouseSensitivity =
-                draftMouseSensitivity * user_settings::kMouseSensitivityDisplayScale;
-            ImGui::SliderFloat("Mouse Sensitivity",
-                               &displayedMouseSensitivity,
-                               user_settings::kMinMouseSensitivity *
-                                   user_settings::kMouseSensitivityDisplayScale,
-                               user_settings::kMaxMouseSensitivity *
-                                   user_settings::kMouseSensitivityDisplayScale,
-                               "%.3f");
-            draftMouseSensitivity = displayedMouseSensitivity / user_settings::kMouseSensitivityDisplayScale;
-            draftMouseSensitivity = std::clamp(draftMouseSensitivity,
-                                               user_settings::kMinMouseSensitivity,
-                                               user_settings::kMaxMouseSensitivity);
-            if (draftMouseSensitivity != previousSensitivity)
-                dirty = true;
-
-            const float previousFov = draftHorizontalFovDegrees;
-            ImGui::SliderFloat("Horizontal FOV", &draftHorizontalFovDegrees, k_minFovDegrees, k_maxFovDegrees, "%.0f");
-            draftHorizontalFovDegrees = std::clamp(draftHorizontalFovDegrees, k_minFovDegrees, k_maxFovDegrees);
-            if (draftHorizontalFovDegrees != previousFov)
-                dirty = true;
-
-            ImGui::Spacing();
-            ImGui::SeparatorText("Video");
-
-            const bool previousMuzzleFlash = draftMuzzleFlashEnabled;
-            ImGui::Checkbox("Muzzle Flash", &draftMuzzleFlashEnabled);
-            if (draftMuzzleFlashEnabled != previousMuzzleFlash)
-                dirty = true;
-
-            ImGui::Spacing();
-            ImGui::SeparatorText("Controller");
-
-            const float previousGamepadYawSensitivity = draftGamepadYawSensitivity;
-            ImGui::SliderFloat("Horizontal Look Sensitivity",
-                               &draftGamepadYawSensitivity,
-                               k_minGamepadSensitivity,
-                               k_maxGamepadSensitivity,
-                               "%.1f rad/s");
-            draftGamepadYawSensitivity =
-                std::clamp(draftGamepadYawSensitivity, k_minGamepadSensitivity, k_maxGamepadSensitivity);
-            if (draftGamepadYawSensitivity != previousGamepadYawSensitivity)
-                dirty = true;
-
-            const float previousGamepadPitchSensitivity = draftGamepadPitchSensitivity;
-            ImGui::SliderFloat("Vertical Look Sensitivity",
-                               &draftGamepadPitchSensitivity,
-                               k_minGamepadSensitivity,
-                               k_maxGamepadSensitivity,
-                               "%.1f rad/s");
-            draftGamepadPitchSensitivity =
-                std::clamp(draftGamepadPitchSensitivity, k_minGamepadSensitivity, k_maxGamepadSensitivity);
-            if (draftGamepadPitchSensitivity != previousGamepadPitchSensitivity)
-                dirty = true;
-
-            const float previousGamepadLookDeadzone = draftGamepadLookDeadzone;
-            ImGui::SliderFloat("Right Stick Deadzone",
-                               &draftGamepadLookDeadzone,
-                               k_minGamepadLookDeadzone,
-                               k_maxGamepadLookDeadzone,
-                               "%.2f");
-            draftGamepadLookDeadzone =
-                std::clamp(draftGamepadLookDeadzone, k_minGamepadLookDeadzone, k_maxGamepadLookDeadzone);
-            if (draftGamepadLookDeadzone != previousGamepadLookDeadzone)
-                dirty = true;
-
-            const float previousGamepadMoveDeadzone = draftGamepadMoveDeadzone;
-            ImGui::SliderFloat("Left Stick Deadzone",
-                               &draftGamepadMoveDeadzone,
-                               k_minGamepadMoveDeadzone,
-                               k_maxGamepadMoveDeadzone,
-                               "%.2f");
-            draftGamepadMoveDeadzone =
-                std::clamp(draftGamepadMoveDeadzone, k_minGamepadMoveDeadzone, k_maxGamepadMoveDeadzone);
-            if (draftGamepadMoveDeadzone != previousGamepadMoveDeadzone)
-                dirty = true;
-
-            const bool previousGamepadSwapSticks = draftGamepadSwapSticks;
-            ImGui::Checkbox("Swap Sticks (southpaw)", &draftGamepadSwapSticks);
-            if (draftGamepadSwapSticks != previousGamepadSwapSticks)
-                dirty = true;
-
-            const bool previousAimAssistEnabled = draftAimAssistEnabled;
-            ImGui::Checkbox("Aim Assist", &draftAimAssistEnabled);
-            if (draftAimAssistEnabled != previousAimAssistEnabled)
-                dirty = true;
-
-            const float previousAimAssistStrength = draftAimAssistStrength;
-            ImGui::BeginDisabled(!draftAimAssistEnabled);
-            ImGui::SliderFloat(
-                "Aim Assist Strength", &draftAimAssistStrength, k_minAimAssistStrength, k_maxAimAssistStrength, "%.2f");
-            ImGui::EndDisabled();
-            draftAimAssistStrength = std::clamp(draftAimAssistStrength, k_minAimAssistStrength, k_maxAimAssistStrength);
-            if (draftAimAssistStrength != previousAimAssistStrength)
-                dirty = true;
-
-            ImGui::Spacing();
-            const bool previousShowControllerBindings = draftShowControllerBindings;
-            ImGui::Checkbox("Controller Bindings", &draftShowControllerBindings);
-            if (draftShowControllerBindings != previousShowControllerBindings) {
-                listeningBinding.reset();
-                dirty = true;
-            }
-
-            ImGui::Spacing();
-            const BindingDevice visibleDevice =
-                draftShowControllerBindings ? BindingDevice::Controller : BindingDevice::KeyboardMouse;
-            if (ImGui::BeginTable("bindings", 3, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg)) {
-                ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
-                ImGui::TableSetupColumn("Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f * settingsUiScale);
-                ImGui::TableSetupColumn("Alt Binding", ImGuiTableColumnFlags_WidthFixed, 190.0f * settingsUiScale);
-                ImGui::TableHeadersRow();
-
-                for (Action action : InputBindings::actions()) {
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::TextUnformatted(InputBindings::actionLabel(action).data());
-
-                    for (std::size_t slot = 0; slot < InputBindings::kBindingSlots; ++slot) {
-                        ImGui::TableSetColumnIndex(static_cast<int>(slot + 1));
-                        const bool listening = listeningBinding && listeningBinding->action == action &&
-                                               listeningBinding->device == visibleDevice &&
-                                               listeningBinding->slot == slot;
-                        const std::string label =
-                            listening ? std::string(draftShowControllerBindings ? "Press controller input"
-                                                                                : "Press key, mouse, or wheel")
-                                      : InputBindings::bindingLabel(draftBindings.get(action, visibleDevice, slot));
-                        ImGui::PushID(static_cast<int>(action));
-                        ImGui::PushID(static_cast<int>(slot));
-                        if (ImGui::Button(label.c_str(), {-1.0f, 0.0f})) {
-                            listeningBinding =
-                                ListeningBinding{.action = action, .device = visibleDevice, .slot = slot};
-                            statusMessage.clear();
-                        }
-                        ImGui::PopID();
-                        ImGui::PopID();
-                    }
-                }
-
-                ImGui::EndTable();
-            }
-
-            if (!statusMessage.empty()) {
-                ImGui::Spacing();
-                ImGui::TextWrapped("%s", statusMessage.c_str());
-            }
-
-            ImGui::Spacing();
-            if (ImGui::Button("Reset to Defaults", {buttonWidth, 30.0f * settingsUiScale})) {
-                const UserSettings defaults;
-                draftBindings = defaults.inputBindings;
-                draftMouseSensitivity = defaults.mouseSensitivity;
-                draftHorizontalFovDegrees = defaults.horizontalFovDegrees;
-                draftShowControllerBindings = defaults.showControllerBindings;
-                draftGamepadYawSensitivity = defaults.gamepadYawSensitivity;
-                draftGamepadPitchSensitivity = defaults.gamepadPitchSensitivity;
-                draftGamepadLookDeadzone = defaults.gamepadLookDeadzone;
-                draftGamepadMoveDeadzone = defaults.gamepadMoveDeadzone;
-                draftAimAssistEnabled = defaults.aimAssistEnabled;
-                draftAimAssistStrength = defaults.aimAssistStrength;
-                draftGamepadSwapSticks = defaults.gamepadSwapSticks;
-                draftMuzzleFlashEnabled = defaults.muzzleFlashEnabled;
-                listeningBinding.reset();
-                dirty = true;
-                statusMessage.clear();
-            }
-
-            const float halfWidth = (buttonWidth - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-            if (menu_theme::accentButton("Apply", {halfWidth, 34.0f * settingsUiScale})) {
-                settings.inputBindings = draftBindings;
-                settings.mouseSensitivity = draftMouseSensitivity;
-                settings.horizontalFovDegrees = draftHorizontalFovDegrees;
-                settings.showControllerBindings = draftShowControllerBindings;
-                settings.gamepadYawSensitivity = draftGamepadYawSensitivity;
-                settings.gamepadPitchSensitivity = draftGamepadPitchSensitivity;
-                settings.gamepadLookDeadzone = draftGamepadLookDeadzone;
-                settings.gamepadMoveDeadzone = draftGamepadMoveDeadzone;
-                settings.aimAssistEnabled = draftAimAssistEnabled;
-                settings.aimAssistStrength = draftAimAssistStrength;
-                settings.gamepadSwapSticks = draftGamepadSwapSticks;
-                settings.muzzleFlashEnabled = draftMuzzleFlashEnabled;
-                const bool saved = user_settings::save(std::string(settingsPath), settings);
-                statusMessage = saved ? "Settings saved." : "Settings could not be saved.";
-                dirty = false;
-                listeningBinding.reset();
+            const SettingsEditorResult settingsResult = settingsEditor_.render(settings, settingsPath, settingsUiScale);
+            if (settingsResult.applied) {
                 result.settingsApplied = true;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel", {halfWidth, 34.0f * settingsUiScale})) {
-                if (dirty) {
-                    requestDiscardSettingsConfirm();
-                } else {
-                    closeSettingsPage();
-                }
-            }
-
-            if (dirty) {
-                ImGui::TextUnformatted("Unsaved changes");
             }
         }
     }
@@ -508,21 +161,6 @@ PauseMenuResult PauseMenu::render(UserSettings& settings, std::string_view setti
             break;
         case PendingConfirm::ExitDesktop:
             result.exitToDesktop = true;
-            break;
-        case PendingConfirm::DiscardSettings:
-            draftBindings = settings.inputBindings;
-            draftMouseSensitivity = settings.mouseSensitivity;
-            draftHorizontalFovDegrees = settings.horizontalFovDegrees;
-            draftShowControllerBindings = settings.showControllerBindings;
-            draftGamepadYawSensitivity = settings.gamepadYawSensitivity;
-            draftGamepadPitchSensitivity = settings.gamepadPitchSensitivity;
-            draftGamepadLookDeadzone = settings.gamepadLookDeadzone;
-            draftGamepadMoveDeadzone = settings.gamepadMoveDeadzone;
-            draftAimAssistEnabled = settings.aimAssistEnabled;
-            draftAimAssistStrength = settings.aimAssistStrength;
-            draftGamepadSwapSticks = settings.gamepadSwapSticks;
-            draftMuzzleFlashEnabled = settings.muzzleFlashEnabled;
-            closeSettingsPage();
             break;
         case PendingConfirm::None:
             break;

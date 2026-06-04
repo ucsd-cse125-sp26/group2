@@ -26,6 +26,9 @@ public:
     /// @brief True if the user requested opening the host configuration screen, then clear that request.
     bool consumeHostRequest();
 
+    /// @brief True if the user requested opening the settings screen, then clear that request.
+    bool consumeSettingsRequest();
+
     /// @brief True if the user requested closing the application, then clear that request.
     bool consumeExitRequest();
 
@@ -34,5 +37,6 @@ private:
     SDL_Window* window = nullptr;    ///< Application window; not owned.
     bool pendingPlay = false;        ///< Set when the user clicks "Play", cleared by App.
     bool pendingHost = false;        ///< Set when the user clicks "Host", cleared by App.
+    bool pendingSettings = false;    ///< Set when the user clicks "Settings", cleared by App.
     bool pendingExit = false;        ///< Set when the user clicks "Exit", cleared by App.
 };
