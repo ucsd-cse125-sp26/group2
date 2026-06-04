@@ -411,7 +411,8 @@ private:
                          bool staticGeometry,
                          bool entityGeometry,
                          bool skinnedGeometry,
-                         PointLightType lightType);
+                         PointLightType lightType,
+                         bool cullByCamera = true);
 
     void onFirstFrame(SDL_GPUCommandBuffer* cmd);
 

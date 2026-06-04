@@ -321,8 +321,10 @@ private:
                                            ///  vs only after a physics tick (false).
     bool inputSyncedWithPhysics = true;    ///< Sample mouse once per physics tick (true)
                                            ///  vs every iterate() call (false).
-    bool limitFPSToMonitor = false;        ///< VSync on (true) / off (false). Default off = uncapped
-                                           ///  (mailbox present); toggle live via the debug menu.
+    bool limitFPSToMonitor = true;         ///< VSync on (true) / off (false). Default ON: caps to the
+                                           ///  monitor refresh, which frees GPU headroom and removes the
+                                           ///  near-light stutter. Toggle live via the debug menu; the
+                                           ///  GROUP2_CLIENT_UNCAPPED env var / bench mode still force it off.
 
     Uint64 softLimitPeriod = 0;            ///< Target frame period in perf-counter ticks (0 = disabled).
     Uint64 softLimitNextFrame = 0;         ///< Performance counter target for next frame deadline.
