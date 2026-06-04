@@ -6,6 +6,9 @@
 #include "FbxImportUtils.hpp"
 #include "SkinVertex.hpp"
 
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -47,10 +50,20 @@ public:
     CharacterRig(CharacterRig&&) noexcept;
     CharacterRig& operator=(CharacterRig&&) noexcept;
 
-    /// @brief Load rig from an FBX file.
-    /// @param path  Absolute path to an FBX with a skin-weighted mesh.
+    /// @brief Load rig from an FBX/GLB file.
+    /// @param path  Absolute path to a file with a skin-weighted mesh.
+    /// @param orientationFix  Rotation prepended to the skeleton root so the
+    ///        whole rig (render mesh, joint frames, hitboxes) is re-oriented
+    ///        consistently. Defaults to identity. Needed when a re-export
+    ///        changes the up/forward axis convention (e.g. a glTF export of a
+    ///        rig whose armature carried an unapplied 90° rotation).
+    /// @param flipNormals  Negate every bind-pose vertex normal. Defaults to
+    ///        false. Use when an export inverts normal/winding handedness so
+    ///        the lit surface faces the wrong way.
     /// @return True on success (skeleton built + at least one skinned mesh).
-    bool loadFromFBX(const std::string& path);
+    bool loadFromFBX(const std::string& path,
+                     const glm::quat& orientationFix = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                     bool flipNormals = false);
 
     /// @brief True after a successful loadFromFBX().
     [[nodiscard]] bool isLoaded() const noexcept;

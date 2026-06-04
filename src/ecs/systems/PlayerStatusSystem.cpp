@@ -30,6 +30,7 @@
 #include "ecs/physics/WorldData.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/DroppedWeaponSystem.hpp"
+#include "ecs/components/Ragdoll.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
 #include "network/NetKillEvent.hpp"
 
@@ -304,7 +305,8 @@ inline void handleDeath(entt::entity& player,
         // and instead reads the 15 ragdoll bone transforms via
         // `RagdollBoneTag` to drive the skinned-mesh palette.
         destroyRagdoll(registry, player);
-        spawnRagdoll(registry, player);
+        if (kRagdollsEnabled)
+            spawnRagdoll(registry, player);
 
         // Update death
         auto& deadVis = registry.get_or_emplace<PlayerVisState>(player);

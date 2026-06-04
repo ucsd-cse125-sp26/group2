@@ -529,6 +529,8 @@ constexpr RagdollJointBinding kRagdollJointBindings[] = {
 std::unordered_map<ClientId, ClientRagdollPose> collectClientRagdollPoses(Registry& registry)
 {
     std::unordered_map<ClientId, ClientRagdollPose> poses;
+    if constexpr (!kRagdollsEnabled)
+        return poses; // ragdolls disabled — no corpse poses to collect/render
     registry.view<RagdollBoneTag, Position>().each([&](entt::entity e, const RagdollBoneTag& tag, const Position& pos) {
         if (tag.characterId.value < 0)
             return;
@@ -1407,13 +1409,20 @@ bool Game::init(AppContext& ctx)
     chatOpen_ = false;
 
     // Load the shared skinned-character rig (skeleton + bind pose + weights).
-    // Loading a single FBX is enough — any file with matching skin data works;
-    // we use standard_walk.fbx because it's guaranteed present for locomotion.
+    // character_rigged_new.glb supplies the visible character mesh; animation
+    // clips are layered on top via AnimationLibrary (same Mixamo skeleton).
+    //
+    // The .glb is a Blender glTF re-export (the .fbx had per-mesh bind-matrix
+    // divergence that exploded the skin). That export baked the armature's
+    // unapplied +90° X rotation into the rig, leaving it face-down in-engine,
+    // and inverted normal handedness vs the old FBX. Correct both at load:
+    // rotate the skeleton root -90° about X and flip normals.
     {
         const char* base = SDL_GetBasePath();
         const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
-        const std::string rigPath = assetsDir + "standard_walk.fbx";
-        if (!charRig_.loadFromFBX(rigPath)) {
+        const std::string rigPath = assetsDir + "character_rigged_new.glb";
+        const glm::quat rigOrientationFix = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        if (!charRig_.loadFromFBX(rigPath, rigOrientationFix, /*flipNormals=*/true)) {
             SDL_Log("[client] WARNING: rig load failed — animated characters disabled");
         } else {
             SDL_Log("[client] rig loaded — %d joints, %zu mesh(es)", charRig_.numJoints(), charRig_.meshes().size());
@@ -1454,7 +1463,11 @@ bool Game::init(AppContext& ctx)
                         static_cast<double>(kRigVerticalOffset_));
             }
 
-            // Load every animation clip onto the shared skeleton.
+            // Load every animation clip onto the shared skeleton. The rig is a
+            // standard Mixamo skeleton matching the clips, so use the clips'
+            // full translations (only scaled to the rig's units by clipScale in
+            // loadClipFromFBX). This preserves authored hip/root vertical motion
+            // so crouch/slide lower the body and the feet stay on the floor.
             for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
                 const ClipId id = static_cast<ClipId>(i);
                 const std::string clipPath = assetsDir + clipFile(id);
@@ -1464,6 +1477,23 @@ bool Game::init(AppContext& ctx)
                 }
                 SDL_Log(
                     "[client] clip '%s' duration=%.2fs", clipName(id), static_cast<double>(animLibrary_.duration(id)));
+            }
+
+            // Ground off the IDLE pose, not the T-pose bind. The clips bend the
+            // knees slightly, so the animated feet sit a constant amount above
+            // the straight-legged bind — grounding off the bind lifts every clip
+            // by that amount. Re-reference the grounding min-Y to the idle feet
+            // (now that clips are loaded) and recompute the vertical offset.
+            {
+                const float groundedMinY =
+                    computeIdleGroundedMinY(charRig_, animLibrary_, rigOrientationFix, rigMeshMinY_);
+                if (groundedMinY != rigMeshMinY_) {
+                    SDL_Log("[client] rig grounding: idle-referenced minY %.3f -> %.3f",
+                            static_cast<double>(rigMeshMinY_),
+                            static_cast<double>(groundedMinY));
+                    rigMeshMinY_ = groundedMinY;
+                    kRigVerticalOffset_ = -tms::k_standingHalfHeight - rigMeshMinY_ * kRigScale_;
+                }
             }
 
             // Cache the right-hand bone index. The third-person weapon mesh
@@ -4214,7 +4244,7 @@ SDL_AppResult Game::iterate()
             });
         }
 
-        if (charRig_.isLoaded() && numJoints > 0) {
+        if (kRagdollsEnabled && charRig_.isLoaded() && numJoints > 0) {
             registry.view<AnimatedCharacter, Position, PlayerVisState, ClientId>().each([&](entt::entity e,
                                                                                             AnimatedCharacter& ac,
                                                                                             const Position& pos,

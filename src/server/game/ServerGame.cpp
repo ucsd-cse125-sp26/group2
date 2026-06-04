@@ -64,6 +64,7 @@
 #include "ecs/systems/PickupGeometry.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
+#include "ecs/components/Ragdoll.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
 #include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
@@ -784,7 +785,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         // Phase 13: age out ragdolls so gameplay can fade / despawn corpses.
         GROUP2_PROF_SCOPE("ragdolls");
-        systems::runRagdolls(registry, dt);
+        if (kRagdollsEnabled)
+            systems::runRagdolls(registry, dt);
     }
     {
         GROUP2_PROF_SCOPE("explosion");
@@ -1119,9 +1121,13 @@ void ServerGame::initAnimation()
 {
     const char* base = SDL_GetBasePath();
     const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
-    const std::string rigPath = assetsDir + "standard_walk.fbx";
+    const std::string rigPath = assetsDir + "character_rigged_new.glb";
 
-    if (!serverRig_.loadFromFBX(rigPath)) {
+    // Match the client's rig orientation fix (see Game.cpp) so server-side
+    // hitbox capsules line up with the rendered, re-oriented body. Normals are
+    // irrelevant server-side, so no flip needed here.
+    const glm::quat rigOrientationFix = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    if (!serverRig_.loadFromFBX(rigPath, rigOrientationFix)) {
         SDL_Log("[server] WARNING: rig load failed — skeleton hitboxes disabled, falling back to AABB");
         return;
     }
@@ -1149,13 +1155,28 @@ void ServerGame::initAnimation()
                 static_cast<double>(rigScale_));
     }
 
-    // Load animation clips.
+    // Load animation clips with full (unit-scaled) translations to match the
+    // client (see Game.cpp) so server hitbox poses track the rendered body,
+    // including crouch/slide vertical motion.
     for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
         const ClipId id = static_cast<ClipId>(i);
         const std::string clipPath = assetsDir + clipFile(id);
         if (!serverAnimLibrary_.loadClipFromFBX(serverRig_, id, clipPath)) {
             SDL_Log("[server] WARNING: failed to load clip '%s'", clipName(id));
             continue;
+        }
+    }
+
+    // Ground hitboxes off the IDLE pose, not the T-pose bind (matches the
+    // client; see Game.cpp) so capsules track the rendered, grounded body.
+    {
+        const float groundedMinY =
+            computeIdleGroundedMinY(serverRig_, serverAnimLibrary_, rigOrientationFix, rigMeshMinY_);
+        if (groundedMinY != rigMeshMinY_) {
+            SDL_Log("[server] rig grounding: idle-referenced minY %.3f -> %.3f",
+                    static_cast<double>(rigMeshMinY_),
+                    static_cast<double>(groundedMinY));
+            rigMeshMinY_ = groundedMinY;
         }
     }
 
