@@ -13,6 +13,11 @@ struct AmmoCounter : HudWidget
     float clipFontSize = 125.5f;  ///< Current ammo in the magazine.
     float reserveFontSize = 75.f; ///< Reserve / total ammo.
     float edgePadding = 0.f;      ///< Inset from the panel edge to the rightmost number.
+    float backgroundScale = 1.26f;
+    float backgroundOffsetX = -99.5f;
+    float backgroundOffsetY = -4.f;
+    float backgroundStretchX = 1.3f;
+    float backgroundStretchY = 1.f;
 
     AmmoCounter();
     void update(float dt, const HudGameState& state, HudTweenPool& tweens) override;

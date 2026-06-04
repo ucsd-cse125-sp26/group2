@@ -262,6 +262,11 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "clipFontSize", ammo->clipFontSize);
         writeFloatParam(out, first, "reserveFontSize", ammo->reserveFontSize);
         writeFloatParam(out, first, "edgePadding", ammo->edgePadding);
+        writeFloatParam(out, first, "backgroundScale", ammo->backgroundScale);
+        writeFloatParam(out, first, "backgroundOffsetX", ammo->backgroundOffsetX);
+        writeFloatParam(out, first, "backgroundOffsetY", ammo->backgroundOffsetY);
+        writeFloatParam(out, first, "backgroundStretchX", ammo->backgroundStretchX);
+        writeFloatParam(out, first, "backgroundStretchY", ammo->backgroundStretchY);
     } else if (const auto* crosshair = dynamic_cast<const CrosshairWidget*>(&widget)) {
         writeFloatParam(out, first, "gap", crosshair->style.gap);
         writeFloatParam(out, first, "length", crosshair->style.length);
@@ -467,6 +472,11 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Clip Font Size", ammo->clipFontSize, 0.5f, 6.0f, 160.0f);
         editFloat("Reserve Font Size", ammo->reserveFontSize, 0.5f, 6.0f, 120.0f);
         editFloat("Edge Padding", ammo->edgePadding, 0.5f, 0.0f, 200.0f);
+        editFloat("BG Scale", ammo->backgroundScale, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Offset X", ammo->backgroundOffsetX, 0.5f, -400.0f, 400.0f);
+        editFloat("BG Offset Y", ammo->backgroundOffsetY, 0.5f, -400.0f, 400.0f);
+        editFloat("BG Stretch X", ammo->backgroundStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Stretch Y", ammo->backgroundStretchY, 0.01f, 0.01f, 8.0f);
     } else if (auto* crosshair = dynamic_cast<CrosshairWidget*>(&widget)) {
         editFloat("Gap", crosshair->style.gap, 0.25f, 0.0f, 200.0f);
         editFloat("Arm Length", crosshair->style.length, 0.25f, 0.0f, 200.0f);
@@ -602,6 +612,9 @@ void HudDebugPanel::build(Hud& hud, bool* open)
         ImGui::SetTooltip(
             "Draws inactive HUD widgets for layout debugging. Railgun Scope still uses normal visibility.");
     }
+    ImGui::Checkbox("Show Alignment Border", &hud.debugShowAlignmentBorder());
+    editFloat("Border Left/Right Offset", hud.debugAlignmentBorderOffsetX(), 1.0f, 0.0f, 4000.0f);
+    editFloat("Border Top/Bottom Offset", hud.debugAlignmentBorderOffsetY(), 1.0f, 0.0f, 4000.0f);
 
     static std::array<char, 260> savePath{"hud_tweaks.json"};
     static std::string saveStatus;
