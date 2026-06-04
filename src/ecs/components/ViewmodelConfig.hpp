@@ -26,7 +26,6 @@ struct ViewmodelParams
 /// — plus the weapon mesh scale.
 struct ThirdPersonWeaponParams
 {
-    float scale = 1.0f;
     /// Per-weapon-class scaler on the Phase F procedural spine bend (1.0 = full,
     /// heavier weapons get less so the character looks like it struggles with
     /// the weight when aiming up/down).
@@ -157,15 +156,15 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
 {
     static const std::array<ThirdPersonWeaponParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle — middleweight, full spine bend, moderate recoil.
-        {.scale = 10.0f, .spineBendMultiplier = 1.0f, .hipLeanMultiplier = 0.1f, .recoilKickRad = 0.05f},
+        {.spineBendMultiplier = 1.0f, .hipLeanMultiplier = 0.1f, .recoilKickRad = 0.05f},
         // Rocket launcher — heavy, slower upper-body response, big kick.
-        {.scale = 0.025f, .spineBendMultiplier = 0.65f, .hipLeanMultiplier = 0.06f, .recoilKickRad = 0.18f},
+        {.spineBendMultiplier = 0.65f, .hipLeanMultiplier = 0.06f, .recoilKickRad = 0.18f},
         // RailGun / charge rifle — heavy precision rifle, slower bend, rifle-ish kick.
-        {.scale = 7.0f, .spineBendMultiplier = 0.85f, .hipLeanMultiplier = 0.08f, .recoilKickRad = 0.07f},
+        {.spineBendMultiplier = 0.85f, .hipLeanMultiplier = 0.08f, .recoilKickRad = 0.07f},
         // EnergyGun — light pistol, fast spine bend, gentle kick.
-        {.scale = 1.0f, .spineBendMultiplier = 1.0f, .hipLeanMultiplier = 0.1f, .recoilKickRad = 0.03f},
+        {.spineBendMultiplier = 1.0f, .hipLeanMultiplier = 0.1f, .recoilKickRad = 0.03f},
         // Shotgun — copies EnergyGun (same mesh); heavier kick.
-        {.scale = 1.0f, .spineBendMultiplier = 1.0f, .hipLeanMultiplier = 0.1f, .recoilKickRad = 0.12f},
+        {.spineBendMultiplier = 1.0f, .hipLeanMultiplier = 0.1f, .recoilKickRad = 0.12f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
@@ -177,58 +176,66 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
 /// from `assets/weapons/<name>.hold.toml` if present and live-tuned via the
 /// Weapon Hold tweaker (which saves back to that TOML).
 ///
-/// Values are the rifle hold pose hand-tuned in-game via the Weapon Hold
-/// tweaker (spine-relative gun placement + 3-DOF FK arm/finger angles). Every
-/// weapon reuses it as its default; per-weapon overrides come from
-/// `assets/weapons/<name>.hold.toml` at runtime.
+/// Per-weapon hold poses hand-tuned in-game via the Weapon Hold tweaker
+/// (spine-relative gun placement + scale + 3-DOF FK arm/finger angles), exported
+/// from each weapon's `<name>.hold.toml`. Finger curl is shared across weapons;
+/// the offset, scale, and arm bone angles differ per weapon. Runtime overrides
+/// still come from `assets/weapons/<name>.hold.toml`.
 inline const WeaponHoldPose& getWeaponHoldPose(WeaponType type)
 {
-    static const auto k_rifle = []() {
+    using BoneAngles = std::array<glm::vec3, kArmHoldBoneCount>;
+
+    // Shared finger curl (right = trigger hand, left = support hand wrapping the
+    // foregrip). (pitch, yaw, roll) degrees; layout matches GripPose::index.
+    static const std::array<glm::vec3, kGripPoseJointCount> k_rightFingers{{
+        {30.0f, 20.0f, 0.0f}, {35.0f, 0.0f, 0.0f}, {25.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, // thumb
+        {25.0f, 0.0f, 0.0f}, {40.0f, 0.0f, 0.0f}, {35.0f, 0.0f, 0.0f}, {15.0f, 0.0f, 0.0f},  // index
+        {55.0f, 0.0f, 0.0f}, {75.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // middle
+        {60.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // ring
+        {60.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // pinky
+    }};
+    static const std::array<glm::vec3, kGripPoseJointCount> k_leftFingers{{
+        {35.0f, -20.0f, 0.0f}, {40.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, // thumb
+        {65.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // index
+        {70.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // middle
+        {70.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // ring
+        {65.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // pinky
+    }};
+
+    auto make = [&](glm::vec3 offset, float scale, BoneAngles right, BoneAngles left) {
         WeaponHoldPose p;
-        // Spine2-local weapon placement (rifle, hand-tuned).
-        p.spineOffset = glm::vec3{-21.0f, 23.5f, 66.25f};
+        p.spineOffset = offset;
         p.spineRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-
-        // Arm-chain bones root → tip (Shoulder, UpperArm, ForeArm, Hand);
-        // (pitch, yaw, roll) degrees, hand-tuned.
-        p.rightArm.boneAngles = {{
-            {0.0f, 0.0f, 0.0f},
-            {0.0f, 0.0f, 44.0f},
-            {-107.0f, -7.0f, 13.0f},
-            {-1.0f, 24.0f, -41.0f},
-        }};
-        p.leftArm.boneAngles = {{
-            {24.0f, 0.0f, 0.0f},
-            {36.0f, 0.0f, 48.0f},
-            {71.0f, -3.0f, 6.0f},
-            {-11.0f, -46.0f, -23.0f},
-        }};
-
-        // Right hand (trigger hand): index softer (trigger finger), thumb over top.
-        // (pitch, yaw, roll) degrees — roll seeded at 0.
-        const std::array<glm::vec3, kGripPoseJointCount> rightFingers{{
-            {30.0f, 20.0f, 0.0f}, {35.0f, 0.0f, 0.0f}, {25.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, // thumb
-            {25.0f, 0.0f, 0.0f}, {40.0f, 0.0f, 0.0f}, {35.0f, 0.0f, 0.0f}, {15.0f, 0.0f, 0.0f},  // index
-            {55.0f, 0.0f, 0.0f}, {75.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // middle
-            {60.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // ring
-            {60.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // pinky
-        }};
-        // Left hand (support hand): all fingers wrap tightly around the foregrip.
-        const std::array<glm::vec3, kGripPoseJointCount> leftFingers{{
-            {35.0f, -20.0f, 0.0f}, {40.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, // thumb
-            {65.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // index
-            {70.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // middle
-            {70.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // ring
-            {65.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // pinky
-        }};
-        p.rightArm.fingerAngles = rightFingers;
-        p.leftArm.fingerAngles = leftFingers;
+        p.scale = scale;
+        p.rightArm.boneAngles = right;
+        p.leftArm.boneAngles = left;
+        p.rightArm.fingerAngles = k_rightFingers;
+        p.leftArm.fingerAngles = k_leftFingers;
         return p;
-    }();
+    };
 
-    // Every weapon shares the rifle default until per-weapon tuning lands.
-    static const std::array<WeaponHoldPose, kRenderableWeaponTypeCount> k_params{
-        {k_rifle, k_rifle, k_rifle, k_rifle, k_rifle}};
+    static const std::array<WeaponHoldPose, kRenderableWeaponTypeCount> k_params{{
+        // Rifle
+        make({-21.0f, 23.5f, 66.25f}, 39.4f,
+             {{{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 44.0f}, {-107.0f, -7.0f, 13.0f}, {-1.0f, 24.0f, -41.0f}}},
+             {{{24.0f, 0.0f, 0.0f}, {36.0f, 0.0f, 48.0f}, {71.0f, -3.0f, 6.0f}, {-11.0f, -46.0f, -23.0f}}}),
+        // Rocket launcher
+        make({-21.0f, -28.25f, 28.75f}, 39.4f,
+             {{{0.0f, 0.0f, 0.0f}, {0.0f, 42.0f, 18.0f}, {-155.0f, 4.0f, 9.0f}, {6.0f, 106.0f, -62.0f}}},
+             {{{24.0f, 0.0f, 0.0f}, {40.0f, -16.0f, 46.0f}, {103.0f, -3.0f, 5.0f}, {-6.0f, -57.0f, -41.0f}}}),
+        // RailGun / charge rifle
+        make({-21.0f, -18.0f, 66.25f}, 39.4f,
+             {{{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 44.0f}, {-107.0f, -7.0f, 13.0f}, {-1.0f, 24.0f, -41.0f}}},
+             {{{24.0f, 0.0f, 0.0f}, {36.0f, 0.0f, 48.0f}, {71.0f, -3.0f, 6.0f}, {-11.0f, -46.0f, -23.0f}}}),
+        // EnergyGun
+        make({-21.0f, 3.25f, 80.0f}, 22.9f,
+             {{{0.0f, -14.0f, 0.0f}, {0.0f, 0.0f, 35.0f}, {-120.0f, 5.0f, 7.0f}, {13.0f, 53.0f, -27.0f}}},
+             {{{24.0f, 0.0f, 0.0f}, {36.0f, 0.0f, 48.0f}, {71.0f, -3.0f, 6.0f}, {-11.0f, -123.0f, -21.0f}}}),
+        // Shotgun — reuses the EnergyGun model + pose.
+        make({-21.0f, 3.25f, 80.0f}, 22.9f,
+             {{{0.0f, -14.0f, 0.0f}, {0.0f, 0.0f, 35.0f}, {-120.0f, 5.0f, 7.0f}, {13.0f, 53.0f, -27.0f}}},
+             {{{24.0f, 0.0f, 0.0f}, {36.0f, 0.0f, 48.0f}, {71.0f, -3.0f, 6.0f}, {-11.0f, -123.0f, -21.0f}}}),
+    }};
 
     return k_params[static_cast<std::size_t>(type)];
 }

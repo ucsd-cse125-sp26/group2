@@ -3757,7 +3757,6 @@ SDL_AppResult Game::iterate()
                     if (const auto* ws = registry.try_get<WeaponState>(e); ws != nullptr) {
                         const GunInstance& gun = getEquippedGun(*ws);
                         if (isRenderableGunType(gun.type)) {
-                            const auto& tp = tpWeaponParams_[static_cast<int>(gun.type)];
                             c.sampleThisFrame = true;
                             // FK weapon hold (rewrite): the gun is a rigid child of Spine2 and
                             // both arms are FK-posed from the per-weapon hold pose. The worker
@@ -3765,10 +3764,10 @@ SDL_AppResult Game::iterate()
                             // post-spine-bend Spine2 model matrix.
                             c.hasWeapon = true;
                             c.weaponModelIdx = weaponModelIndices_[static_cast<std::size_t>(gun.type)];
-                            c.weaponScale = tp.scale;
                             c.weaponWorld = glm::mat4(1.0f); // overwritten in the worker.
                             c.hasHoldPose = spine2JointIdx_ >= 0;
                             c.holdPose = weaponHoldPoses_[static_cast<std::size_t>(gun.type)];
+                            c.weaponScale = c.holdPose.scale;
 
                             // Weapon-swap fade: ramp the arm FK weight 0 → 1 over
                             // kHoldSwapDurationSec after a weapon-type change so the arms
@@ -5685,7 +5684,7 @@ SDL_AppResult Game::iterate()
                 "Arms are pure FK: each bone's (pitch, yaw) is a local rotation off its rest pose. No IK.");
 
             ImGui::SeparatorText("Weapon vs Spine2 bone");
-            ImGui::DragFloat("Scale", &tp.scale, 0.05f, 0.0001f, 30.0f, "%.3f");
+            ImGui::DragFloat("Scale", &hold.scale, 0.05f, 0.0001f, 200.0f, "%.3f");
             ImGui::DragFloat3("Offset (R/U/F)", &hold.spineOffset.x, 0.25f, -80.0f, 80.0f, "%.2f");
             ImGui::DragFloat("Rot Step (deg)", &holdRotStepDeg_, 0.5f, 0.1f, 90.0f, "%.1f");
             ImGui::PushButtonRepeat(true);

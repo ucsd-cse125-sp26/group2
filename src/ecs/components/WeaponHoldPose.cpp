@@ -7,6 +7,7 @@
 /// [weapon]
 /// offset   = [x, y, z]          # Spine2-local weapon translation
 /// rotation = [w, x, y, z]       # Spine2-local weapon rotation quaternion
+/// scale    = 39.4               # weapon mesh scale
 ///
 /// [right_arm]
 /// bones = [[p,y,r],[p,y,r],[p,y,r],[p,y,r]]   # Shoulder, UpperArm, ForeArm, Hand
@@ -132,6 +133,10 @@ bool loadWeaponHoldPose(const std::string& path, WeaponHoldPose& out)
                               static_cast<float>(rot.get(3) ? rot.get(3)->value_or(0.0) : 0.0)};
             out.spineRotation = glm::normalize(q);
         }
+        // scale is optional — a file written before scale was persisted keeps
+        // the caller's existing value (the compile-time default).
+        if (const auto* scaleNode = weapon.get("scale"); scaleNode != nullptr)
+            out.scale = static_cast<float>(scaleNode->value_or(static_cast<double>(out.scale)));
     }
 
     readArm(root, "right_arm", out.rightArm);
@@ -158,9 +163,11 @@ bool saveWeaponHoldPose(const std::string& path, const WeaponHoldPose& pose)
                       static_cast<double>(pose.spineOffset.x), static_cast<double>(pose.spineOffset.y),
                       static_cast<double>(pose.spineOffset.z));
         f << buf;
-        std::snprintf(buf, sizeof(buf), "rotation = [%.5f, %.5f, %.5f, %.5f]\n\n",
+        std::snprintf(buf, sizeof(buf), "rotation = [%.5f, %.5f, %.5f, %.5f]\n",
                       static_cast<double>(pose.spineRotation.w), static_cast<double>(pose.spineRotation.x),
                       static_cast<double>(pose.spineRotation.y), static_cast<double>(pose.spineRotation.z));
+        f << buf;
+        std::snprintf(buf, sizeof(buf), "scale    = %.3f\n\n", static_cast<double>(pose.scale));
         f << buf;
         writeArm(f, "right_arm", pose.rightArm);
         writeArm(f, "left_arm", pose.leftArm);

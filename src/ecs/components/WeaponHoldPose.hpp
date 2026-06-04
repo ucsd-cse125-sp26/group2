@@ -57,6 +57,7 @@ struct WeaponHoldPose
 {
     glm::vec3 spineOffset{0.0f};                     ///< Spine2-local weapon translation (rig/model units).
     glm::quat spineRotation{1.0f, 0.0f, 0.0f, 0.0f}; ///< Spine2-local weapon rotation.
+    float scale = 1.0f;                              ///< Weapon mesh scale.
     ArmHoldPose rightArm;
     ArmHoldPose leftArm;
 };
