@@ -116,12 +116,12 @@ inline const std::array<WeaponViewmodelAssets, kRenderableWeaponTypeCount> kWeap
     // geometry_shadowed.frag samples V un-flipped (like static models), so the
     // glTF→DCC V convention is corrected at import (matches the world model path).
     {.viewmodelGlb = "apex_r301.glb", .armsGlb = "apex_r301_arms.glb", .flipUVs = true},
-    // Rocket — static fallback.
+    // Rocket — static fallback (no first-person hands by design).
     {},
-    // RailGun — static fallback (kept on the legacy viewmodel for now).
-    {},
-    // EnergyGun — static fallback.
-    {},
-    // Shotgun — static fallback.
-    {},
+    // RailGun — Apex Nemesis (ptpov_nemesis): draw/reload/reload_empty/fire clips.
+    {.viewmodelGlb = "apex_nemesis.glb", .armsGlb = "apex_nemesis_arms.glb", .flipUVs = true},
+    // EnergyGun ("beamgun") — Apex Havoc (ptpov_beam_ar): draw/reload/reload_empty/fire/charge.
+    {.viewmodelGlb = "apex_havoc.glb", .armsGlb = "apex_havoc_arms.glb", .flipUVs = true},
+    // Shotgun — Apex Mastiff (ptpov_mastiff): draw + segmented (concatenated) reload; no fire clip.
+    {.viewmodelGlb = "apex_mastiff.glb", .armsGlb = "apex_mastiff_arms.glb", .flipUVs = true},
 }};
