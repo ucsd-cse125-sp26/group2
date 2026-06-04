@@ -24,6 +24,8 @@ struct EquipmentSlots : HudWidget
         SvgComponentTuning iconFrame;
         SvgComponentTuning icon;
         SvgComponentTuning bar;
+        float bindingOffsetX = 0.f;
+        float bindingOffsetY = 0.f;
         bool flipIconX = false;
         bool flipIconY = false;
         bool flipBarX = false;
