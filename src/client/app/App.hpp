@@ -79,8 +79,8 @@ private:
         .persistAfterClientExit = false,
         .advertiseGlobal = true,
         .advertiseLan = true,
-        .serverName = "Group 2 Server",
-        .killsToWin = 10,
+        .serverName = "Server",
+        .killsToWin = 25,
         .maxPlayers = 8,
     }; ///< Persistent host screen draft state.
 

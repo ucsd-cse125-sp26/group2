@@ -11,6 +11,11 @@
 
 namespace host_config_ui
 {
+namespace
+{
+constexpr float k_labelColumnWidth = 190.0f;
+}
+
 HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
 {
     HostConfigResult result{};
@@ -20,7 +25,7 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
                                    inputs.hasUnsavedServerChanges ? "UNSAVED CHANGES" : "CONFIG CLEAN");
     menu_theme::terminalSection("SETTINGS");
     if (ImGui::BeginTable("HostSettings", 2, ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+        ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, k_labelColumnWidth);
         ImGui::TableSetupColumn("Value");
 
         ImGui::TableNextRow();
@@ -54,15 +59,13 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
         ImGui::BeginDisabled(inputs.serverRunning);
         ImGui::Checkbox("##PersistentServer", &draft.persistAfterClientExit);
         ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::TextDisabled("stays online after you close the game");
 
         ImGui::EndTable();
     }
 
     menu_theme::terminalSection("ADVANCED");
     if (ImGui::BeginTable("HostAdvancedSettings", 2, ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+        ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, k_labelColumnWidth);
         ImGui::TableSetupColumn("Value");
 
         ImGui::TableNextRow();

@@ -40,7 +40,7 @@ lan-broadcast-enabled = true
 lan-broadcast-port = 2311
 directory-host = "157.245.233.91"
 directory-udp-port = 10081
-server-name = "Palantir"
+server-name = "Server"
 # Default authoritative player cap for locally hosted servers.
 max-players = 8
 refresh-seconds = 5
