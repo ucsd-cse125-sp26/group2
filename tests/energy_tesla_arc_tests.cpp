@@ -69,5 +69,9 @@ int main()
     assert(effect.arcCount() > effect.mainArcCount());
     assert(effect.arcCount() < 8192);
 
+    effect.update(0.016f, {0.0f, 0.0f, -1.0f});
+    assert(effect.activeBeamCount() == 0);
+    assert(effect.arcCount() == 0);
+
     return 0;
 }

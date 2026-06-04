@@ -141,12 +141,12 @@ EnergyTeslaArcEffect::Beam* EnergyTeslaArcEffect::findOrAllocBeam(uint32_t key)
             return &beam;
     }
     Beam* slot = nullptr;
-    float oldest = FLT_MAX;
+    float oldestAge = -FLT_MAX;
     for (auto& beam : beams_) {
         if (!beam.active)
             return &beam;
-        if (beam.keepAlive < oldest) {
-            oldest = beam.keepAlive;
+        if (beam.age > oldestAge) {
+            oldestAge = beam.age;
             slot = &beam;
         }
     }
@@ -196,7 +196,7 @@ void EnergyTeslaArcEffect::drive(uint32_t key,
     beam->hitPoint = hitPoint;
     beam->locked = locked;
     beam->lockStrength = std::clamp(lockStrength, 0.0f, 1.0f);
-    beam->keepAlive = k_keepAlive;
+    beam->drivenThisFrame = true;
 }
 
 void EnergyTeslaArcEffect::debugPulse(glm::vec3 origin,
@@ -325,11 +325,11 @@ void EnergyTeslaArcEffect::update(float dt, glm::vec3 camForward)
         if (!beam.active)
             continue;
 
-        beam.keepAlive -= dt;
-        if (beam.keepAlive <= -k_fadeTime) {
+        if (!beam.drivenThisFrame) {
             beam.active = false;
             continue;
         }
+        beam.drivenThisFrame = false;
 
         beam.age += dt;
         beam.time += dt;
@@ -354,8 +354,7 @@ void EnergyTeslaArcEffect::update(float dt, glm::vec3 camForward)
         const glm::vec3 perp2 = safeNormalize(glm::cross(axisN, perp), {0.0f, 1.0f, 0.0f});
 
         const float fadeIn = std::min(1.0f, beam.age / k_fadeTime);
-        const float fadeOut = std::clamp((beam.keepAlive + k_fadeTime) / k_fadeTime, 0.0f, 1.0f);
-        const float fade = fadeIn * fadeOut;
+        const float fade = fadeIn;
         const float baseAmp = len * (beam.locked ? (0.010f + beam.displayedLock * 0.018f) : 0.008f);
         const int strandCount = beam.locked ? 1 : k_maxStrands;
         const uint32_t crackleFrame = static_cast<uint32_t>(std::floor(beam.time * 34.0f));

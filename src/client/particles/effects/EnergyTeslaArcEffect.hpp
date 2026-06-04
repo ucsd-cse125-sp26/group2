@@ -48,7 +48,6 @@ private:
     static constexpr int k_branchSegs = 7;
     static constexpr int k_maxBranches = 8;
     static constexpr int k_maxStrands = 3;
-    static constexpr float k_keepAlive = 0.06f;
     static constexpr float k_fadeTime = 0.08f;
     static constexpr float k_branchRetime = 0.045f;
 
@@ -72,11 +71,11 @@ private:
         float lockStrength = 0.0f;
         float displayedLock = 0.0f;
         float age = 0.0f;
-        float keepAlive = 0.0f;
         float time = 0.0f;
         float seed = 0.0f;
         float warpSeed = 0.0f;
         float branchTimer = 0.0f;
+        bool drivenThisFrame = false;
         std::array<Branch, k_maxBranches> branches{};
         int branchCount = 0;
     };
