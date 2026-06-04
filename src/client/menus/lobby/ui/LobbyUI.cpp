@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <imgui.h>
+#include <imgui_internal.h>
 
 namespace lobby_ui
 {
@@ -69,15 +70,24 @@ void drawSidebar(const LobbyUIConfig& config, BuildResult& result, bool localRea
 {
     if (config.isHosting) {
         menu_theme::terminalSection("HOSTING");
+        const float prevScale = ImGui::GetCurrentWindow()->FontWindowScale;
+        const float smallScale = prevScale * 0.75f;
+        const float reservedHeight = ImGui::GetTextLineHeightWithSpacing() * (smallScale / prevScale) * 2.0f;
+        const ImVec2 startCursor = ImGui::GetCursorPos();
         if (config.hostAddressesVisible) {
-            ImGui::Text("Listen address: %.*s:%u",
+            ImGui::SetWindowFontScale(smallScale);
+            ImGui::Text("Listen: %.*s:%u",
                         static_cast<int>(config.hostLanIp.size()),
                         config.hostLanIp.data(),
                         static_cast<unsigned>(config.hostPort));
-            ImGui::Text("Local address: 127.0.0.1:%u", static_cast<unsigned>(config.hostPort));
+            ImGui::Text("Local:  127.0.0.1:%u", static_cast<unsigned>(config.hostPort));
+            ImGui::SetWindowFontScale(prevScale);
         } else {
+            ImGui::SetWindowFontScale(smallScale);
             ImGui::TextDisabled("Addresses hidden");
+            ImGui::SetWindowFontScale(prevScale);
         }
+        ImGui::SetCursorPos(ImVec2(startCursor.x, startCursor.y + reservedHeight));
         if (menu_theme::terminalActionRow(
                 config.hostAddressesVisible ? "HIDE ADDRESSES" : "SHOW ADDRESSES", nullptr, ImVec2(0.0f, 28.0f)))
         {
@@ -96,7 +106,9 @@ void drawSidebar(const LobbyUIConfig& config, BuildResult& result, bool localRea
 
     menu_theme::terminalStatusLine("LOBBY COMMANDS", "ARROWS / ENTER");
     if (config.startCountdownActive) {
-        ImGui::Text("Entering match countdown in %.1fs", static_cast<double>(config.startCountdownRemaining));
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "MATCH STARTING");
+        ImGui::Text("in %.1fs", static_cast<double>(config.startCountdownRemaining));
     }
 
     ImGui::BeginDisabled(config.startCountdownActive);
