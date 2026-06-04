@@ -67,6 +67,14 @@ int main()
     assert(distanceToLine(newlyLocked.points[newlyLocked.count / 4], locked.origin, locked.guidePoint) > 0.5f);
     assert(distanceToLine(newlyLocked.points[newlyLocked.count - 3], locked.origin, locked.guidePoint) > 8.0f);
 
+    EnergyTeslaArcEffect unlockedEffect;
+    unlockedEffect.drive(7, unlocked.origin, unlocked.guidePoint, unlocked.hitPoint, false, 0.0f);
+    unlockedEffect.update(0.016f, {0.0f, 0.0f, -1.0f});
+    assert(unlockedEffect.activeBeamCount() == 1);
+    assert(unlockedEffect.mainArcCount() > 0);
+    assert(unlockedEffect.detailArcCount() > 0);
+    assert(unlockedEffect.arcCount() < 8192);
+
     EnergyTeslaArcEffect effect;
     effect.drive(42, locked.origin, locked.guidePoint, locked.hitPoint, true, 1.0f);
     effect.update(0.016f, {0.0f, 0.0f, -1.0f});

@@ -4732,6 +4732,21 @@ SDL_AppResult Game::iterate()
                     lightEnd = guideEnd;
             }
 
+            const glm::vec3 lightColor = (beam.type == WeaponType::EnergyGun) ? glm::vec3{0.16f, 0.78f, 1.0f}
+                                                                              : glm::vec3{0.3f, 1.0f, 0.2f};
+            if (beam.type == WeaponType::EnergyGun && beam.locked == 0) {
+                if (dynLights.size() < 14) {
+                    dynLights.push_back(PointLight{
+                        .position = lightStart,
+                        .intensity = 1.2f,
+                        .color = lightColor,
+                        .range = 40.0f,
+                    });
+                    ++beamPointLights;
+                }
+                return;
+            }
+
             const glm::vec3 delta = lightEnd - lightStart;
             const float len = glm::length(delta);
             if (len < 1.0f)
@@ -4739,8 +4754,6 @@ SDL_AppResult Game::iterate()
             const int numLights = (beam.type == WeaponType::EnergyGun)
                                       ? std::max(2, static_cast<int>(len / 130.0f) + 1)
                                       : std::max(2, static_cast<int>(len / 80.0f) + 1);
-            const glm::vec3 lightColor = (beam.type == WeaponType::EnergyGun) ? glm::vec3{0.16f, 0.78f, 1.0f}
-                                                                              : glm::vec3{0.3f, 1.0f, 0.2f};
             for (int i = 0; i < numLights && dynLights.size() < 14; ++i) {
                 const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
                 glm::vec3 lightPos = lightStart + delta * t;

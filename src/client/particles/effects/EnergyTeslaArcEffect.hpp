@@ -126,4 +126,11 @@ private:
                       float seed,
                       bool targetCorona,
                       glm::vec3 camForward);
+    void appendEnergyBall(const Beam& beam,
+                          glm::vec3 axisN,
+                          glm::vec3 perp,
+                          glm::vec3 perp2,
+                          float len,
+                          float fade,
+                          glm::vec3 camForward);
 };

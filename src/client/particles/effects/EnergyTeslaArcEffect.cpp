@@ -332,6 +332,51 @@ void EnergyTeslaArcEffect::appendCorona(glm::vec3 center,
     }
 }
 
+void EnergyTeslaArcEffect::appendEnergyBall(const Beam& beam,
+                                            glm::vec3 axisN,
+                                            glm::vec3 perp,
+                                            glm::vec3 perp2,
+                                            float len,
+                                            float fade,
+                                            glm::vec3 camForward)
+{
+    const float radius = std::clamp(len * 0.009f, 1.5f, 2.75f);
+    const glm::vec3 center = beam.origin + axisN * (radius * 0.18f);
+    const uint32_t frame = static_cast<uint32_t>(std::floor(beam.time * 28.0f));
+    const uint32_t baseSeed = static_cast<uint32_t>(beam.seed * 4096.0f) ^ (frame * 2654435761u);
+
+    for (int loop = 0; loop < 5; ++loop) {
+        const uint32_t loopSeed = baseSeed + static_cast<uint32_t>(loop) * 747796405u;
+        const float a0 = hash01(loopSeed + 11u) * glm::two_pi<float>();
+        const float pulse = 0.88f + hash01(loopSeed + 23u) * 0.18f;
+        const float r = radius * glm::mix(0.58f, 1.0f, hash01(loopSeed + 37u)) * pulse;
+        const glm::vec3 planeA = safeNormalize(perp * std::cos(a0) + perp2 * std::sin(a0), perp);
+        const glm::vec3 planeB =
+            safeNormalize(glm::cross(axisN, planeA) + axisN * (hash01(loopSeed + 53u) - 0.5f) * 0.35f, perp2);
+
+        std::vector<glm::vec3> pts;
+        pts.reserve(13);
+        for (int j = 0; j <= 12; ++j) {
+            const float t = static_cast<float>(j) / 12.0f;
+            const float a = a0 + glm::two_pi<float>() * t;
+            glm::vec3 p = center + planeA * (std::cos(a) * r) + planeB * (std::sin(a) * r * 0.78f);
+            p += axisN * (std::sin(a * 2.0f + beam.time * 5.5f) * radius * 0.055f);
+            pts.push_back(p);
+        }
+        appendArcStrip(detailArcVerts_, pts, 0.48f, {0.22f, 0.78f, 1.00f, 0.16f * fade}, camForward);
+        appendArcStrip(mainArcVerts_, pts, 0.21f, {0.84f, 0.97f, 1.00f, 0.58f * fade}, camForward);
+    }
+
+    std::vector<glm::vec3> core;
+    core.reserve(5);
+    core.push_back(center - perp * radius * 0.30f);
+    core.push_back(center - perp2 * radius * 0.22f);
+    core.push_back(center + perp * radius * 0.30f);
+    core.push_back(center + perp2 * radius * 0.22f);
+    core.push_back(center - perp * radius * 0.30f);
+    appendArcStrip(mainArcVerts_, core, 0.35f, {0.96f, 0.99f, 1.00f, 0.70f * fade}, camForward);
+}
+
 void EnergyTeslaArcEffect::update(float dt, glm::vec3 camForward)
 {
     mainArcVerts_.clear();
@@ -357,7 +402,6 @@ void EnergyTeslaArcEffect::update(float dt, glm::vec3 camForward)
             rerandomizeBranches(beam);
         }
 
-        const PathSample path = buildGuidePath(beam.origin, beam.guidePoint, beam.hitPoint, beam.locked, beam.displayedLock);
         const glm::vec3 axis = beam.guidePoint - beam.origin;
         const float len = glm::length(axis);
         if (len < 0.5f)
@@ -371,6 +415,13 @@ void EnergyTeslaArcEffect::update(float dt, glm::vec3 camForward)
 
         const float fadeIn = std::min(1.0f, beam.age / k_fadeTime);
         const float fade = fadeIn;
+        if (!beam.locked) {
+            appendEnergyBall(beam, axisN, perp, perp2, len, fade, camForward);
+            continue;
+        }
+
+        const PathSample path =
+            buildGuidePath(beam.origin, beam.guidePoint, beam.hitPoint, beam.locked, beam.displayedLock);
         const float baseAmp = len * (beam.locked ? (0.007f + beam.displayedLock * 0.012f) : 0.0055f);
         const int strandCount = k_maxStrands;
         const uint32_t crackleFrame = static_cast<uint32_t>(std::floor(beam.time * 34.0f));

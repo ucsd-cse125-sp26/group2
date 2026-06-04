@@ -198,8 +198,8 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
         }, // RailGun
         WeaponConfig{
             .fireCooldown = 0.0f,
-            .magazineSize = 600,
-            .defaultAmmoCapacity = 200,
+            .magazineSize = 400,
+            .defaultAmmoCapacity = 800,
             .damage = 6.0f,
             .hitscan = true,
             .hitscanRadius = 12.0f,
