@@ -61,11 +61,16 @@ void ParticleSystem::quit()
 
 void ParticleSystem::update(float dt, const NewCamera& cam, Registry& reg)
 {
+    update(dt, cam.getEye(), cam.getForward(), cam.getRight(), cam.getUp(), reg);
+}
+
+void ParticleSystem::update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec3 right, glm::vec3 up, Registry& reg)
+{
     frameDt_ = dt;
-    camPos_ = cam.getEye();
-    camForward_ = cam.getForward();
-    camRight_ = cam.getRight();
-    camUp_ = cam.getUp();
+    camPos_ = eye;
+    camForward_ = glm::normalize(forward);
+    camRight_ = glm::normalize(right);
+    camUp_ = glm::normalize(up);
 
     tracers_.update(dt, reg);
     ribbons_.update(dt, reg, camPos_);
@@ -79,15 +84,22 @@ void ParticleSystem::update(float dt, const NewCamera& cam, Registry& reg)
             return;
         glm::vec3 origin = beam.origin;
         glm::vec3 guidePoint = beam.guidePoint;
+        glm::vec3 hitPoint = beam.hitPoint;
         if (reg.all_of<LocalPlayer>(e)) {
-            const glm::vec3 oldOrigin = origin;
+            float guideLen = glm::length(beam.guidePoint - beam.origin);
+            if (guideLen < 0.5f)
+                guideLen = glm::length(beam.hitPoint - beam.origin);
+            if (guideLen < 0.5f)
+                guideLen = 140.0f;
             origin = camPos_ + camForward_ * 6.0f + camRight_ * 5.0f - camUp_ * 5.0f;
-            guidePoint += origin - oldOrigin;
+            guidePoint = origin + camForward_ * guideLen;
+            if (beam.locked == 0)
+                hitPoint = guidePoint;
         }
         if (glm::length(guidePoint - origin) < 0.5f)
-            guidePoint = beam.hitPoint;
+            guidePoint = hitPoint;
         energyTesla_.drive(
-            static_cast<uint32_t>(e), origin, guidePoint, beam.hitPoint, beam.locked != 0, beam.lockStrength);
+            static_cast<uint32_t>(e), origin, guidePoint, hitPoint, beam.locked != 0, beam.lockStrength);
     });
     tesla_.update(dt, camForward_);
     energyTesla_.update(dt, camForward_);

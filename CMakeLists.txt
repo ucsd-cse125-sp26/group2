@@ -1258,6 +1258,11 @@ target_precompile_headers(group2 PRIVATE
 if(PCH_NO_TIMESTAMP_FLAG)
     target_compile_options(group2 PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
 endif()
+if(MSVC)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.cpp"
+        PROPERTIES COMPILE_OPTIONS "/bigobj")
+endif()
 
 # Copy assets (models, textures, …) next to the binary so the renderer can
 # find them via SDL_GetBasePath().  Tolerate missing dir (e.g. CI without LFS).

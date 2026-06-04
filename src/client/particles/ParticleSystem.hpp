@@ -117,6 +117,7 @@ public:
 
     /// @brief Simulate all effects. Called once per render frame (not per physics tick).
     void update(float dt, const NewCamera& cam, Registry& reg);
+    void update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec3 right, glm::vec3 up, Registry& reg);
 
     /// @brief Upload all particle data to GPU. Must be called BEFORE render pass.
     void uploadToGpu(SDL_GPUCommandBuffer* cmd);
