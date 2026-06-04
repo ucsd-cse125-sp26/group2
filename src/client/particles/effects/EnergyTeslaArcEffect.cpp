@@ -100,7 +100,8 @@ EnergyTeslaArcEffect::PathSample EnergyTeslaArcEffect::buildGuidePath(glm::vec3 
     const glm::vec3 guideAxis = guidePoint - origin;
     const glm::vec3 guideN = safeNormalize(guideAxis, hitPoint - origin);
     const float guideLen = glm::max(glm::length(guideAxis), 1.0f);
-    const float bend = locked ? smooth01(lockStrength) : 0.0f;
+    (void)lockStrength;
+    const float bend = locked ? 1.0f : 0.0f;
     constexpr float kBendStart = 0.58f;
 
     const glm::vec3 bendStart = origin + guideAxis * kBendStart;

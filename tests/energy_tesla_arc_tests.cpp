@@ -61,6 +61,11 @@ int main()
         assert(distanceToLine(bent.points[i], locked.origin, locked.guidePoint) < 0.001f);
     assert(distanceToLine(bent.points[bent.count - 3], locked.origin, locked.guidePoint) > 8.0f);
 
+    const auto newlyLocked =
+        EnergyTeslaArcEffect::buildGuidePathForTest(locked.origin, locked.guidePoint, locked.hitPoint, true, 0.01f);
+    assert(glm::length(newlyLocked.points[newlyLocked.count - 1] - locked.hitPoint) < 0.001f);
+    assert(distanceToLine(newlyLocked.points[newlyLocked.count - 3], locked.origin, locked.guidePoint) > 8.0f);
+
     EnergyTeslaArcEffect effect;
     effect.drive(42, locked.origin, locked.guidePoint, locked.hitPoint, true, 1.0f);
     effect.update(0.016f, {0.0f, 0.0f, -1.0f});
