@@ -7,6 +7,7 @@
 #include "animation/AnimationLibrary.hpp"
 #include "animation/AnimationTesterUI.hpp"
 #include "animation/CharacterRig.hpp"
+#include "animation/WeaponViewmodelAnim.hpp"
 #include "animation/SkinningBackend.hpp"
 #include "app/AppContext.hpp"
 #include "debug/ClientPerfRecorder.hpp"
@@ -578,29 +579,19 @@ private:
 
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
     ThirdPersonWeaponParams
-        tpWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from defaults.
-    int tpTuneWeaponIdx_ = 0;                        ///< Which weapon type is being tuned.
-    int tpAnchorTuneStanceIdx_ = 0;                  ///< Which HoldStance the right-hand anchor sliders are editing.
-    float tpAnchorRotStepDeg_ = 5.0f; ///< Delta-rotation step (degrees) for the gimbal-free anchor rotation buttons.
-    float tpAnchorWorldRotStepDeg_ = 5.0f; ///< Delta-rotation step (degrees) for the WORLD-space rotation buttons.
-    bool tpAnchorShowDebugMarker_ = true; ///< Render the red-cube anchor wish-point marker when the 3P tweaker is open.
-    bool tpEnableJointConstraints_ =
-        false; ///< Debug toggle: pass enableJointConstraints into the arm IK targets. Default OFF — current
-               ///< shoulder/elbow/wrist clamps don't contribute usefully and fight the anchor authoring; flip on
-               ///< per-session if testing extreme poses.
-    bool tpEnableReachFade_ = true;   ///< Debug toggle: pass enableReachFade into the arm IK targets. Off = no fade-out
-                                      ///< when target is past arm reach.
-    bool tpFreezeAnimations_ = false; ///< Debug toggle: freeze every animator's playback so world-space anchor sliders
-                                      ///< don't drift from idle bob.
-    bool showTPWeaponUI_ = false;     ///< Show the 3P Weapon Tweaker window.
+        tpWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable procedural/scale params.
+    int tpTuneWeaponIdx_ = 0;                        ///< Which weapon type the Weapon Hold tweaker is editing.
+    bool tpFreezeAnimations_ = false;                ///< Debug: freeze every animator's playback while tuning.
 
-    // Hand mount tuning for third-person player IK / weapon grips.
-    WeaponHandMountParams
-        weaponHandMountParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from defaults.
-    WeaponHandMountParams
-        authoredWeaponHandMountParams_[kRenderableWeaponTypeCount]; ///< Defaults loaded from authored weapon assets.
-    int handMountTuneWeaponIdx_ = 0;                                ///< Which weapon type is being tuned.
-    bool showHandMountUI_ = false;                                  ///< Show the Hand Mount Tweaker window.
+    // Third-person FK weapon hold poses (spine-relative gun + per-bone arm angles).
+    std::array<WeaponHoldPose, kRenderableWeaponTypeCount> weaponHoldPoses_{};         ///< Runtime, live-tuned.
+    std::array<WeaponHoldPose, kRenderableWeaponTypeCount> authoredWeaponHoldPoses_{}; ///< Compile-time defaults.
+    std::array<std::string, kRenderableWeaponTypeCount> weaponHoldPosePaths_{};        ///< Source TOML path each.
+    std::array<std::filesystem::file_time_type, kRenderableWeaponTypeCount> weaponHoldPoseMTimes_{};
+    float holdPoseReloadAccumulator_ = 0.0f; ///< Seconds since last hot-reload mtime poll (~4 Hz throttle).
+    float holdRotStepDeg_ = 5.0f;            ///< Delta-rotation step (deg) for the spine-rotation buttons.
+    bool holdShowDebugMarker_ = true;        ///< Render the spine-anchor axis marker when the tweaker is open.
+    bool showWeaponHoldUI_ = false;          ///< Show the Weapon Hold tweaker window.
 
     // First-person arm mount tuning (separate from third-person grips).
     FirstPersonHandMountParams
@@ -648,38 +639,48 @@ private:
     // Animation subsystem — shared rig + clip library + skinning backend.
     // CharacterAnimators (one per animated entity) hold non-owning refs.
     CharacterRig charRig_;       ///< Shared skinned rig (skeleton + bind pose + weights).
-    int rightHandJointIdx_ = -1; ///< Cached "mixamorig:RightHand" joint index (-1 = not present). Used to parent the
-                                 ///< third-person weapon mesh to the right-hand bone after IK.
-    int spine2JointIdx_ = -1;    ///< Cached "mixamorig:Spine2" joint index. Anchors the chest-relative right-hand IK
-                                 ///< target so the gun is held in front of the chest instead of hanging at the side.
-    std::array<WeaponGripPose, kRenderableWeaponTypeCount>
-        weaponGripPoses_{};      ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from
-                                 ///< assets/weapons/<name>.grip.toml at startup. Joint data is per-joint (pitch, yaw)
-    ///< degrees so the editor can drive sliders directly against the runtime data; the animator
-    ///< builds a local-space quat per joint on the fly via fingerLocalQuat.
-    /// Per-entity weapon-swap crossfade state (Phase F polish). When an entity's
-    /// equipped weapon changes, we reset `swapElapsedSec` to 0 and ramp the
-    /// `*GripWeight` from 0 → 1 over `kGripSwapDurationSec` so the hands briefly
-    /// release the grip and re-grip the new weapon. `lastType` tracks the last
-    /// observed weapon so we can detect the transition next frame.
+    int rightHandJointIdx_ = -1; ///< Cached "mixamorig:RightHand" joint index (-1 = not present).
+    int spine2JointIdx_ = -1;    ///< Cached "mixamorig:Spine2" joint index. The weapon is a rigid child of this bone
+                                 ///< and the FK arm hold hangs off it.
+    /// Per-entity weapon-swap fade state. When an entity's equipped weapon
+    /// changes we reset `swapElapsedSec` to 0 and ramp the arm-FK hold weight
+    /// 0 → 1 over the swap duration so the arms re-pose onto the new weapon.
     struct GripSwapState
     {
         WeaponType lastType = WeaponType::Rifle;
-        float swapElapsedSec = 1.0f; ///< Initialised to "already done" so freshly-seen entities start at full grip.
+        float swapElapsedSec = 1.0f; ///< Initialised to "already done" so freshly-seen entities start at full hold.
     };
     std::unordered_map<entt::entity, GripSwapState> gripSwapState_{};
-    std::array<std::string, kRenderableWeaponTypeCount>
-        weaponGripPosePaths_{};  ///< Source TOML path for each weapon's grip pose; populated at init and reused for
-                                 ///< Phase E hot-reload + the per-finger authoring UI's save button.
-    std::array<std::filesystem::file_time_type, kRenderableWeaponTypeCount>
-        weaponGripPoseMTimes_{}; ///< Last-observed mtime; reload triggers when the file mtime changes (Phase E hot
-                                 ///< reload).
-    float gripPoseReloadAccumulator_ =
-        0.0f; ///< Seconds since last hot-reload mtime poll; throttle to ~4 Hz to keep filesystem stats cheap.
-    bool showGripPoseUI_ = false;          ///< Show the per-finger Grip Pose Tweaker window (Phase E authoring tool).
-    int gripPoseTuneWeaponIdx_ = 0;        ///< Which weapon's grip pose is being authored in the tweaker UI.
     float aimAssistParityAccumSec_ = 0.0f; ///< Seconds since the last aim-assist parity check log line (Phase F).
     AnimationLibrary animLibrary_;         ///< Collection of ozz clips on the shared rig.
+    // Per-weapon animated first-person viewmodel (gun rig + arms + baked clips),
+    // indexed by WeaponType (see kWeaponViewmodelAssets). The renderer has a
+    // single viewmodel rig slot, so the active weapon's rig is (re)installed on
+    // equip; `activeViewmodelType_` tracks which is installed. A weapon whose GLB
+    // failed to load keeps weaponVmLoaded_[t]=false and falls back to the legacy
+    // static weapon model + procedural hands.
+    std::array<WeaponViewmodelAnim, kRenderableWeaponTypeCount> weaponVms_;    ///< Skinned gun rig per weapon.
+    std::array<WeaponViewmodelAnim, kRenderableWeaponTypeCount> weaponVmArms_; ///< First-person arms rig per weapon.
+    std::array<bool, kRenderableWeaponTypeCount> weaponVmLoaded_{};
+    std::array<bool, kRenderableWeaponTypeCount> weaponVmArmsLoaded_{};
+    std::array<int, kRenderableWeaponTypeCount> weaponVmModelIdx_{};     ///< Hidden static gun model per weapon (textures).
+    std::array<int, kRenderableWeaponTypeCount> weaponVmArmsModelIdx_{}; ///< Hidden static arms model per weapon (textures).
+    int activeViewmodelType_ = -1;         ///< WeaponType whose rig is installed in the renderer (-1 = none).
+    bool weaponVmReloadActive_ = false;    ///< Edge-trigger so the reload clip plays once per reload (active weapon).
+    bool weaponVmEquipped_ = false;        ///< Edge-trigger so the draw clip plays once on equip (active weapon).
+    int weaponVmPrevMagAmmo_ = -1;         ///< Tracks mag ammo to detect a shot fired this frame.
+    int shellEjectModelIdx_ = -1;          ///< Spent-casing prop (hidden static; drawn via entity list).
+    struct Casing
+    {
+        glm::vec3 pos{0.0f};
+        glm::vec3 vel{0.0f};
+        glm::mat3 orient{1.0f}; ///< Base orientation: casing long axis (local X) aligned to the barrel at spawn.
+        float angle = 0.0f;     ///< Tumble angle (about the casing's local Z).
+        float spin = 0.0f;      ///< Tumble rate.
+        float age = 0.0f;
+    };
+    std::vector<Casing> casings_;          ///< Live ejected casings (world space, gravity + spin + lifetime).
+    uint32_t casingSpawnCounter_ = 0;      ///< Cheap deterministic jitter source for ejection.
     CpuLbsSkinningBackend skinBackend_;    ///< Phase-1 CPU linear-blend-skinning backend.
     AnimationTesterState animUI_;          ///< Persistent state for the Animation Tester panel.
     HitboxRig clientHitboxRig_;            ///< Hitbox definitions for client-side debug visualization.

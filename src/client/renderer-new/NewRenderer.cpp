@@ -164,8 +164,19 @@ bool NewRenderer::init(SDL_Window* window)
 
     camera_ = NewCamera();
 
+    // Neutral fallback diffuse for untextured viewmodel meshes (prevents the
+    // previous weapon's texture bleeding onto an untextured part on switch).
+    {
+        const unsigned char neutral[4] = {160, 160, 162, 255};
+        viewmodelFallbackTex_ = Boilerplate::createTextureRGBA8(device_, 1, 1, neutral);
+    }
+
     SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    // Player character rig stays untextured (debug shader + chams/killcam path).
     skinnedRenderer_.init(device_, hdrFormat, shaderFormat_);
+    // Animated first-person weapon viewmodel + arms render textured (own diffuse).
+    viewmodelSkinned_.init(device_, hdrFormat, shaderFormat_, /*textured=*/true);
+    viewmodelArmsSkinned_.init(device_, hdrFormat, shaderFormat_, /*textured=*/true);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
     if (!dynamicShadowMaps_) {
@@ -501,6 +512,8 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
         if (copyPass) {
             skinnedRenderer_.uploadFrame(cmd, copyPass);
+            viewmodelSkinned_.uploadFrame(cmd, copyPass);
+            viewmodelArmsSkinned_.uploadFrame(cmd, copyPass);
             SDL_EndGPUCopyPass(copyPass);
         }
     }
@@ -827,6 +840,11 @@ void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUComman
     // visible parts fail the test here and render normally in the pass below.
     skinnedRenderer_.drawChams(renderPass, cmd);
     skinnedRenderer_.draw(renderPass, cmd);
+
+    // Animated first-person weapon viewmodel + arms share the skinned pipeline
+    // and the geometry pass's camera view-projection (pushed at vertex UBO slot 0).
+    viewmodelSkinned_.draw(renderPass, cmd);
+    viewmodelArmsSkinned_.draw(renderPass, cmd);
 }
 
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth, const FrustumPlanes& frustumPlanes)
@@ -1086,6 +1104,12 @@ void NewRenderer::quit()
         }
 
         skinnedRenderer_.shutdown();
+        viewmodelSkinned_.shutdown();
+        viewmodelArmsSkinned_.shutdown();
+        if (viewmodelFallbackTex_) {
+            SDL_ReleaseGPUTexture(device_, viewmodelFallbackTex_);
+            viewmodelFallbackTex_ = nullptr;
+        }
 
         if (geometryPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, geometryPipeline_);
@@ -1390,6 +1414,94 @@ void NewRenderer::setSkinnedFrame(const std::vector<glm::mat4>& palette, const s
     // us every character and SkinnedRenderer keeps only the ones whose bounding
     // sphere is on screen, using this frame's camera frustum planes.
     skinnedRenderer_.setFrame(palette, instances, camera_.getViewProjectionFrustumPlane());
+}
+
+bool NewRenderer::setViewmodelRig(const std::vector<RigMeshSource>& meshes, int numJoints)
+{
+    return viewmodelSkinned_.setRig(meshes, numJoints);
+}
+
+void NewRenderer::setViewmodelFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
+{
+    // The viewmodel sits in front of the camera, so it survives the frustum cull;
+    // pass the same camera frustum the player path uses.
+    viewmodelSkinned_.setFrame(palette, instances, camera_.getViewProjectionFrustumPlane());
+}
+
+namespace
+{
+/// Resolve the diffuse GPU texture for a model's source material *index*.
+/// Returns nullptr if the index/material/texture isn't present.
+SDL_GPUTexture* diffuseTexForMaterialIndex(const Asset::Model& model, uint32_t materialIndex)
+{
+    if (materialIndex >= model.materialsByIndex_.size())
+        return nullptr;
+    const MaterialIdInt matId = model.materialsByIndex_[materialIndex];
+    if (!Asset::materials_.contains(matId))
+        return nullptr;
+    const Asset::Material& mat = Asset::materials_.at(matId);
+    if (Asset::textures_.contains(mat.diffuseTexture))
+        return Asset::textures_.at(mat.diffuseTexture).tex;
+    return nullptr;
+}
+} // namespace
+
+void NewRenderer::setViewmodelTexture(int modelInstanceIndex)
+{
+    if (modelInstanceIndex >= 0 && static_cast<size_t>(modelInstanceIndex) < Asset::modelInstances_.size()) {
+        const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
+        const std::vector<uint32_t>& matIdx = viewmodelSkinned_.meshMaterialIndices();
+        if (Asset::models_.contains(modelId) && !matIdx.empty()) {
+            // Per-mesh diffuse so each gun part samples its OWN material texture, in
+            // the rig's mesh order. The R-301 magazine is a flat-color material with
+            // no UVs; binding the single body atlas to it sampled the atlas's unused,
+            // fully transparent (0,0) texel and the magazine vanished in-game. The
+            // loader synthesizes a 1x1 opaque texel for such flat-color parts, so the
+            // magazine now renders its true colour.
+            const Asset::Model& model = Asset::models_.at(modelId);
+            std::vector<SDL_GPUTexture*> perMesh;
+            perMesh.reserve(matIdx.size());
+            for (uint32_t mi : matIdx) {
+                SDL_GPUTexture* tex = diffuseTexForMaterialIndex(model, mi);
+                perMesh.push_back(tex ? tex : viewmodelFallbackTex_);
+            }
+            viewmodelSkinned_.setPerMeshDiffuse(std::move(perMesh), sampler_);
+            return;
+        }
+    }
+    // No model / rig not installed: bind the neutral fallback so the previously
+    // equipped weapon's texture doesn't persist.
+    viewmodelSkinned_.setDiffuseTexture(viewmodelFallbackTex_, sampler_);
+}
+
+bool NewRenderer::setViewmodelArmsRig(const std::vector<RigMeshSource>& meshes, int numJoints)
+{
+    return viewmodelArmsSkinned_.setRig(meshes, numJoints);
+}
+
+void NewRenderer::setViewmodelArmsFrame(const std::vector<glm::mat4>& palette,
+                                        const std::vector<SkinnedInstance>& instances)
+{
+    viewmodelArmsSkinned_.setFrame(palette, instances, camera_.getViewProjectionFrustumPlane());
+}
+
+void NewRenderer::setViewmodelArmsTexture(int modelInstanceIndex)
+{
+    if (modelInstanceIndex < 0 || static_cast<size_t>(modelInstanceIndex) >= Asset::modelInstances_.size())
+        return;
+    const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
+    if (!Asset::models_.contains(modelId))
+        return;
+    Asset::Model& model = Asset::models_.at(modelId);
+    for (auto& element : model.modelElements_) {
+        if (!Asset::materials_.contains(element.materialId_))
+            continue;
+        const Asset::Material& mat = Asset::materials_.at(element.materialId_);
+        if (Asset::textures_.contains(mat.diffuseTexture)) {
+            viewmodelArmsSkinned_.setDiffuseTexture(Asset::textures_.at(mat.diffuseTexture).tex, sampler_);
+            return;
+        }
+    }
 }
 
 

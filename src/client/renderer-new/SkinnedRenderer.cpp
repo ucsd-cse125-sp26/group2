@@ -21,9 +21,11 @@
 
 void SkinnedRenderer::init(SDL_GPUDevice* device,
                            SDL_GPUTextureFormat& colorTarget,
-                           const SDL_GPUShaderFormat& shaderFormat)
+                           const SDL_GPUShaderFormat& shaderFormat,
+                           bool textured)
 {
     device_ = device;
+    textured_ = textured;
     colorFormat_ = colorTarget;
     shaderFormat_ = shaderFormat;
     // No GPU allocations here — buffers and pipeline are created on demand
@@ -51,6 +53,7 @@ void SkinnedRenderer::shutdown()
             SDL_ReleaseGPUBuffer(device_, sm.ib);
     }
     skinnedMeshes_.clear();
+    meshMaterialIndices_.clear();
 
     if (palettesSsboInfo_.ssbo_)
         SDL_ReleaseGPUBuffer(device_, palettesSsboInfo_.ssbo_);
@@ -97,8 +100,23 @@ bool SkinnedRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJo
         return false;
     }
     if (rigInstalled_) {
-        SDL_Log("SkinnedRenderer::setRig: rig already installed; ignoring repeat call");
-        return false;
+        // Replacing the installed rig (per-weapon viewmodel swap on equip). Wait
+        // for the GPU to finish any in-flight use of the old buffers, then release
+        // them before rebuilding — otherwise the new weapon's skin matrices get
+        // applied to the previous weapon's mesh (wrong gun + T-posed arms).
+        SDL_WaitForGPUIdle(device_);
+        for (auto& sm : skinnedMeshes_) {
+            if (sm.vb)
+                SDL_ReleaseGPUBuffer(device_, sm.vb);
+            if (sm.boneVb)
+                SDL_ReleaseGPUBuffer(device_, sm.boneVb);
+            if (sm.ib)
+                SDL_ReleaseGPUBuffer(device_, sm.ib);
+        }
+        skinnedMeshes_.clear();
+        meshMaterialIndices_.clear();
+        perMeshDiffuse_.clear();
+        rigInstalled_ = false;
     }
     if (meshes.empty() || numJoints <= 0) {
         SDL_Log("SkinnedRenderer::setRig: empty meshes or numJoints<=0 (%zu, %d)", meshes.size(), numJoints);
@@ -122,6 +140,8 @@ bool SkinnedRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJo
     numJoints_ = numJoints;
     skinnedMeshes_.clear();
     skinnedMeshes_.reserve(meshes.size());
+    meshMaterialIndices_.clear();
+    meshMaterialIndices_.reserve(meshes.size());
 
     // Bind-pose bounding sphere (rig-local space) for per-instance frustum
     // culling in setFrame.  AABB over every mesh vertex → centre + farthest
@@ -203,6 +223,7 @@ bool SkinnedRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJo
             uploadToBuffer(sm.ib, m.indices.data(), iBytes);
 
         skinnedMeshes_.push_back(sm);
+        meshMaterialIndices_.push_back(m.materialIndex);
     }
 
     SDL_EndGPUCopyPass(cp);
@@ -316,6 +337,18 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
     recordChams();
 }
 
+void SkinnedRenderer::setDiffuseTexture(SDL_GPUTexture* tex, SDL_GPUSampler* sampler)
+{
+    diffuseTex_ = tex;
+    diffuseSampler_ = sampler;
+}
+
+void SkinnedRenderer::setPerMeshDiffuse(std::vector<SDL_GPUTexture*> textures, SDL_GPUSampler* sampler)
+{
+    perMeshDiffuse_ = std::move(textures);
+    perMeshSampler_ = sampler;
+}
+
 bool SkinnedRenderer::ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes)
 {
     auto growBuf = [&](SDL_GPUBuffer*& buf, Uint32& cap, Uint32 want, SDL_GPUBufferUsageFlags use) {
@@ -420,9 +453,32 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
 
     SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
-    for (auto sm : skinnedMeshes_) {
+
+    // Textured mode (first-person weapon viewmodel): bind a shared diffuse once.
+    // Multi-material rigs (gun body + magazine) set perMeshDiffuse_ and rebind
+    // per-mesh in the loop below. skinned_geometry_textured.frag samples a single
+    // sampler at fragment slot 0.
+    if (textured_ && perMeshDiffuse_.empty() && diffuseTex_ && diffuseSampler_) {
+        SDL_GPUTextureSamplerBinding b{};
+        b.texture = diffuseTex_;
+        b.sampler = diffuseSampler_;
+        SDL_BindGPUFragmentSamplers(renderPass, 0, &b, 1);
+    }
+    for (size_t mi = 0; mi < skinnedMeshes_.size(); ++mi) {
+        const SkinnedMesh& sm = skinnedMeshes_[mi];
         if (!sm.vb || !sm.boneVb || !sm.ib) {
             continue;
+        }
+        // Per-mesh diffuse (multi-material rig): bind this mesh's texture right
+        // before its draw. Parallel to skinnedMeshes_ order.
+        if (textured_ && !perMeshDiffuse_.empty() && perMeshSampler_) {
+            SDL_GPUTexture* t = (mi < perMeshDiffuse_.size()) ? perMeshDiffuse_[mi] : nullptr;
+            if (t) {
+                SDL_GPUTextureSamplerBinding b{};
+                b.texture = t;
+                b.sampler = perMeshSampler_;
+                SDL_BindGPUFragmentSamplers(renderPass, 0, &b, 1);
+            }
         }
         std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
 
@@ -556,8 +612,13 @@ bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, 
     vertexShader.storageBufferCount = 2;
 
     Boilerplate::ShaderInfo fragmentShader{};
-    fragmentShader.path = "shaders-new/debug.frag";
+    // Textured mode (first-person weapon viewmodel) samples a single diffuse
+    // texture with its own directional light; the untextured player rig keeps
+    // the normal-debug shader.
+    fragmentShader.path = textured_ ? "shaders-new/skinned_geometry_textured.frag" : "shaders-new/debug.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    if (textured_)
+        fragmentShader.samplerCount = 1; // diffuse
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;

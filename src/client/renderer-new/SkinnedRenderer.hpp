@@ -51,7 +51,21 @@ public:
     /// the device exists.  Does NOT allocate any GPU resources yet; those
     /// are created lazily on the first `setRig` / `setFrame` call.
     /// @param device  Borrowed; the device must outlive this SkinnedRenderer.
-    void init(SDL_GPUDevice* device, SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat);
+    /// @param textured  When true, this instance uses a textured fragment
+    /// shader (samples a diffuse texture set via setDiffuseTexture) instead of
+    /// the untextured debug shader.  Used by the first-person weapon viewmodel.
+    void init(SDL_GPUDevice* device,
+              SDL_GPUTextureFormat& colorTarget,
+              const SDL_GPUShaderFormat& shaderFormat,
+              bool textured = false);
+
+    /// @brief Diffuse texture + sampler bound for all meshes when textured.
+    void setDiffuseTexture(SDL_GPUTexture* tex, SDL_GPUSampler* sampler);
+
+    /// @brief Per-mesh diffuse textures (parallel to the rig's mesh order), bound
+    /// individually in the draw loop. Used for multi-material rigs (e.g. the gun's
+    /// body + magazine meshes). Entry may be null (that mesh falls back to white).
+    void setPerMeshDiffuse(std::vector<SDL_GPUTexture*> textures, SDL_GPUSampler* sampler);
 
     /// @brief Install the shared character rig.  Call ONCE after `init`.
     /// @param meshes     One source-mesh entry per skinned mesh in the rig (typically 1-3 for humanoid rigs).
@@ -159,6 +173,11 @@ public:
     /// @brief Number of instances pending render this frame (0 if no frame submitted).
     [[nodiscard]] size_t pendingInstanceCount() const { return frameInstances_.size(); }
 
+    /// @brief Source material index of each installed rig mesh, in skinnedMeshes_
+    /// order. Lets the renderer build a per-mesh diffuse list aligned to the rig's
+    /// mesh order (which differs from the model loader's node-DFS order).
+    [[nodiscard]] const std::vector<uint32_t>& meshMaterialIndices() const { return meshMaterialIndices_; }
+
 private:
     /// @brief One mesh of the installed skinned rig.  Built by `setRig`.
     ///
@@ -232,6 +251,14 @@ private:
     bool rigInstalled_ = false;
     int numJoints_ = 0;
     std::vector<SkinnedMesh> skinnedMeshes_;
+    std::vector<uint32_t> meshMaterialIndices_; ///< Source material index per mesh, parallel to skinnedMeshes_.
+
+    // Textured mode (first-person weapon viewmodel) ──────────────────────────
+    bool textured_ = false;
+    SDL_GPUTexture* diffuseTex_ = nullptr;   ///< Borrowed; bound when textured_ (single-texture, e.g. viewmodel).
+    SDL_GPUSampler* diffuseSampler_ = nullptr;
+    std::vector<SDL_GPUTexture*> perMeshDiffuse_; ///< Per-mesh diffuse (multi-material rig); parallel to skinnedMeshes_.
+    SDL_GPUSampler* perMeshSampler_ = nullptr;    ///< Sampler for perMeshDiffuse_ binds.
 
     // Bind-pose bounding sphere (rig-local space), computed in `setRig` and used
     // by `setFrame` to frustum-cull instances.  The radius carries an animation

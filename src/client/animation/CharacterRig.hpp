@@ -33,6 +33,7 @@ struct RigMeshData
     std::vector<ModelVertex> baseVertices; ///< Bind-pose vertices (never mutated).
     std::vector<SkinWeight> skinWeights;   ///< Parallel to baseVertices.
     std::vector<uint32_t> indices;         ///< Triangle indices.
+    uint32_t materialIndex = 0;            ///< Source aiMesh material index — used to bind the right per-mesh texture.
 };
 
 /// @brief Shared skinned rig — skeleton + bind-pose meshes + joint map.
@@ -60,10 +61,14 @@ public:
     /// @param flipNormals  Negate every bind-pose vertex normal. Defaults to
     ///        false. Use when an export inverts normal/winding handedness so
     ///        the lit surface faces the wrong way.
+    /// @param flipUVs  Apply aiProcess_FlipUVs. Defaults to false. Matches the
+    ///        static model loader's glTF-vs-DCC convention so skinned viewmodel
+    ///        meshes sample their textures right-side-up.
     /// @return True on success (skeleton built + at least one skinned mesh).
     bool loadFromFBX(const std::string& path,
                      const glm::quat& orientationFix = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-                     bool flipNormals = false);
+                     bool flipNormals = false,
+                     bool flipUVs = false);
 
     /// @brief True after a successful loadFromFBX().
     [[nodiscard]] bool isLoaded() const noexcept;

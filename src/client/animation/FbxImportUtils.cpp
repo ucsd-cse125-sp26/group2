@@ -50,7 +50,12 @@ bool buildJoint(const aiNode* node,
         .scale = ozz::math::Float3{s.x, s.y, s.z},
     };
 
-    const bool isBone = boneNames.count(name) > 0;
+    // Keep skin-deforming bones, plus Apex weapon-attachment bones (which carry
+    // no skin weights and would otherwise be pruned) such as `ja_c_propGun`.
+    // The first-person viewmodel reads these reference frames for mounting; the
+    // skin bones it also queries (muzzle_flash, def_c_bolt) are kept via boneNames.
+    const bool isBone = boneNames.count(name) > 0 || name.find("propGun") != std::string::npos
+                        || name.find("propHand") != std::string::npos || name.find("weapon_bone") != std::string::npos;
     bool hasBoneChild = false;
 
     for (unsigned i = 0; i < node->mNumChildren; ++i) {

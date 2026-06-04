@@ -734,6 +734,7 @@ file(MAKE_DIRECTORY "${SHADER_NEW_OUT_DIR}")
 set(SHADER_NEW_SOURCES
         geometry_depth.vert emtpy.frag
         skinned_geometry.vert skinned_geometry_depth.vert debug.frag chams.frag
+        skinned_geometry_textured.frag
         geometry.vert geometry.frag
         geometry_shadowed.frag
         debug_depth.vert debug_depth.frag
@@ -858,6 +859,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/WeaponViewmodelAnim.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/WeaponViewmodelAnim.hpp"
     # HUD system
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTypes.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.cpp"
@@ -1067,6 +1070,8 @@ add_executable(group2
         src/ecs/components/ViewmodelConfig.hpp
         src/ecs/components/GripPose.hpp
         src/ecs/components/GripPose.cpp
+        src/ecs/components/WeaponHoldPose.hpp
+        src/ecs/components/WeaponHoldPose.cpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
         src/ecs/components/Explosion.hpp
@@ -1400,6 +1405,8 @@ add_executable(server
         src/ecs/components/ViewmodelConfig.hpp
         src/ecs/components/GripPose.hpp
         src/ecs/components/GripPose.cpp
+        src/ecs/components/WeaponHoldPose.hpp
+        src/ecs/components/WeaponHoldPose.cpp
         src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp

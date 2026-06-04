@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ecs/components/Projectile.hpp"
+#include "ecs/components/WeaponHoldPose.hpp"
 
 #include <array>
 #include <cstddef>
@@ -17,47 +18,12 @@ struct ViewmodelParams
     float yawOffset, pitchOffset, rollOffset; // degrees
 };
 
-/// @brief Mid-level character stance the right-hand anchor varies on. Matches
-/// CharacterAnimator's internal `Mode` enum 1:1 except `HoldPose` /
-/// `DebugOverride` (which both fall back to Locomotion). Authoring one anchor
-/// per stance lets crouch / slide / wallrun have visibly different gun
-/// positions — a crouched character pulls the gun in tighter, a sliding
-/// character punches it forward, etc.
-enum class HoldStance : std::uint8_t
-{
-    Locomotion = 0,
-    Crouch,
-    Airborne,
-    Slide,
-    WallRun,
-    Count,
-};
-
-inline constexpr std::size_t kHoldStanceCount = static_cast<std::size_t>(HoldStance::Count);
-inline constexpr std::array<const char*, kHoldStanceCount> kHoldStanceNames{
-    "Locomotion", "Crouch", "Airborne", "Slide", "WallRun"};
-
-/// @brief A single (position, rotation) anchor for the right-hand weapon hold.
+/// @brief Per-weapon procedural-overlay + scale params for the third-person body.
 ///
-/// `offset` is in the parent bone's (Spine2's) local frame; `rotation` is a
-/// quaternion in that same frame. Stored as a quat — not Euler — to keep the
-/// editor free of gimbal-lock surprises near pitch ≈ ±90°.
-struct HoldAnchor
-{
-    glm::vec3 offset{0.0f};
-    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
-};
-
-/// @brief Third-person weapon attachment params.
-///
-/// The weapon mesh is parented to the right-hand bone after IK runs, so its
-/// world placement is fully determined by:
-///   1. `rightHandHolds[stance]` — where the wrist sits (Spine2-local).
-///   2. `WeaponHandMountParams::rightHand.palm` — where the weapon meets the wrist (weapon-local).
-/// There is no longer a separate "weapon hand offset" or "aim pivot" or
-/// per-weapon yaw/pitch/roll because none of them participated in the bone-
-/// parented derivation — they only fed the legacy fallback path that the
-/// animated-character pipeline overrode.
+/// The weapon placement itself is now driven entirely by `WeaponHoldPose` (the
+/// weapon is a rigid child of Spine2 and the arms are FK-posed). What remains
+/// here is the body's procedural response — spine bend / hip lean / recoil kick
+/// — plus the weapon mesh scale.
 struct ThirdPersonWeaponParams
 {
     float scale = 1.0f;
@@ -72,13 +38,6 @@ struct ThirdPersonWeaponParams
     /// Per-weapon-class recoil kick magnitude in radians, applied additively to
     /// the spine bend when the player fires a shot.
     float recoilKickRad = 0.06f;
-    /// Right-hand weapon-hold anchor per stance. The animator pulls the right
-    /// hand to `Spine2World × rightHandHolds[stance].offset` via IK each
-    /// frame; the weapon mesh — parented to the right-hand bone — follows.
-    /// Different stances can hold the weapon differently (e.g. crouched vs
-    /// sliding); the candidate populator picks the entry matching the
-    /// entity's current animator mode.
-    std::array<HoldAnchor, kHoldStanceCount> rightHandHolds{};
 };
 
 /// @brief A weapon-local grip point for either hand.
@@ -94,22 +53,6 @@ struct HandMountPoint
 inline constexpr std::size_t kHandFingerMountCount = 5;
 inline constexpr std::array<const char*, kHandFingerMountCount> kHandFingerMountNames{
     "Thumb", "Index", "Middle", "Ring", "Pinky"};
-
-/// @brief Palm plus per-finger targets for one hand on a weapon.
-struct HandMountSet
-{
-    glm::vec3 elbowOffset{0.0f};
-    HandMountPoint palm;                                         ///< Weapon-local hard anchor for the hand.
-    std::array<HandMountPoint, kHandFingerMountCount> fingers{}; ///< Palm-local child offsets.
-};
-
-/// @brief Per-weapon hand mount targets used by third-person player arm/finger IK.
-struct WeaponHandMountParams
-{
-    HandMountSet rightHand;
-    HandMountSet leftHand;
-    float viewmodelHandScale = 45.0f;
-};
 
 /// @brief First-person arm controls, independent from third-person weapon grips.
 struct FirstPersonArmMountSet
@@ -161,13 +104,16 @@ struct RecoilParams
 inline const ViewmodelParams& getViewmodelParams(WeaponType type)
 {
     static constexpr std::array<ViewmodelParams, kRenderableWeaponTypeCount> k_params{{
-        // Rifle — existing tuning
-        {.scale = 39.0f,
-         .forward = 78.0f,
-         .right = 37.0f,
-         .down = -11.0f,
+        // Rifle (Apex R-301) — animated first-person viewmodel. The apex_r301.glb
+        // rig is authored in camera space at ~1.0 native scale, so it places
+        // itself; no per-weapon offset/scale (all 0 / scale 1). The legacy static
+        // assault-rifle tuning (scale 39, forward 78, …) is superseded here.
+        {.scale = 1.0f,
+         .forward = 0.0f,
+         .right = 0.0f,
+         .down = 0.0f,
          .yawOffset = 0.0f,
-         .pitchOffset = -1.0f,
+         .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
         // Rocket — fallback to rifle tuning
         {.scale = 39.0f,
@@ -206,114 +152,70 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
     return k_params[static_cast<std::size_t>(type)];
 }
 
-/// @brief Returns third-person weapon attachment params for remote players.
+/// @brief Returns third-person procedural/scale params for a weapon type.
 inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type)
 {
-    // Per-stance offset deltas, applied additively on top of the weapon's
-    // Locomotion anchor. Same values for every weapon for now — visually
-    // sensible defaults that the user can override per-weapon via the
-    // tweaker UI. Crouched: gun pulled in tight and slightly up.
-    // Airborne: slightly forward (running/jumping leans into the weapon).
-    // Slide: punched forward and down (gun aimed past sliding feet).
-    // WallRun: pulled in tight (silhouette stays narrow against the wall).
-    const HoldAnchor k_crouchAnchor{.offset = {4.0f, 8.0f, 12.0f}, .rotation = glm::quat(1, 0, 0, 0)};
-    const HoldAnchor k_airborneAnchor{.offset = {6.0f, 4.0f, 16.0f}, .rotation = glm::quat(1, 0, 0, 0)};
-    const HoldAnchor k_slideAnchor{.offset = {6.0f, 2.0f, 18.0f}, .rotation = glm::quat(1, 0, 0, 0)};
-    const HoldAnchor k_wallRunAnchor{.offset = {3.0f, 6.0f, 10.0f}, .rotation = glm::quat(1, 0, 0, 0)};
-
-    // Rifle's hand-tuned right-hand hold anchors. Every weapon reuses these as
-    // its default IK hold positions until per-weapon tuning lands — the
-    // Locomotion entry is hand-tuned via the 3P Weapon Tweaker; the other
-    // stances stay on the generic defaults until they're tuned.
-    const std::array<HoldAnchor, kHoldStanceCount> k_rifleHolds{{
-        // Locomotion: hand-tuned.
-        {.offset = {-12.69f, -8.23f, 22.32f}, .rotation = glm::quat(0.4410f, 0.5464f, 0.4894f, 0.5171f)},
-        k_crouchAnchor,
-        k_airborneAnchor,
-        k_slideAnchor,
-        k_wallRunAnchor,
-    }};
-
     static const std::array<ThirdPersonWeaponParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle — middleweight, full spine bend, moderate recoil.
-        {.scale = 10.0f,
-         .spineBendMultiplier = 1.0f,
-         .hipLeanMultiplier = 0.1f,
-         .recoilKickRad = 0.05f,
-         .rightHandHolds = k_rifleHolds},
+        {.scale = 10.0f, .spineBendMultiplier = 1.0f, .hipLeanMultiplier = 0.1f, .recoilKickRad = 0.05f},
         // Rocket launcher — heavy, slower upper-body response, big kick.
-        // IK hold positions reuse the rifle defaults until tuned.
-        {.scale = 0.025f,
-         .spineBendMultiplier = 0.65f,
-         .hipLeanMultiplier = 0.06f,
-         .recoilKickRad = 0.18f,
-         .rightHandHolds = k_rifleHolds},
-        // RailGun / charge rifle — heavy precision rifle, slower bend than the
-        // assault rifle, similar kick to a rifle since the energy delivery is smooth.
-        // IK hold positions reuse the rifle defaults until tuned.
-        {.scale = 7.0f,
-         .spineBendMultiplier = 0.85f,
-         .hipLeanMultiplier = 0.08f,
-         .recoilKickRad = 0.07f,
-         .rightHandHolds = k_rifleHolds},
+        {.scale = 0.025f, .spineBendMultiplier = 0.65f, .hipLeanMultiplier = 0.06f, .recoilKickRad = 0.18f},
+        // RailGun / charge rifle — heavy precision rifle, slower bend, rifle-ish kick.
+        {.scale = 7.0f, .spineBendMultiplier = 0.85f, .hipLeanMultiplier = 0.08f, .recoilKickRad = 0.07f},
         // EnergyGun — light pistol, fast spine bend, gentle kick.
-        // IK hold positions reuse the rifle defaults until tuned.
-        {.scale = 1.0f,
-         .spineBendMultiplier = 1.0f,
-         .hipLeanMultiplier = 0.1f,
-         .recoilKickRad = 0.03f,
-         .rightHandHolds = k_rifleHolds},
+        {.scale = 1.0f, .spineBendMultiplier = 1.0f, .hipLeanMultiplier = 0.1f, .recoilKickRad = 0.03f},
         // Shotgun — copies EnergyGun (same mesh); heavier kick.
-        // IK hold positions reuse the rifle defaults until tuned.
-        {.scale = 1.0f,
-         .spineBendMultiplier = 1.0f,
-         .hipLeanMultiplier = 0.1f,
-         .recoilKickRad = 0.12f,
-         .rightHandHolds = k_rifleHolds},
+        {.scale = 1.0f, .spineBendMultiplier = 1.0f, .hipLeanMultiplier = 0.1f, .recoilKickRad = 0.12f},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
 }
 
-/// @brief Returns hand grip/mount points for a weapon type.
-inline const WeaponHandMountParams& getWeaponHandMountParams(WeaponType type)
+/// @brief Returns the default third-person FK hold pose for a weapon type.
+///
+/// These are compile-time fallbacks; at runtime each weapon's pose is loaded
+/// from `assets/weapons/<name>.hold.toml` if present and live-tuned via the
+/// Weapon Hold tweaker (which saves back to that TOML).
+///
+/// The arm-chain angles default to zero (bind/T-pose) — they MUST be tuned per
+/// weapon in the tweaker — but the finger curl is seeded from the previously
+/// hand-tuned rifle grip so the hands look closed around a weapon out of the box.
+inline const WeaponHoldPose& getWeaponHoldPose(WeaponType type)
 {
-    // Rifle is the only weapon with hand-tuned IK so far. Every other weapon
-    // reuses the rifle setup as its default until per-weapon tuning lands —
-    // looks closer to "two hands on a gun" than the placeholder offsets it
-    // replaces, and gives the tuner a known-good baseline to nudge from.
-    static constexpr WeaponHandMountParams k_rifleHandMounts{
-        .rightHand = {.elbowOffset = {-8.4f, -17.99f, -20.35f},
-                      .palm = {.offset = {-1.05f, -11.39f, -7.2f}, .rotationDegrees = {-6.0f, 92.0f, 94.0f}},
-                      .fingers = {{
-                          {.offset = {-0.3f, 3.05f, 1.9f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {-2.6f, 0.3f, -2.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {-2.7f, -0.5f, -0.4f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {-2.6f, -1.0f, 0.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                          {.offset = {-2.5f, -1.3f, 1.4f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                      }}},
-        .leftHand = {.elbowOffset = {13.7f, -13.14f, -13.3f},
-                     .palm = {.offset = {3.6f, -12.99f, 2.0f}, .rotationDegrees = {-3.0f, -102.0f, -72.0f}},
-                     .fingers = {{
-                         {.offset = {2.3f, 0.7f, 1.3f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {2.6f, -0.2f, -1.9f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {2.7f, -0.8f, -0.6f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {2.6f, -1.1f, 0.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                         {.offset = {2.5f, -1.2f, 1.5f}, .rotationDegrees = {0.0f, 0.0f, 0.0f}},
-                     }}},
-        .viewmodelHandScale = 45.0f};
-    static const std::array<WeaponHandMountParams, kRenderableWeaponTypeCount> k_params{{
-        // Rifle: trigger hand near the rear grip, support hand wrapped around the mag well.
-        k_rifleHandMounts,
-        // Rocket launcher — rifle defaults until tuned.
-        k_rifleHandMounts,
-        // RailGun / charge rifle — rifle defaults until tuned.
-        k_rifleHandMounts,
-        // Energy gun / pistol — rifle defaults until tuned.
-        k_rifleHandMounts,
-        // Shotgun — rifle defaults until tuned.
-        k_rifleHandMounts,
-    }};
+    // Finger curl carried over from the old rifle.grip.toml (pitch = curl,
+    // yaw = splay; per finger × 4 joints). Layout matches GripPose::index.
+    static const auto k_rifle = []() {
+        WeaponHoldPose p;
+        // Weapon roughly in front of the chest in Spine2-local space — a
+        // starting estimate near where the old right-hand hold sat. Tune live.
+        p.spineOffset = glm::vec3{-13.0f, -8.0f, 22.0f};
+        p.spineRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+
+        // Right hand (trigger hand): index softer (trigger finger), thumb over top.
+        // (pitch, yaw, roll) degrees — roll seeded at 0.
+        const std::array<glm::vec3, kGripPoseJointCount> rightFingers{{
+            {30.0f, 20.0f, 0.0f}, {35.0f, 0.0f, 0.0f}, {25.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, // thumb
+            {25.0f, 0.0f, 0.0f}, {40.0f, 0.0f, 0.0f}, {35.0f, 0.0f, 0.0f}, {15.0f, 0.0f, 0.0f},  // index
+            {55.0f, 0.0f, 0.0f}, {75.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // middle
+            {60.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // ring
+            {60.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // pinky
+        }};
+        // Left hand (support hand): all fingers wrap tightly around the foregrip.
+        const std::array<glm::vec3, kGripPoseJointCount> leftFingers{{
+            {35.0f, -20.0f, 0.0f}, {40.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, // thumb
+            {65.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // index
+            {70.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // middle
+            {70.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // ring
+            {65.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // pinky
+        }};
+        p.rightArm.fingerAngles = rightFingers;
+        p.leftArm.fingerAngles = leftFingers;
+        return p;
+    }();
+
+    // Every weapon shares the rifle default until per-weapon tuning lands.
+    static const std::array<WeaponHoldPose, kRenderableWeaponTypeCount> k_params{
+        {k_rifle, k_rifle, k_rifle, k_rifle, k_rifle}};
 
     return k_params[static_cast<std::size_t>(type)];
 }
