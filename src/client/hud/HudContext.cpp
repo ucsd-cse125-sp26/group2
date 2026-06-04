@@ -49,6 +49,22 @@ void HudContext::tintVertices(std::size_t startVertex, HudColor tint)
     }
 }
 
+void HudContext::rotateVertices(std::size_t startVertex, float cx, float cy, float angleDeg)
+{
+    if (startVertex >= vertices_.size() || std::abs(angleDeg) <= 0.001f)
+        return;
+
+    const float radians = angleDeg * 3.14159265358979323846f / 180.f;
+    const float s = std::sin(radians);
+    const float c = std::cos(radians);
+    for (std::size_t i = startVertex; i < vertices_.size(); ++i) {
+        const float dx = vertices_[i].position[0] - cx;
+        const float dy = vertices_[i].position[1] - cy;
+        vertices_[i].position[0] = cx + dx * c - dy * s;
+        vertices_[i].position[1] = cy + dx * s + dy * c;
+    }
+}
+
 // ── Internal helpers ────────────────────────────────────────────────────────
 
 void HudContext::emitQuad(float x,

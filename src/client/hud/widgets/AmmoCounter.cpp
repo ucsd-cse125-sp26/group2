@@ -35,6 +35,8 @@ void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
     const float x = anchorX - pw;
     const float y = anchorY - ph;
 
+    ctx.svg(HudIcon::BulletCountBox, x, y, pw, ph);
+
     const float clipFs = clipFontSize * s;
     const float reserveFs = reserveFontSize * s;
 

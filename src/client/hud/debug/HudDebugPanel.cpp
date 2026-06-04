@@ -302,8 +302,15 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "countPadY", grenades->countPadY);
         writeFloatParam(out, first, "countCharacterGap", grenades->countCharacterGap);
         writeFloatParam(out, first, "iconPadRight", grenades->iconPadRight);
-        writeFloatParam(out, first, "cornerCut", grenades->cornerCut);
-        writeFloatParam(out, first, "borderThickness", grenades->borderThickness);
+        writeFloatParam(out, first, "elementsRotationDeg", grenades->elementsRotationDeg);
+        writeFloatParam(out, first, "backgroundWidth", grenades->backgroundWidth);
+        writeFloatParam(out, first, "backgroundHeight", grenades->backgroundHeight);
+        writeFloatParam(out, first, "backgroundScale", grenades->backgroundScale);
+        writeFloatParam(out, first, "backgroundOffsetX", grenades->backgroundOffsetX);
+        writeFloatParam(out, first, "backgroundOffsetY", grenades->backgroundOffsetY);
+        writeFloatParam(out, first, "backgroundStretchX", grenades->backgroundStretchX);
+        writeFloatParam(out, first, "backgroundStretchY", grenades->backgroundStretchY);
+        writeFloatParam(out, first, "backgroundRotationDeg", grenades->backgroundRotationDeg);
     } else if (const auto* health = dynamic_cast<const HealthArmorBar*>(&widget)) {
         writeFloatParam(out, first, "panelWidth", health->panelWidth);
         writeFloatParam(out, first, "barHeight", health->barHeight);
@@ -500,8 +507,15 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Count Pad Y", grenades->countPadY, 0.25f, 0.0f, 40.0f);
         editFloat("Count Character Gap", grenades->countCharacterGap, 0.25f, 0.0f, 20.0f);
         editFloat("Icon Pad Right", grenades->iconPadRight, 0.25f, 0.0f, 40.0f);
-        editFloat("Corner Cut", grenades->cornerCut, 0.25f, 0.0f, 40.0f);
-        editFloat("Border Thickness", grenades->borderThickness, 0.25f, 0.0f, 20.0f);
+        editFloat("Elements Rotation", grenades->elementsRotationDeg, 0.5f, -180.0f, 180.0f);
+        editFloat("BG Width", grenades->backgroundWidth, 1.0f, 8.0f, 800.0f);
+        editFloat("BG Height", grenades->backgroundHeight, 1.0f, 8.0f, 400.0f);
+        editFloat("BG Scale", grenades->backgroundScale, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Offset X", grenades->backgroundOffsetX, 0.5f, -400.0f, 400.0f);
+        editFloat("BG Offset Y", grenades->backgroundOffsetY, 0.5f, -400.0f, 400.0f);
+        editFloat("BG Stretch X", grenades->backgroundStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Stretch Y", grenades->backgroundStretchY, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Rotation", grenades->backgroundRotationDeg, 0.5f, -180.0f, 180.0f);
     } else if (auto* health = dynamic_cast<HealthArmorBar*>(&widget)) {
         editFloat("Panel Width", health->panelWidth, 1.0f, 80.0f, 1200.0f);
         editFloat("Bar Height", health->barHeight, 0.5f, 4.0f, 200.0f);
