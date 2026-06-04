@@ -107,6 +107,17 @@ bool AssetLoader::loadMesh(MeshIdInt id, const aiMesh& asimpMeshResult)
             v.texUV = glm::vec2(0.0f, 0.0f);
         }
 
+        if (asimpMeshResult.mTextureCoords[1]) {
+            v.lightMapUV = glm::vec2(asimpMeshResult.mTextureCoords[1][i].x, asimpMeshResult.mTextureCoords[1][i].y);
+        } else {
+            v.lightMapUV = glm::vec2(0.0f, 0.0f);
+        }
+        // In loadMesh, after reading UVs
+        if (i < 5) {
+            SDL_Log("Mesh: %u, vertex %d: texUV=(%.3f, %.3f) lightMapUV=(%.3f, %.3f)",
+                    id,i, v.texUV.x, v.texUV.y, v.lightMapUV.x, v.lightMapUV.y);
+        }
+
         if (hasTangents) {
             const glm::vec3 tangent{
                 asimpMeshResult.mTangents[i].x, asimpMeshResult.mTangents[i].y, asimpMeshResult.mTangents[i].z};
@@ -431,6 +442,7 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string& meshNameSpa
         me_j.cachedTransform_ = glm::mat4(1.0f);
 
         loadMesh(meshNameId, mesh_j_Ai);
+
 
         Asset::Mesh &mesh = Asset::meshes_.at(meshNameId);
         me_j.cachedAabb_ = mesh.aabb_;

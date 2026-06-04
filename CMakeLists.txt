@@ -120,6 +120,17 @@ function(group2_dependency_url name out_url)
     set(${out_url} "${_url}" PARENT_SCOPE)
 endfunction()
 
+# tinyexr — single-header EXR loader for lightmap textures
+group2_dependency_git(tinyexr TINYEXR_REPOSITORY TINYEXR_TAG)
+FetchContent_Declare(
+    tinyexr
+    GIT_REPOSITORY "${TINYEXR_REPOSITORY}"
+    GIT_TAG        "${TINYEXR_TAG}"
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(tinyexr)
+
+
 # SDL3 — window, input, GPU pipeline (Vulkan/Metal/DX12) + OpenGL context
 group2_dependency_git(SDL3 SDL3_REPOSITORY SDL3_TAG)
 FetchContent_Declare(
@@ -736,6 +747,7 @@ set(SHADER_NEW_SOURCES
         skinned_geometry.vert skinned_geometry_depth.vert debug.frag chams.frag
         geometry.vert geometry.frag
         geometry_shadowed.frag
+        geometry_shadowed_lightmap.frag
         debug_depth.vert debug_depth.frag
         hud.vert hud.frag
         fxaa.frag tonemap.frag
@@ -1162,6 +1174,7 @@ add_executable(group2
 target_include_directories(group2 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+        "${tinyexr_SOURCE_DIR}"
 )
 
 # Compile shaders before linking the binary.
@@ -1213,7 +1226,9 @@ endif()
 # SDL3 GPU uses [0, 1] depth range on all backends (Vulkan + Metal).
 # Without this define, glm::perspective maps depth to [-1, 1] (OpenGL convention)
 # and fragments in the near half of the frustum are clipped on Metal.
-target_compile_definitions(group2 PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
+target_compile_definitions(group2 PRIVATE
+        GLM_FORCE_DEPTH_ZERO_TO_ONE
+        GLM_ENABLE_EXPERIMENTAL )
 
 # ---- Client link libraries ----
 target_link_libraries(group2 PRIVATE
@@ -1225,6 +1240,7 @@ target_link_libraries(group2 PRIVATE
     imgui_lib
     assimp
     stb_image
+        tinyexr
     lunasvg::lunasvg
     minimp3
     Opus::opus

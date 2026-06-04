@@ -214,6 +214,8 @@ SDL_GPUTexture* createTextureRGBA8(SDL_GPUDevice* device,
                                    const void* data,
                                    SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM);
 
+SDL_GPUTexture* createTextureRGBA32(SDL_GPUDevice* device, Uint32 width, Uint32 height, const void* data, SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT);
+
 /// @brief Load an image file from disk and create a GPU texture from it.
 /// @param device The GPU device.
 /// @param path Path to the image file.
@@ -234,7 +236,7 @@ createSampledColorTarget(SDL_GPUDevice* device, Uint32 width, Uint32 height, SDL
 /// @brief Create a linear-filtering, repeat-addressing sampler.
 /// @param device The GPU device.
 /// @return The created GPU sampler.
-SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device);
+SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device,bool nearest);
 
 /// @brief Create a linear-filtering, comparison sampler (for shadow map depth comparison).
 /// @param device The GPU device.

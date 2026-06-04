@@ -394,6 +394,65 @@ SDL_GPUTexture* createEmptyTextureD32F(SDL_GPUDevice* device, Uint32 width, Uint
 
     return texture;
 }
+SDL_GPUTexture* createTextureRGBA32(SDL_GPUDevice* device, Uint32 width, Uint32 height, const void* data, SDL_GPUTextureFormat format)
+{
+    SDL_GPUTextureCreateInfo textureInfo{};
+    textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    textureInfo.format = format;
+    textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    textureInfo.width = width;
+    textureInfo.height = height;
+    textureInfo.layer_count_or_depth = 1;
+    textureInfo.num_levels = 1;
+    textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+    SDL_GPUTexture* texture = SDL_CreateGPUTexture(device, &textureInfo);
+    if (!texture) {
+        SDL_Log("createTextureRGBA8: SDL_CreateGPUTexture failed: %s", SDL_GetError());
+        return nullptr;
+    }
+
+    const size_t uploadSize = static_cast<size_t>(width) * height * 4 * 4;
+    SDL_GPUTransferBuffer* transferBuffer = createUploadBuffer(device, uploadSize);
+    if (!transferBuffer) {
+        SDL_ReleaseGPUTexture(device, texture);
+        return nullptr;
+    }
+
+    void* mapped = SDL_MapGPUTransferBuffer(device, transferBuffer, false);
+    if (!mapped) {
+        SDL_Log("createTextureRGBA8: SDL_MapGPUTransferBuffer failed: %s", SDL_GetError());
+        SDL_ReleaseGPUTransferBuffer(device, transferBuffer);
+        SDL_ReleaseGPUTexture(device, texture);
+        return nullptr;
+    }
+
+    SDL_memcpy(mapped, data, uploadSize);
+    SDL_UnmapGPUTransferBuffer(device, transferBuffer);
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
+
+    SDL_GPUTextureTransferInfo source{};
+    source.transfer_buffer = transferBuffer;
+    source.offset = 0;
+    source.pixels_per_row = width;
+    source.rows_per_layer = height;
+
+    SDL_GPUTextureRegion dest{};
+    dest.texture = texture;
+    dest.w = width;
+    dest.h = height;
+    dest.d = 1;
+
+    SDL_UploadToGPUTexture(copyPass, &source, &dest, false);
+
+    SDL_EndGPUCopyPass(copyPass);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_ReleaseGPUTransferBuffer(device, transferBuffer);
+
+    return texture;
+}
 
 SDL_GPUTexture*
 createTextureRGBA8(SDL_GPUDevice* device, Uint32 width, Uint32 height, const void* data, SDL_GPUTextureFormat format)
@@ -520,11 +579,11 @@ createSampledColorTarget(SDL_GPUDevice* device, Uint32 width, Uint32 height, SDL
     return texture;
 }
 
-SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device)
+SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device,bool nearest)
 {
     SDL_GPUSamplerCreateInfo samplerInfo{};
-    samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
-    samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.min_filter = nearest ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mag_filter = nearest ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
     samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
     samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
     samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;

@@ -41,6 +41,7 @@ struct Vertex
     glm::vec3 normal;
     glm::vec2 texUV;
     glm::vec4 tangent;
+    glm::vec2 lightMapUV;
 };
 
 struct AABB

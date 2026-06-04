@@ -7,11 +7,13 @@
 /// should end up.
 
 #include "NewRenderer.hpp"
+#include "tinyexr.h"
 
 #include "Asset.hpp"
 #include "AssetLoader.hpp"
 #include "Boilerplate.hpp"
 #include "glm/gtc/random.hpp"
+#include "glm/gtx/io.hpp"
 #include "particles/ParticleSystem.hpp"
 
 #include <algorithm>
@@ -95,6 +97,11 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
+    if (!createGeometryLightMapPipeline()) {
+        SDL_Log("NewRenderer: failed to create geometry pipeline: %s", SDL_GetError());
+        return false;
+    }
+
     if (!createHudPipeline()) {
         SDL_Log("NewRenderer: failed to create hud pipeline: %s", SDL_GetError());
         return false;
@@ -125,13 +132,19 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    sampler_ = Boilerplate::createLinearRepeatSampler(device_);
+    sampler_ = Boilerplate::createLinearRepeatSampler(device_,false);
     if (!sampler_) {
         SDL_Log("NewRenderer: failed to create sampler: %s", SDL_GetError());
         return false;
     }
 
-    hudSampler_ = Boilerplate::createLinearRepeatSampler(device_);
+    nearestSampler_ = Boilerplate::createLinearRepeatSampler(device_,true);
+    if (!nearestSampler_) {
+        SDL_Log("NewRenderer: failed to create nearestSampler_: %s", SDL_GetError());
+        return false;
+    }
+
+    hudSampler_ = Boilerplate::createLinearRepeatSampler(device_,false);
     if (!hudSampler_) {
         SDL_Log("NewRenderer: failed to create hud sampler: %s", SDL_GetError());
         return false;
@@ -206,6 +219,12 @@ bool NewRenderer::init(SDL_Window* window)
     cubeFaceUps_[5] = glm::vec3(0, -1, 0);
 
     firstFrame_ = true;
+    ;
+
+    if (!loadLightMap()) {
+        SDL_Log("NewRenderer: failed to load LightMap");
+        return false;
+    }
 
     return true;
 }
@@ -297,6 +316,7 @@ bool NewRenderer::createGeometryPipeline()
         Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, normal)),
         Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, texUV)),
         Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Vertex, tangent)),
+        Boilerplate::makeAttribute(4, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, lightMapUV)),
     };
 
     SDL_GPUTextureFormat hdrFormat = getHdrFormat();
@@ -306,6 +326,42 @@ bool NewRenderer::createGeometryPipeline()
     return geometryPipeline_ != nullptr;
 }
 
+bool NewRenderer::createGeometryLightMapPipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/geometry.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+    vertexShader.uniformBufferCount = 2;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/geometry_shadowed_lightmap.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = MATERIAL_MAX_TEXTURE_COUNT + 4;
+    fragmentShader.uniformBufferCount = 3;
+
+    SDL_GPUVertexBufferDescription vertexBufferDescription{};
+    vertexBufferDescription.slot = 0;
+    vertexBufferDescription.pitch = (sizeof(Vertex));
+    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+    vertexBufferDescription.instance_step_rate = 0;
+
+    Boilerplate::VertexInputLayout vertexLayout{};
+    // vertexLayout.vertexPitch = sizeof(Vertex);
+    vertexLayout.bufferDescriptions.push_back(vertexBufferDescription);
+    vertexLayout.attributes = {
+        Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, position)),
+        Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, normal)),
+        Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, texUV)),
+        Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Vertex, tangent)),
+        Boilerplate::makeAttribute(4, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, lightMapUV)),
+    };
+
+    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    geometryLightMapPipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, hdrFormat, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
+
+    return geometryLightMapPipeline_ != nullptr;
+}
 
 SDL_GPUGraphicsPipeline* NewRenderer::createDepthPipeline(const SDL_GPURasterizerState &rasterizer_state) const
 {
@@ -604,14 +660,21 @@ void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
     drawToShadowMap(cmd, staticShadowMaps_,0, true, false, false,STATIC);
 }
 
-void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
+void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd,bool lightmap)
 {
-    SDL_GPUTextureSamplerBinding shadowBindings[3];
-    shadowBindings[0] = {staticShadowMaps_, staticDepthSampler_};
-    shadowBindings[1] = {dynamicShadowMaps_, dynamicDepthSampler_};
-    shadowBindings[2] = {movingLightShadowMaps_, dynamicDepthSampler_};
+    std::vector<SDL_GPUTextureSamplerBinding> shadowBindings;
+    if (lightmap) {
+        shadowBindings.reserve(4);
+        shadowBindings.push_back({lightMap_, nearestSampler_});
+    } else {
+        shadowBindings.reserve(3);
+    }
 
-    SDL_BindGPUFragmentSamplers(renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings, 3);
+    shadowBindings.push_back({staticShadowMaps_, staticDepthSampler_});
+    shadowBindings.push_back({dynamicShadowMaps_, dynamicDepthSampler_});
+    shadowBindings.push_back({movingLightShadowMaps_, dynamicDepthSampler_});
+
+    SDL_BindGPUFragmentSamplers(renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings.data(), shadowBindings.size());
 
     SDL_PushGPUFragmentUniformData(cmd, 2, &sceneLightInfo_, sizeof(LightUBO));
 }
@@ -620,19 +683,23 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
     if (particleSystem_)
         particleSystem_->uploadToGpu(cmd); // Must be before render pass
 
+    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+    FrustumPlanes frustumPlanes = camera_.getViewProjectionFrustumPlane();
+
     SDL_GPUColorTargetInfo colorTarget =
         Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
 
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
-    SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
-    bindLightShadowInfo(geometryPass, cmd);
-
-    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
-    FrustumPlanes frustumPlanes = camera_.getViewProjectionFrustumPlane();
-
+    SDL_BindGPUGraphicsPipeline(geometryPass, geometryLightMapPipeline_);
+    bindLightShadowInfo(geometryPass, cmd, true);
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
     drawWorldModelInstances(geometryPass, cmd, false,frustumPlanes);
+
+
+    SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
+    bindLightShadowInfo(geometryPass, cmd, false);
+    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
     drawEntityModels(geometryPass, cmd, false,frustumPlanes);
 
     drawSkinnedModels(geometryPass, cmd);
@@ -657,7 +724,7 @@ void NewRenderer::drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffe
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
 
-    bindLightShadowInfo(geometryPass, cmd);
+    bindLightShadowInfo(geometryPass, cmd, false);
 
     drawWeapon(geometryPass, cmd,camera_.getViewProjectionFrustumPlane());
 
@@ -1370,4 +1437,32 @@ bool NewRenderer::inFrustum(const Asset::AABB &modelElementAABB,const FrustumPla
 
 
     return inFrustumRet;
+}
+
+bool NewRenderer::loadLightMap() {
+    const char* base = SDL_GetBasePath();
+    std::string path = std::string(base ? base : "") + "assets/LightMap.exr";
+
+    float* data = nullptr;
+    int width = 0;
+    int height = 0;
+    const char* err = nullptr;
+
+    SDL_Log("loadLightMap: trying path: %s", path.c_str());
+
+    int ret = LoadEXR(&data, &width, &height, path.c_str(), &err);
+    if (ret != TINYEXR_SUCCESS) {
+        SDL_Log("loadLightMap: LoadEXR failed (%d): %s", ret, err ? err : "unknown");
+        FreeEXRErrorMessage(err);
+        return false;
+    }
+
+    lightMap_ = Boilerplate::createTextureRGBA32(device_,
+                    static_cast<Uint32>(width),
+                    static_cast<Uint32>(height),
+                    data,
+                    SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT);
+    free(data);
+
+    return lightMap_ != nullptr;
 }

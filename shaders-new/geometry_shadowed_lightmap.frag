@@ -35,9 +35,11 @@ layout(set = 2, binding = 0) uniform sampler2D tex;
 layout(set = 2, binding = 1) uniform sampler2D normalTex;
 layout(set = 2, binding = 2) uniform sampler2D metallicRoughnessTex;
 
-layout(set = 2, binding = 3) uniform samplerCubeArrayShadow staticPointLightShadowMaps;
-layout(set = 2, binding = 4) uniform samplerCubeArrayShadow dynamicPointLightShadowMaps;
-layout(set = 2, binding = 5) uniform samplerCubeArrayShadow movingPointLightShadowMaps;
+layout(set = 2, binding = 3) uniform sampler2D lightMap;
+
+layout(set = 2, binding = 4) uniform samplerCubeArrayShadow staticPointLightShadowMaps;
+layout(set = 2, binding = 5) uniform samplerCubeArrayShadow dynamicPointLightShadowMaps;
+layout(set = 2, binding = 6) uniform samplerCubeArrayShadow movingPointLightShadowMaps;
 
 
 layout(set = 3, binding = 0) uniform Material {
@@ -69,8 +71,7 @@ layout(location = 0) out vec4 color;
 // Just a single directional light for now...
 //const vec3 light_direction = normalize(-vec3(1.0f,1.0f,1.0f));
 //const vec4 light_color = vec4(1.0f,1.0f,1.0f,1.0f);
-const vec3 ambient_color = 1.0f * vec3(0.08f, 0.08f,0.12f); // dark-blue
-//const vec3 ambient_color = 5.0f * vec3(0.08f, 0.08f,0.12f); // dark-blue
+const vec3 ambient_color = 0.0f * vec3(0.08f, 0.08f,0.12f); // dark-blue
 //const vec3 ambient_color = normalize(vec3(0.08f, 0.08f,0.12f)); // dark-blue
 //const vec3 ambient_color = vec3(0.0f, 0.0f,0.0f); // dark-black
 
@@ -85,7 +86,8 @@ void main()
         normal = normalize(tbn * tangentNormal);
     }
 
-    vec4 albedo = materialFlags.useTexture != 0 ? texture(tex, frag_vt) : material.diffuse;
+    //vec4 albedo = materialFlags.useTexture != 0 ? texture(tex, frag_vt) : material.diffuse;
+    vec4 albedo = vec4(1.0f);
     albedo.rgb = pow(albedo.rgb,vec3(2.2f));
     vec2 mr = materialFlags.useMetallicRoughnessTexture != 0
         ? texture(metallicRoughnessTex, frag_vt).gb
@@ -99,13 +101,23 @@ void main()
 
 //    float cosT = max(0.0f, dot(-light_direction, normal));
 //    vec4 irradiance = light_color * cosT + ambient_color;
-    vec3 irradiance = ambient_color;
+    vec3 irradiance = vec3(0.0f);
+//    vec3 staticLightValue = texture(lightMap, frag_lt).rgb;
+
+    // Try 2 - flip Y
+    vec2 lightmapUV = vec2(frag_lt.x, 1.0 - frag_lt.y);
+
+    vec3 staticLightValue = texture(lightMap, lightmapUV).rgb;
+
+    irradiance += staticLightValue;
 
     for (int i = 0; i < lightInfo.numPointLights; i++ ){
         PointLight pLight_i = lightInfo.pointLights[i];
 
         vec3 lightToWorldPos = frag_worldPos - pLight_i.pos;
         float r = length(lightToWorldPos);
+        float attenutaion = 1.0f / (r * r);
+        float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
 
         vec3 absDir = abs(lightToWorldPos);
         float dominantAxis = max(absDir.x, max(absDir.y, absDir.z));
@@ -114,14 +126,11 @@ void main()
         float staticShadow_i = texture(staticPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
         float dynamicShadow_i = texture(dynamicPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
 
-        float shadow_i = dynamicShadow_i * staticShadow_i;
-
-        float attenutaion = 1.0f / (r * r);
-
-        float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
-        irradiance += shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion * cosT_i;
-
+        irradiance -= staticShadow_i * (1.0f-dynamicShadow_i) * pLight_i.color * (pLight_i.intensity) * attenutaion * cosT_i; //subtract direct lighting component in shadow from prebaked irradiance
     }
+    irradiance = max(vec3(0.0f),irradiance);
+    irradiance += ambient_color;
+
     for (int i = 0; i < lightInfo.numMovingPointLights; i++ ){
         PointLight pLight_i = lightInfo.movingPointLights[i];
 
@@ -137,12 +146,13 @@ void main()
         float attenutaion = 1.0f / (r * r);
 
         float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
-        irradiance += shadow_i * pLight_i.color * (100.0f *pLight_i.intensity) * attenutaion * cosT_i;
+        irradiance += shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion * cosT_i;
 
     }
 
-//    albedo.rgb *= (normal * 0.5f) + 0.5f;
+    //albedo.rgb *= (normal * 0.5f) + 0.5f;
     vec3 diffuse = albedo.rgb * (1.0 - metallic) * irradiance;
     vec3 metal = albedo.rgb * metallic * irradiance * (1.0 - 0.5 * roughness);
     color = vec4(diffuse + metal, albedo.a);
+//    color = vec4(frag_lt.x, frag_lt.y, 0.0, 1.0);
 }
