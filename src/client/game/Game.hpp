@@ -344,19 +344,19 @@ private:
     // emote wheel fires, cleared on local movement/combat input or death. Drives
     // the local animator override, the third-person emote camera, and showing
     // the local body. Remote players' emotes are server-driven via AnimSnapshot.
-    int localEmote_{-1};            ///< Active local emote index (EmoteCatalog), or -1.
-    float emoteCamBlend_{0.0f};     ///< 0 = first-person, 1 = third-person emote cam (eased).
+    int localEmote_{-1};        ///< Active local emote index (EmoteCatalog), or -1.
+    float emoteCamBlend_{0.0f}; ///< 0 = first-person, 1 = third-person emote cam (eased).
 
     // Killcam: while dead and awaiting respawn, hold the camera at the death
     // position and rotate it to keep the killer centered on screen.
-    bool killcamActive_{false};            ///< True this frame while the killcam is driving the camera.
-    glm::vec3 killcamEye_{0.0f};           ///< Eye position locked at the moment of death.
-    float killcamYaw_{0.0f};               ///< Smoothed killcam yaw (radians).
-    float killcamPitch_{0.0f};             ///< Smoothed killcam pitch (radians).
-    glm::vec3 killcamKillerCenter_{0.0f};  ///< Killer AABB center (world) for the HUD label.
-    glm::vec3 killcamKillerHalf_{0.0f};    ///< Killer AABB half-extents (world) for the HUD label.
+    bool killcamActive_{false};                    ///< True this frame while the killcam is driving the camera.
+    glm::vec3 killcamEye_{0.0f};                   ///< Eye position locked at the moment of death.
+    float killcamYaw_{0.0f};                       ///< Smoothed killcam yaw (radians).
+    float killcamPitch_{0.0f};                     ///< Smoothed killcam pitch (radians).
+    glm::vec3 killcamKillerCenter_{0.0f};          ///< Killer AABB center (world) for the HUD label.
+    glm::vec3 killcamKillerHalf_{0.0f};            ///< Killer AABB half-extents (world) for the HUD label.
     entt::entity killcamKillerEntity_{entt::null}; ///< Killer entity (drives the chams pass), or null.
-    std::string killcamKillerName_;        ///< Killer's display nickname (for the HUD label).
+    std::string killcamKillerName_;                ///< Killer's display nickname (for the HUD label).
 
     // Map collision data — loaded from GLB, owns the vectors that back activeWorld().
     physics::MapCollisionData mapCollision_;
@@ -374,6 +374,9 @@ private:
 
     int rocketProjectileModelIdx_ = -1;
     int grenadeModelIdx_ = -1;
+    int heGrenadeModelIdx_ = -1;
+    int stickyGrenadeModelIdx_ = -1;
+    int molotovModelIdx_ = -1;
     int medkitModelIdx_ = -1;
 
     // Dynamic lighting test controls (ImGui-tunable)

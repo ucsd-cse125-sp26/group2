@@ -135,16 +135,16 @@ inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
     static constexpr std::array<GrenadeConfig, 3> k_grenadeConfigs{{
         // HEGrenade
         GrenadeConfig{
-            .throwSpeed = 1500.0f,
+            .throwSpeed = 1800.0f,
             .throwPitchOffset = 0.14f,
             .throwCooldown = 1.0f,
-            .fuseTime = 3.0f,
+            .fuseTime = 2.0f,
             .bounceRestitution = 0.5f,
             .sticky = false,
             .maxLifeTime = 8.0f,
             .detonation = GrenadeDetonationKind::Explosion,
-            .damage = 120.0f,
-            .explosionRadius = 200.0f,
+            .damage = 150.0f,
+            .explosionRadius = 300.0f,
             .damageFalloffExp = 2.5f,
             .selfDamageMult = 0.4f,
             .maxKnockback = 1100.0f, // impulse-grade knockback folded into the HE frag
@@ -154,7 +154,7 @@ inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
         },
         // Molotov
         GrenadeConfig{
-            .throwSpeed = 1200.0f,
+            .throwSpeed = 1500.0f,
             .throwPitchOffset = 0.20f,
             .throwCooldown = 1.0f,
             .fuseTime = -1.0f, // impact-detonate
@@ -170,7 +170,7 @@ inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
         },
         // Sticky
         GrenadeConfig{
-            .throwSpeed = 1500.0f,
+            .throwSpeed = 1800.0f,
             .throwPitchOffset = 0.14f,
             .throwCooldown = 1.0f,
             .fuseTime = 2.0f, // arms once it sticks to a surface or player
@@ -178,7 +178,7 @@ inline const GrenadeConfig& getGrenadeConfig(WeaponType type)
             .sticky = true,
             .maxLifeTime = 8.0f,
             .detonation = GrenadeDetonationKind::Explosion,
-            .damage = 100.0f,
+            .damage = 180.0f,
             .explosionRadius = 220.0f,
             .damageFalloffExp = 2.0f,
             .selfDamageMult = 0.4f,

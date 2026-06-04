@@ -372,3 +372,9 @@ To update a dependency, change `GIT_TAG` in `CMakeLists.txt` and delete `build/`
 | SDL3_net | `main` | Networking |
 | GLM | `1.0.1` | Math (vectors, matrices, quaternions) |
 | EnTT | `v3.14.0` | ECS — only fetched when `USE_ENTT=ON` |
+
+# Models Used
+- Grenades
+  - HE: https://sketchfab.com/3d-models/sci-fi-grenade-f14321b41c5d4a308218dd4c28bf5d3e by Hunter Wiltse
+  - Molotov: https://sketchfab.com/3d-models/ng50-napalm-grenade-27ea60123e9645ab907547c71b116099 by epavlenko
+  - Sticky: https://sketchfab.com/3d-models/powerball-e7c119ce590c4a919ebc6405cfd12a4c by Alex Sanches

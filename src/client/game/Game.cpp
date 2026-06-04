@@ -1099,8 +1099,50 @@ bool Game::init(AppContext& ctx)
                 kGrenadeModel.filename, kGrenadeModel.loadTranslation, kGrenadeModel.loadScale, kGrenadeModel.flipUVs);
             assets_.setModelIndex(id, grenadeModelIdx_);
 
-            if (grenadeModelIdx_ < 0)
+            if (grenadeModelIdx_ >= 0)
+                renderer->setModelScenePass(grenadeModelIdx_, false);
+            else
                 SDL_Log("[client] WARNING: grenade model '%s' failed to load", kGrenadeModel.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kHEGrenadeModel);
+            heGrenadeModelIdx_ = renderer->loadSceneModel(kHEGrenadeModel.filename,
+                                                          kHEGrenadeModel.loadTranslation,
+                                                          kHEGrenadeModel.loadScale,
+                                                          kHEGrenadeModel.flipUVs);
+            assets_.setModelIndex(id, heGrenadeModelIdx_);
+
+            if (heGrenadeModelIdx_ >= 0)
+                renderer->setModelScenePass(heGrenadeModelIdx_, false);
+            else
+                SDL_Log("[client] WARNING: HE grenade model '%s' failed to load", kHEGrenadeModel.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kStickyGrenadeModel);
+            stickyGrenadeModelIdx_ = renderer->loadSceneModel(kStickyGrenadeModel.filename,
+                                                              kStickyGrenadeModel.loadTranslation,
+                                                              kStickyGrenadeModel.loadScale,
+                                                              kStickyGrenadeModel.flipUVs);
+            assets_.setModelIndex(id, stickyGrenadeModelIdx_);
+
+            if (stickyGrenadeModelIdx_ >= 0)
+                renderer->setModelScenePass(stickyGrenadeModelIdx_, false);
+            else
+                SDL_Log("[client] WARNING: sticky grenade model '%s' failed to load", kStickyGrenadeModel.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kMolotovModel);
+            molotovModelIdx_ = renderer->loadSceneModel(
+                kMolotovModel.filename, kMolotovModel.loadTranslation, kMolotovModel.loadScale, kMolotovModel.flipUVs);
+            assets_.setModelIndex(id, molotovModelIdx_);
+
+            if (molotovModelIdx_ >= 0)
+                renderer->setModelScenePass(molotovModelIdx_, false);
+            else
+                SDL_Log("[client] WARNING: molotov model '%s' failed to load", kMolotovModel.filename);
         }
 
         {
@@ -1275,8 +1317,7 @@ bool Game::init(AppContext& ctx)
         // Pop a brief point light at the muzzle on every shot so the flash
         // lights up nearby geometry. For the local player prefer the exact
         // viewmodel muzzle; for everyone else use the shot's muzzle origin.
-        if (evt.effectType == ParticleEffectType::BulletTracer ||
-            evt.effectType == ParticleEffectType::HitscanBeam) {
+        if (evt.effectType == ParticleEffectType::BulletTracer || evt.effectType == ParticleEffectType::HitscanBeam) {
             // Local player: 10 units ahead of the right palm along the view dir
             // (muzzleFlashOrigin). Remote players: the shot's muzzle origin.
             const glm::vec3 flashPos = (evt.source == localPlayer) ? muzzleFlashOrigin(evtOrigin) : evtOrigin;
@@ -1323,8 +1364,11 @@ bool Game::init(AppContext& ctx)
             }
             break;
         case ParticleEffectType::Explosion:
-            particleSystem.spawnExplosionVfx(
-                evt.pos1, glm::length(evt.pos2) > 0.001f ? glm::normalize(evt.pos2) : glm::vec3{0.0f, 1.0f, 0.0f}, evt.param, explosionVfxKindForWeapon(evt.weaponType));
+            particleSystem.spawnExplosionVfx(evt.pos1,
+                                             glm::length(evt.pos2) > 0.001f ? glm::normalize(evt.pos2)
+                                                                            : glm::vec3{0.0f, 1.0f, 0.0f},
+                                             evt.param,
+                                             explosionVfxKindForWeapon(evt.weaponType));
             spawnExplosionFlashLight(evt.pos1, evt.weaponType, evt.param);
             // Dispatch ExplosionEvent so SfxSystem plays the explosion sound.
             {
@@ -2831,9 +2875,8 @@ SDL_AppResult Game::iterate()
                 snap.emoteRequest = static_cast<std::int8_t>(emoteRequestThisFrame);
                 // Local prediction: cancel the emote the moment the player moves
                 // or fights, matching the server's break condition.
-                if (snap.forward || snap.back || snap.left || snap.right || snap.jump || snap.crouch ||
-                    snap.shooting || snap.scoped || snap.reload || snap.throwGrenade || snap.ability1 ||
-                    snap.ability2)
+                if (snap.forward || snap.back || snap.left || snap.right || snap.jump || snap.crouch || snap.shooting ||
+                    snap.scoped || snap.reload || snap.throwGrenade || snap.ability1 || snap.ability2)
                     localEmote_ = -1;
             });
         systems::runInputSend(registry, *client);
@@ -2974,7 +3017,7 @@ SDL_AppResult Game::iterate()
             const glm::vec3 forward{
                 std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
             constexpr float k_emoteCamDistance = 260.0f; // units behind the eye.
-            constexpr float k_emoteCamHeight = 70.0f;     // units above the eye.
+            constexpr float k_emoteCamHeight = 70.0f;    // units above the eye.
             renderEye += emoteCamBlend_ * (-forward * k_emoteCamDistance + glm::vec3{0.0f, k_emoteCamHeight, 0.0f});
         }
     }
@@ -4829,8 +4872,8 @@ SDL_AppResult Game::iterate()
             if (dynLights.size() < k_maxDynLights) {
                 float env;
                 if (it->age < k_flashAttack) {
-                    const float x = it->age / k_flashAttack;     // [0, 1)
-                    env = 1.0f - (1.0f - x) * (1.0f - x);        // ease-out: fast rise, smooth into peak
+                    const float x = it->age / k_flashAttack; // [0, 1)
+                    env = 1.0f - (1.0f - x) * (1.0f - x);    // ease-out: fast rise, smooth into peak
                 } else {
                     const float decayTime = std::max(1e-4f, it->lifetime - k_flashAttack);
                     const float t = (it->age - k_flashAttack) / decayTime; // [0, 1)
@@ -7127,9 +7170,15 @@ void Game::refreshRemoteProjectileRenderables()
                                                                              const Velocity& vel,
                                                                              const CollisionShape& /*shape*/) {
         auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-        if (isGrenadeType(projectile.type)) {
-            rend.modelIndex = grenadeModelIdx_;
-            rend.scale = kGrenadeModel.renderScale;
+        if (projectile.type == WeaponType::HEGrenade) {
+            rend.modelIndex = heGrenadeModelIdx_;
+            rend.scale = kHEGrenadeModel.renderScale;
+        } else if (projectile.type == WeaponType::Sticky) {
+            rend.modelIndex = stickyGrenadeModelIdx_;
+            rend.scale = kStickyGrenadeModel.renderScale;
+        } else if (projectile.type == WeaponType::Molotov) {
+            rend.modelIndex = molotovModelIdx_;
+            rend.scale = kMolotovModel.renderScale;
         } else {
             rend.modelIndex = rocketProjectileModelIdx_;
             rend.scale = glm::vec3(kRocketProjectile.loadScale);
@@ -7145,6 +7194,11 @@ void Game::refreshRemoteProjectileRenderables()
             constexpr glm::vec3 modelCenter{0.0f, -1.668982f, 4.484283f};
             rend.translation = rend.orientation * (modelCenter * kRocketProjectile.loadScale);
         }
+
+        if (isGrenadeType(projectile.type) && !projectile.stuck) {
+            float spinAngle = projectile.currentLifeTime * 8.0f;
+            rend.orientation = rend.orientation * glm::angleAxis(spinAngle, glm::vec3{-1, 0, 0});
+        }
     });
 }
 
@@ -7157,12 +7211,19 @@ void Game::refreshRemoteRespawnRenderables()
             const bool grenadeSpawner = isGrenadeType(spawner.type);
 
             if (grenadeSpawner) {
-                if (grenadeModelIdx_ < 0) {
+                int grenadeIdx = grenadeModelIdx_;
+                if (spawner.type == WeaponType::HEGrenade)
+                    grenadeIdx = heGrenadeModelIdx_;
+                else if (spawner.type == WeaponType::Sticky)
+                    grenadeIdx = stickyGrenadeModelIdx_;
+                else if (spawner.type == WeaponType::Molotov)
+                    grenadeIdx = molotovModelIdx_;
+                if (grenadeIdx < 0) {
                     rend.modelIndex = -1;
                     rend.visible = false;
                     return;
                 }
-                rend.modelIndex = grenadeModelIdx_;
+                rend.modelIndex = grenadeIdx;
                 const WeaponSpawnerModelParams& params = defaultSpawnerModelParams(spawner.type);
                 rend.scale = params.scale;
 

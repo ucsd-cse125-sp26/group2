@@ -49,6 +49,30 @@ inline const AssetDefinition kGrenadeModel{
     .renderScale = {20.0f, 20.0f, 20.0f},
 };
 
+inline const AssetDefinition kHEGrenadeModel{
+    .name = "he_grenade",
+    .filename = "grenade_he.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {9.0f, 9.0f, 9.0f},
+};
+
+inline const AssetDefinition kStickyGrenadeModel{
+    .name = "sticky_grenade",
+    .filename = "grenade_sticky.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {0.4f, 0.4f, 0.4f},
+};
+
+inline const AssetDefinition kMolotovModel{
+    .name = "molotov",
+    .filename = "grenade_fire.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {600.0f, 600.0f, 600.0f},
+};
+
 inline const AssetDefinition kMedkitModel{
     .name = "medkit",
     .filename = "medkit.glb",
