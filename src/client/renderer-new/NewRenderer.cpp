@@ -100,17 +100,17 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    if (!createDepthRes0Pipeline()) {
+    if (!createDepthRes0Pipeline(true)) {
         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
         return false;
     }
 
-    if (!createDepthRes1Pipeline()) {
+    if (!createDepthRes1Pipeline(true)) {
         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
         return false;
     }
 
-    if (!createDepthRes2Pipeline()) {
+    if (!createDepthRes2Pipeline(true)) {
         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
         return false;
     }
@@ -137,13 +137,13 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    staticDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_, SDL_GPU_FILTER_LINEAR);
+    staticDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_, SDL_GPU_FILTER_LINEAR,true);
     if (!staticDepthSampler_) {
         SDL_Log("NewRenderer: failed to create depth sampler: %s", SDL_GetError());
         return false;
     }
 
-    dynamicDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_, SDL_GPU_FILTER_NEAREST);
+    dynamicDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_, SDL_GPU_FILTER_NEAREST,true);
     if (!dynamicDepthSampler_) {
         SDL_Log("NewRenderer: failed to create depth sampler: %s", SDL_GetError());
         return false;
@@ -389,6 +389,7 @@ SDL_GPUGraphicsPipeline* NewRenderer::createDepthPipeline(const SDL_GPURasterize
     depthPipelineDesc.shaderFormat = shaderFormat_;
     depthPipelineDesc.vertexInputLayout = &vertexLayout;
     depthPipelineDesc.colorTarget = nullptr;
+    depthPipelineDesc.reverseZ = true;
     depthPipelineDesc.depthTest = true;
     depthPipelineDesc.depthWrite = true;
 
@@ -397,37 +398,48 @@ SDL_GPUGraphicsPipeline* NewRenderer::createDepthPipeline(const SDL_GPURasterize
 
     return Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
 }
-bool NewRenderer::createDepthRes0Pipeline()
+bool NewRenderer::createDepthRes0Pipeline(bool reverseZ)
 {
     SDL_GPURasterizerState rasterizer_state{};
     rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
     rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     rasterizer_state.enable_depth_bias = true;
-    rasterizer_state.depth_bias_constant_factor = 500.0f;
-    rasterizer_state.depth_bias_slope_factor = 1.0f;
-    rasterizer_state.depth_bias_clamp = 0.005f;
+    rasterizer_state.depth_bias_constant_factor = 400.0f;
+    rasterizer_state.depth_bias_slope_factor = 1.5f;
+    rasterizer_state.depth_bias_clamp = 0.0005f;
+
+    if (reverseZ) {
+        rasterizer_state.depth_bias_constant_factor *= -1.0f ;
+        rasterizer_state.depth_bias_slope_factor *= -1.0f ;
+        rasterizer_state.depth_bias_clamp *= -1.0f ;
+    }
 
     depthRes0Pipeline_ = createDepthPipeline(rasterizer_state);
     return depthRes0Pipeline_ != nullptr;
 }
 
-bool NewRenderer::createDepthRes1Pipeline()
+bool NewRenderer::createDepthRes1Pipeline(bool reverseZ)
 {
     SDL_GPURasterizerState rasterizer_state{};
     rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
     rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     rasterizer_state.enable_depth_bias = true;
-    rasterizer_state.depth_bias_constant_factor = 500.0f;
-    rasterizer_state.depth_bias_slope_factor = 10.0f;
-    rasterizer_state.depth_bias_clamp = 0.1f;
+    rasterizer_state.depth_bias_constant_factor = 600.0f;
+    rasterizer_state.depth_bias_slope_factor = 1.5f;
+    rasterizer_state.depth_bias_clamp = 0.005f;
 
+    if (reverseZ) {
+        rasterizer_state.depth_bias_constant_factor *= -1.0f ;
+        rasterizer_state.depth_bias_slope_factor *= -1.0f ;
+        rasterizer_state.depth_bias_clamp *= -1.0f ;
+    }
     depthRes1Pipeline_ = createDepthPipeline(rasterizer_state);
     return depthRes1Pipeline_ != nullptr;
 }
 
-bool NewRenderer::createDepthRes2Pipeline()
+bool NewRenderer::createDepthRes2Pipeline(bool reverseZ)
 {
     SDL_GPURasterizerState rasterizer_state{};
     rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
@@ -437,6 +449,12 @@ bool NewRenderer::createDepthRes2Pipeline()
     rasterizer_state.depth_bias_constant_factor = 100.0f;
     rasterizer_state.depth_bias_slope_factor = 1.0f;
     rasterizer_state.depth_bias_clamp = 0.03f;
+
+    if (reverseZ) {
+        rasterizer_state.depth_bias_constant_factor *= -1.0f ;
+        rasterizer_state.depth_bias_slope_factor *= -1.0f ;
+        rasterizer_state.depth_bias_clamp *= -1.0f ;
+    }
 
     depthRes2Pipeline_ = createDepthPipeline(rasterizer_state);
     return depthRes2Pipeline_ != nullptr;
@@ -578,7 +596,7 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
         default: return;
     }
 
-    SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture, layer, true);
+    SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture, layer, true,true);
 
     SDL_GPURenderPass* geometryDepthPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
     SDL_BindGPUGraphicsPipeline(geometryDepthPass, depthPipeline);
@@ -621,8 +639,12 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
         default: return;
     }
 
+    // glm::mat4 shadowProjection = glm::perspective(
+    //     glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
+
     glm::mat4 shadowProjection = glm::perspective(
-        glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
+        glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightFarPlane,
+                                                     sceneLightInfo_.pointLightNearPlane);
     shadowProjection[1][1] *= -1;
 
     for (Uint8 iLight = 0; iLight < std::min(lightCount,maxLightCount); iLight++) {
@@ -984,7 +1006,7 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
         depthTarget_.texture = nullptr;
     }
 
-    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, false);
+    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, false,false);
 
     if (!depthTarget_.texture)
         return false;
@@ -1170,19 +1192,19 @@ int NewRenderer::loadSceneModel(
 
     Asset::modelInstances_.push_back(sceneInstance);
 
-    if (!model.pointLights.empty()) {
-        std::vector<PointLight> pointLights;
-        pointLights.reserve(model.pointLights.size());
-        for (const Asset::PointLight& light : model.pointLights) {
-            PointLight pointLight{};
-            pointLight.position = glm::vec3(modelTransform * glm::vec4(light.position, 1.0f));
-            pointLight.intensity = light.intensity;
-            pointLight.color = light.color;
-            pointLight.range = light.range * scale;
-            pointLights.push_back(pointLight);
-        }
-        setStaticPointLights(std::move(pointLights));
-    }
+    // if (!model.pointLights.empty()) {
+    //     std::vector<PointLight> pointLights;
+    //     pointLights.reserve(model.pointLights.size());
+    //     for (const Asset::PointLight& light : model.pointLights) {
+    //         PointLight pointLight{};
+    //         pointLight.position = glm::vec3(modelTransform * glm::vec4(light.position, 1.0f));
+    //         pointLight.intensity = light.intensity;
+    //         pointLight.color = light.color;
+    //         pointLight.range = light.range * scale;
+    //         pointLights.push_back(pointLight);
+    //     }
+    //     setStaticPointLights(std::move(pointLights));
+    // }
 
     std::vector<Boilerplate::BufferUpload> uploads;
     auto uploadTexture = [&](TexIdInt texId, SDL_GPUTextureFormat format) {
@@ -1251,8 +1273,7 @@ void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
     memcpy(sceneLightInfo_.movingPointLights, pointLights.data(), sceneLightInfo_.numMovingPointLights * sizeof(PointLight));
 }
 
-void NewRenderer::setStaticPointLights(std::vector<PointLight> &&pointLights)
-{
+void NewRenderer::setStaticPointLights(std::vector<PointLight> &&pointLights) {
     sceneLightInfo_.numPointLights = std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_POINT_LIGHTS));
 
     memcpy(sceneLightInfo_.pointLights, pointLights.data(), sceneLightInfo_.numPointLights * sizeof(PointLight));

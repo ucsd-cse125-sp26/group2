@@ -91,8 +91,12 @@ void main()
     float roughness = mr.x;
     float metallic = mr.y;
 
-    float depthA = lightInfo.pointLightFarPlane / (lightInfo.pointLightFarPlane - lightInfo.pointLightNearPlane );
-    float depthB = depthA * lightInfo.pointLightNearPlane;
+//    float depthA = lightInfo.pointLightFarPlane / (lightInfo.pointLightFarPlane - lightInfo.pointLightNearPlane );
+//    float depthB = depthA * lightInfo.pointLightNearPlane;
+
+
+    float depthA = lightInfo.pointLightNearPlane / (lightInfo.pointLightNearPlane - lightInfo.pointLightFarPlane );
+    float depthB = depthA * lightInfo.pointLightFarPlane;
 
 
 //    float cosT = max(0.0f, dot(-light_direction, normal));

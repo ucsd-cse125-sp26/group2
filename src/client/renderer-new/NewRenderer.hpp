@@ -57,8 +57,8 @@ struct LightUBO
     uint32_t numPointLights = 0;
     uint32_t numMovingPointLights = 0;
     uint32_t numSpotLights = 0;
-    float pointLightFarPlane = 7500.0f;
-    float pointLightNearPlane = 1.0f;
+    float pointLightFarPlane = 4000.0f;
+    float pointLightNearPlane = 5.0f;
     uint32_t _pad0[3];
     PointLight pointLights[MAX_POINT_LIGHTS];
     PointLight movingPointLights[MAX_MOVING_POINT_LIGHTS];
@@ -368,9 +368,9 @@ private:
 
     bool createGeometryPipeline();
     SDL_GPUGraphicsPipeline* createDepthPipeline(const SDL_GPURasterizerState& rasterizer_state) const;
-    bool createDepthRes0Pipeline();
-    bool createDepthRes1Pipeline();
-    bool createDepthRes2Pipeline();
+    bool createDepthRes0Pipeline(bool reverseZ);
+    bool createDepthRes1Pipeline(bool reverseZ);
+    bool createDepthRes2Pipeline(bool reverseZ);
     bool createHudPipeline();
     bool createFxaaPipeline();
     bool createTonemapPipeline();
