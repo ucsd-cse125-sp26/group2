@@ -83,8 +83,10 @@ public:
     bool icon(HudIcon id, float x, float y, float size, HudColor tint = HudColor::white());
     bool svg(HudIcon id, float x, float y, float w, float h, HudColor tint = HudColor::white());
     bool svgFlipped(HudIcon id, float x, float y, float w, float h, bool flipX, bool flipY, HudColor tint = HudColor::white());
+    bool svgPartialX(HudIcon id, float x, float y, float w, float h, float fraction, HudColor tint = HudColor::white());
     bool svgMask(HudIcon id, float x, float y, float w, float h, HudColor color);
     bool svgMaskFlipped(HudIcon id, float x, float y, float w, float h, bool flipX, bool flipY, HudColor color);
+    bool svgMaskPartialX(HudIcon id, float x, float y, float w, float h, float fraction, HudColor color);
 
     // ── Crosshair ───────────────────────────────────────────────────────
 

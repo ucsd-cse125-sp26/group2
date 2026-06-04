@@ -18,6 +18,7 @@
 #include "hud/widgets/HitMarkerWidget.hpp"
 #include "hud/widgets/KdaCounter.hpp"
 #include "hud/widgets/KillFeed.hpp"
+#include "hud/widgets/LevelBarWidget.hpp"
 #include "hud/widgets/Minimap.hpp"
 #include "hud/widgets/PickupNotification.hpp"
 #include "hud/widgets/PickupPrompt.hpp"
@@ -103,6 +104,8 @@ const char* widgetName(const HudWidget* widget)
         return "KDA Counter";
     if (dynamic_cast<const KillFeed*>(widget))
         return "Kill Feed";
+    if (dynamic_cast<const LevelBarWidget*>(widget))
+        return "Level Bar";
     if (dynamic_cast<const Minimap*>(widget))
         return "Minimap";
     if (dynamic_cast<const PickupNotification*>(widget))
@@ -408,6 +411,15 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "fontSize", feed->fontSize);
         writeFloatParam(out, first, "fadeOutDuration", feed->fadeOutDuration);
         writeIntParam(out, first, "maxEntries", feed->maxEntries);
+    } else if (const auto* level = dynamic_cast<const LevelBarWidget*>(&widget)) {
+        writeFloatParam(out, first, "barWidth", level->barWidth);
+        writeFloatParam(out, first, "barHeight", level->barHeight);
+        writeFloatParam(out, first, "svgScale", level->svgScale);
+        writeFloatParam(out, first, "svgOffsetX", level->svgOffsetX);
+        writeFloatParam(out, first, "svgOffsetY", level->svgOffsetY);
+        writeFloatParam(out, first, "svgStretchX", level->svgStretchX);
+        writeFloatParam(out, first, "svgStretchY", level->svgStretchY);
+        writeFloatParam(out, first, "svgRotationDeg", level->svgRotationDeg);
     } else if (const auto* minimap = dynamic_cast<const Minimap*>(&widget)) {
         writeFloatParam(out, first, "mapSize", minimap->mapSize);
         writeFloatParam(out, first, "dotSize", minimap->dotSize);
@@ -635,6 +647,15 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Font Size", feed->fontSize, 0.5f, 4.0f, 96.0f);
         editFloat("Fade Out Duration", feed->fadeOutDuration, 0.05f, 0.0f, 20.0f);
         ImGui::DragInt("Max Entries", &feed->maxEntries, 0.1f, 1, 40);
+    } else if (auto* level = dynamic_cast<LevelBarWidget*>(&widget)) {
+        editFloat("Bar Width", level->barWidth, 1.0f, 8.0f, 2000.0f);
+        editFloat("Bar Height", level->barHeight, 0.5f, 4.0f, 400.0f);
+        editFloat("SVG Scale", level->svgScale, 0.01f, 0.01f, 8.0f);
+        editFloat("SVG Offset X", level->svgOffsetX, 0.5f, -2000.0f, 2000.0f);
+        editFloat("SVG Offset Y", level->svgOffsetY, 0.5f, -2000.0f, 2000.0f);
+        editFloat("SVG Stretch X", level->svgStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("SVG Stretch Y", level->svgStretchY, 0.01f, 0.01f, 8.0f);
+        editFloat("SVG Rotation", level->svgRotationDeg, 0.5f, -180.0f, 180.0f);
     } else if (auto* minimap = dynamic_cast<Minimap*>(&widget)) {
         editFloat("Map Size", minimap->mapSize, 1.0f, 20.0f, 800.0f);
         editFloat("Dot Size", minimap->dotSize, 0.25f, 0.0f, 80.0f);
