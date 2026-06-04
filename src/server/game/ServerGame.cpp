@@ -60,8 +60,8 @@
 #include "ecs/systems/KillzoneSystem.hpp"
 #include "ecs/systems/MatchSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
-#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
@@ -401,7 +401,10 @@ void ServerGame::eventHandler(const Event& event)
             deletePlayerEntity(event.clientId);
             break;
         }
-        lobbyManager.addPlayer(event.clientId);
+        const char* joinedDisplayName = "";
+        if (const auto* playerName = registry.try_get<PlayerName>(clientEntities[event.clientId]))
+            joinedDisplayName = playerName->c_str();
+        lobbyManager.addPlayer(event.clientId, joinedDisplayName);
         server->sendMatchConfigToClient(event.clientId, matchController.getMatchConfig());
         // Lobby updates already cover joins before the match starts. Once the
         // match is active, send a lightweight roster popup event instead.

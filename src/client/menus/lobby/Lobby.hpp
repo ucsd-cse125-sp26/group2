@@ -79,4 +79,5 @@ private:
     std::string hostLanIp = "127.0.0.1";             ///< LAN IPv4 shown in the hosting banner.
     uint16_t hostPort = 0;                           ///< Hosted server port shown in the hosting banner.
     bool exitRequested = false;                      ///< Set when the user confirms "Exit to Desktop".
+    bool hostAddressesVisible = false;               ///< Local UI flag: show listen/local addresses while hosting.
 };

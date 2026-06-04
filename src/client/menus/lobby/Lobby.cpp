@@ -37,6 +37,7 @@ bool Lobby::init(AppContext& ctx)
     }
     hostPort = ctx.hostedServer.port();
     hostLanIp = isHosting ? local_address::firstLanIPv4() : std::string{};
+    hostAddressesVisible = false;
 
     client->onLobbyState([this](const std::vector<LobbyPlayer>& snapshot, ClientId localId) {
         players = snapshot;
@@ -52,7 +53,9 @@ bool Lobby::init(AppContext& ctx)
             if (std::none_of(
                     players.begin(), players.end(), [id = update.id](const LobbyPlayer& p) { return p.id == id; }))
             {
-                players.push_back(LobbyPlayer{update.id});
+                LobbyPlayer joined{update.id};
+                joined.displayName = update.displayName;
+                players.push_back(joined);
             }
             break;
         case LobbyUpdateEvent::Type::PlayerLeft:
@@ -182,6 +185,7 @@ SDL_AppResult Lobby::iterate()
         .isHosting = isHosting,
         .hostLanIp = hostLanIp,
         .hostPort = hostPort,
+        .hostAddressesVisible = hostAddressesVisible,
     };
 
     const auto result = lobby_ui::buildPlayerList(config);
@@ -198,6 +202,9 @@ SDL_AppResult Lobby::iterate()
     }
     if (result.returnToHostConfigClicked) {
         returnToHostConfig = true;
+    }
+    if (result.hostAddressesVisibilityToggled) {
+        hostAddressesVisible = !hostAddressesVisible;
     }
 
     if (settings != nullptr) {
