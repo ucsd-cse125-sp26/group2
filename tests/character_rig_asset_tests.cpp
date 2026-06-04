@@ -5,10 +5,14 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <initializer_list>
 #include <iostream>
 #include <limits>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include <ozz/animation/runtime/local_to_model_job.h>
@@ -159,6 +163,83 @@ bool requireApexRigScalesFromMixamoBody(const glm::quat& orientationFix)
     }
     return true;
 }
+
+bool restJointModelPosition(const CharacterRig& rig, const char* jointName, glm::vec3& out)
+{
+    const auto it = rig.jointMap().find(jointName);
+    if (it == rig.jointMap().end())
+        return false;
+
+    std::vector<ozz::math::Float4x4> models(static_cast<size_t>(rig.numJoints()));
+    ozz::animation::LocalToModelJob l2m;
+    l2m.skeleton = rig.skeleton();
+    l2m.input = rig.skeleton()->joint_rest_poses();
+    l2m.output = ozz::make_span(models);
+    if (!l2m.Run())
+        return false;
+
+    out = glm::vec3(anim_utils::ozzToGlm(models[static_cast<size_t>(it->second)])[3]);
+    return true;
+}
+
+bool requireApexPropSocketNearRightHand(const glm::quat& orientationFix)
+{
+    CharacterRig apexRig;
+    const std::filesystem::path apexPath =
+        std::filesystem::current_path() / "assets/animations/character_rigged_apex_hands.glb";
+    if (!apexRig.loadFromFBX(apexPath.string(), orientationFix, true)) {
+        std::cerr << "failed to load Apex stitched rig for prop socket check\n";
+        return false;
+    }
+
+    glm::vec3 propGun(0.0f);
+    glm::vec3 rightHand(0.0f);
+    if (!restJointModelPosition(apexRig, "ja_c_propGun", propGun) ||
+        !restJointModelPosition(apexRig, "ja_r_propHand", rightHand))
+    {
+        std::cerr << "Apex stitched rig missing prop socket joints for rest-pose placement check\n";
+        return false;
+    }
+
+    const float distance = glm::length(propGun - rightHand);
+    if (distance > 0.055f) {
+        std::cerr << "Apex prop-gun socket is not driven into the weapon hand rest pose; distance to right prop hand="
+                  << distance << '\n';
+        return false;
+    }
+    return true;
+}
+
+bool requireR301UsesApexSocketScale()
+{
+    const std::filesystem::path configPath =
+        std::filesystem::current_path().parent_path().parent_path() / "src/ecs/components/ViewmodelConfig.hpp";
+    std::ifstream input(configPath);
+    if (!input) {
+        std::cerr << "failed to open " << configPath << '\n';
+        return false;
+    }
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    const std::string text = buffer.str();
+    const size_t thirdPersonParams = text.find("static const std::array<ThirdPersonWeaponParams");
+    if (thirdPersonParams == std::string::npos) {
+        std::cerr << "failed to locate ThirdPersonWeaponParams table in " << configPath << '\n';
+        return false;
+    }
+    const size_t rifleComment = text.find("// Rifle", thirdPersonParams);
+    const size_t rocketComment = text.find("// Rocket", rifleComment == std::string::npos ? 0 : rifleComment);
+    if (rifleComment == std::string::npos || rocketComment == std::string::npos || rocketComment <= rifleComment) {
+        std::cerr << "failed to locate Rifle third-person weapon params in " << configPath << '\n';
+        return false;
+    }
+    const std::string rifleBlock = text.substr(rifleComment, rocketComment - rifleComment);
+    if (rifleBlock.find(".scale = 1.0f") == std::string::npos) {
+        std::cerr << "R301 third-person scale must stay at native game scale 1.0\n";
+        return false;
+    }
+    return true;
+}
 } // namespace
 
 int main()
@@ -178,5 +259,7 @@ int main()
                           "ja_c_propGun"}) &&
          ok;
     ok = requireApexRigScalesFromMixamoBody(legacyOrientationFix) && ok;
+    ok = requireApexPropSocketNearRightHand(legacyOrientationFix) && ok;
+    ok = requireR301UsesApexSocketScale() && ok;
     return ok ? 0 : 1;
 }

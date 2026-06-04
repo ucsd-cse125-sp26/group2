@@ -32,6 +32,16 @@ APEX_ARM_PREFIXES = (
     "def_r_fin",
 )
 APEX_ARM_EXACT = {"ja_l_propHand", "ja_r_propHand"}
+APEX_KEEPALIVE_BONES = {
+    "ja_l_propHand",
+    "ja_r_propHand",
+    "ja_c_propGun",
+    "weapon_bone",
+    "muzzle_flash",
+}
+APEX_PROP_HAND_BONES = ("ja_l_propHand", "ja_r_propHand")
+APEX_PROP_GUN_BONE = "ja_c_propGun"
+APEX_PROP_GUN_TARGET = "APEX_SOCKET_PROP_GUN_AUTHORED"
 
 
 def clear_scene():
@@ -282,6 +292,73 @@ def constrain_armature_to_driver(source_armature, driver_armature):
     return constrained
 
 
+def pose_head_world(armature, bone_name):
+    return armature.matrix_world @ armature.pose.bones[bone_name].head
+
+
+def remove_socket_driver_constraints(pose_bone):
+    for constraint in list(pose_bone.constraints):
+        if constraint.name.startswith("socket_driver_"):
+            pose_bone.constraints.remove(constraint)
+
+
+def ensure_prop_gun_follows_adjusted_hands(source_armature, driver_armature):
+    """Calibrate the weapon socket from adjusted prop-hand sockets."""
+    for name in APEX_PROP_HAND_BONES:
+        pose_bone = source_armature.pose.bones.get(name)
+        if pose_bone is not None:
+            remove_socket_driver_constraints(pose_bone)
+
+    prop_bone = source_armature.pose.bones.get(APEX_PROP_GUN_BONE)
+    if prop_bone is None or APEX_PROP_GUN_BONE not in driver_armature.pose.bones:
+        return {"driven": False, "reason": "missing prop-gun bone"}
+    if any(
+        name not in source_armature.pose.bones or name not in driver_armature.pose.bones
+        for name in APEX_PROP_HAND_BONES
+    ):
+        return {"driven": False, "reason": "missing prop-hand sockets"}
+
+    remove_socket_driver_constraints(prop_bone)
+    bpy.context.view_layer.update()
+
+    driver_mid = (pose_head_world(driver_armature, APEX_PROP_HAND_BONES[0]) +
+                  pose_head_world(driver_armature, APEX_PROP_HAND_BONES[1])) * 0.5
+    target_mid = (pose_head_world(source_armature, APEX_PROP_HAND_BONES[0]) +
+                  pose_head_world(source_armature, APEX_PROP_HAND_BONES[1])) * 0.5
+    driver_prop_offset = pose_head_world(driver_armature, APEX_PROP_GUN_BONE) - driver_mid
+    target_world = target_mid + driver_prop_offset
+
+    target = bpy.data.objects.get(APEX_PROP_GUN_TARGET)
+    if target is None:
+        target = bpy.data.objects.new(APEX_PROP_GUN_TARGET, None)
+        bpy.context.collection.objects.link(target)
+    target.empty_display_type = "ARROWS"
+    target.empty_display_size = 0.08
+    target.location = target_world
+    target.hide_render = True
+
+    loc = prop_bone.constraints.new(type="COPY_LOCATION")
+    loc.name = "socket_driver_location"
+    loc.target = target
+    loc.target_space = "WORLD"
+    loc.owner_space = "WORLD"
+    loc.influence = 1.0
+
+    rot = prop_bone.constraints.new(type="COPY_ROTATION")
+    rot.name = "socket_driver_rotation"
+    rot.target = driver_armature
+    rot.subtarget = APEX_PROP_GUN_BONE
+    rot.target_space = "LOCAL"
+    rot.owner_space = "LOCAL"
+    rot.influence = 1.0
+
+    return {
+        "driven": True,
+        "target": [round(float(v), 5) for v in target_world],
+        "driver_prop_offset": [round(float(v), 5) for v in driver_prop_offset],
+    }
+
+
 def graft_meshes_to_armature(meshes, source_armature, target_armature):
     grafted = []
     for mesh in meshes:
@@ -528,6 +605,7 @@ def main():
     driver_armature.matrix_world = apex_matrix
     source_apex_armature.matrix_world = apex_matrix
     constrained_bones = constrain_armature_to_driver(source_apex_armature, driver_armature)
+    constrained_helpers = ensure_prop_gun_follows_adjusted_hands(source_apex_armature, driver_armature)
     bpy.context.view_layer.update()
     parent_object_to_bone_preserve_world(source_apex_armature, current_armature, "mixamorig:Spine2")
     parent_object_to_bone_preserve_world(driver_armature, current_armature, "mixamorig:Spine2")
@@ -549,6 +627,7 @@ def main():
             "current_clip": current_stats,
             "apex_arm_clip": apex_stats,
             "constrained_bones": len(constrained_bones),
+            "constrained_helpers": constrained_helpers,
             "anchors": anchor_names,
             "weapon": weapon_stats,
         }
