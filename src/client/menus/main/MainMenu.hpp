@@ -60,6 +60,9 @@ public:
     /// @brief Display an error string on the join form (e.g. from a failed connection attempt).
     void setJoinError(const std::string& error);
 
+    /// @brief Show or clear the in-progress connection indicator.
+    void setJoinInProgress(bool joining, const std::string& label = {});
+
     /// @brief Display a modal message on the next main menu screen frame.
     void setPopupMessage(const std::string& message);
 

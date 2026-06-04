@@ -15,6 +15,8 @@ struct JoinMenuState
 {
     std::string serverIp = "127.0.0.1"; ///< Server hostname or IP address entered by the user.
     int serverPort = 2310;              ///< Server port entered by the user.
+    bool joining = false;               ///< True while an outbound join attempt is in progress.
+    std::string joiningLabel;           ///< Target label shown while joining.
 };
 
 /// @brief Output from a single main menu UI frame.

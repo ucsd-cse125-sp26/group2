@@ -21,6 +21,7 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <backends/imgui_impl_sdl3.h>
+#include <chrono>
 #include <imgui.h>
 #include <optional>
 #include <string>
@@ -200,6 +201,7 @@ SDL_AppResult App::iterate()
     const SDL_AppResult result = screen_->iterate();
     if (result != SDL_APP_CONTINUE)
         return result;
+    pollJoinAttempt();
 
     switch (current) {
     case Screen::TitleScreen: {
@@ -248,79 +250,7 @@ SDL_AppResult App::iterate()
             return SDL_APP_SUCCESS;
         }
         if (auto joinRequest = mainMenu->consumeJoinRequest()) {
-            std::string serverIp = joinRequest->serverIp;
-            uint16_t serverPort = joinRequest->serverPort;
-            std::optional<net::UdpSessionTransport::RelayConfig> relayConfig;
-            std::optional<net::UdpSessionTransport::PunchAssist> punchAssist;
-            if (joinRequest->globalServerId != 0 && networkConfig.discovery.enabled) {
-                GlobalDiscoveryClient discovery;
-                net::discovery::ServerInfo punchedServer;
-                std::string punchError;
-                const std::uint32_t clientNonce = net::discovery::randomNonce();
-                net::RelayToken relayToken;
-                if (discovery.requestHolePunch(networkConfig.discovery,
-                                               joinRequest->globalServerId,
-                                               clientNonce,
-                                               punchedServer,
-                                               punchError,
-                                               networkConfig.discovery.connectPunchTimeoutMs,
-                                               &relayToken))
-                {
-                    serverIp = punchedServer.udpHost.empty() ? punchedServer.host : punchedServer.udpHost;
-                    serverPort = punchedServer.udpPort != 0 ? punchedServer.udpPort : punchedServer.gamePort;
-                    SDL_Log("Global punch assist selected public UDP endpoint %s:%u for server %u",
-                            serverIp.c_str(),
-                            serverPort,
-                            joinRequest->globalServerId);
-                    // Keep punching from the real game socket during connect:
-                    // the discovery punch above ran on a throwaway socket, so
-                    // its NAT mapping won't match the session socket. Re-sending
-                    // the PunchRequest (same nonce) from the session socket makes
-                    // the directory re-notify the host with our true game port.
-                    punchAssist = net::UdpSessionTransport::PunchAssist{
-                        .directoryHost = networkConfig.discovery.directoryHost,
-                        .directoryPort = networkConfig.discovery.directoryUdpPort,
-                        .request = net::discovery::encodePunchRequest(
-                            {.serverId = joinRequest->globalServerId, .clientNonce = clientNonce}),
-                        .enabled = true,
-                    };
-                    if (!networkConfig.transport.noRelay) {
-                        relayConfig = net::UdpSessionTransport::RelayConfig{
-                            .host = networkConfig.discovery.directoryHost,
-                            .port = networkConfig.discovery.directoryUdpPort,
-                            .serverId = joinRequest->globalServerId,
-                            .clientNonce = clientNonce,
-                            .relayToken = relayToken,
-                            .enabled = true,
-                        };
-                    } else {
-                        SDL_Log("Global punch assist succeeded for server %u; relay disabled, trying direct UDP only",
-                                joinRequest->globalServerId);
-                    }
-                } else if (!punchError.empty()) {
-                    SDL_Log("Global punch assist failed for server %u: %s",
-                            joinRequest->globalServerId,
-                            punchError.c_str());
-                }
-            }
-            SDL_Log("Attempting to join server at %s:%d...", serverIp.c_str(), serverPort);
-            const ConnectError connectError = client.init(serverIp.c_str(),
-                                                          serverPort,
-                                                          networkConfig.transport,
-                                                          k_joinConnectionTimeoutMs,
-                                                          relayConfig,
-                                                          punchAssist);
-            if (connectError != ConnectError::None) {
-                SDL_Log("Failed to connect to server at %s:%d: %s",
-                        serverIp.c_str(),
-                        serverPort,
-                        connectErrorLogName(connectError));
-                mainMenu->setJoinError(joinErrorMessage(connectError));
-            } else {
-                SDL_Log("Successfully connected to server at %s:%d", serverIp.c_str(), serverPort);
-                currentServerName = joinRequest->serverName.empty() ? serverIp : joinRequest->serverName;
-                transitionTo(Screen::Lobby);
-            }
+            startJoinAttempt(*joinRequest);
         }
 
         if (mainMenu->consumeHostRequest()) {
@@ -636,6 +566,7 @@ void App::cleanup()
     if (screen_) {
         screen_->quit();
     }
+    waitForJoinAttempt();
     if (!userSettingsPath.empty()) {
         user_settings::save(userSettingsPath, userSettings);
     }
@@ -685,6 +616,124 @@ void App::showMainMenuPopupMessage(const std::string& message)
     if (mainMenu) {
         mainMenu->setPopupMessage(message);
     }
+}
+
+void App::startJoinAttempt(const JoinRequest& request)
+{
+    if (joinAttempt_.valid())
+        return;
+
+    joinAttemptLabel_ = request.serverName.empty() ? request.serverIp : request.serverName;
+    if (auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get())) {
+        mainMenu->setJoinInProgress(true, joinAttemptLabel_);
+    }
+
+    NetworkConfig cfg = networkConfig;
+    Client& joinClient = client;
+    joinAttempt_ = std::async(std::launch::async, [request, cfg, &joinClient]() mutable {
+        JoinAttemptResult result{
+            .error = ConnectError::ConnectFailed,
+            .serverIp = request.serverIp,
+            .serverPort = request.serverPort,
+            .serverName = request.serverName,
+        };
+
+        std::optional<net::UdpSessionTransport::RelayConfig> relayConfig;
+        std::optional<net::UdpSessionTransport::PunchAssist> punchAssist;
+        if (request.globalServerId != 0 && cfg.discovery.enabled) {
+            GlobalDiscoveryClient discovery;
+            net::discovery::ServerInfo punchedServer;
+            std::string punchError;
+            const std::uint32_t clientNonce = net::discovery::randomNonce();
+            net::RelayToken relayToken;
+            if (discovery.requestHolePunch(cfg.discovery,
+                                           request.globalServerId,
+                                           clientNonce,
+                                           punchedServer,
+                                           punchError,
+                                           cfg.discovery.connectPunchTimeoutMs,
+                                           &relayToken))
+            {
+                result.serverIp = punchedServer.udpHost.empty() ? punchedServer.host : punchedServer.udpHost;
+                result.serverPort = punchedServer.udpPort != 0 ? punchedServer.udpPort : punchedServer.gamePort;
+                SDL_Log("Global punch assist selected public UDP endpoint %s:%u for server %u",
+                        result.serverIp.c_str(),
+                        result.serverPort,
+                        request.globalServerId);
+                punchAssist = net::UdpSessionTransport::PunchAssist{
+                    .directoryHost = cfg.discovery.directoryHost,
+                    .directoryPort = cfg.discovery.directoryUdpPort,
+                    .request = net::discovery::encodePunchRequest(
+                        {.serverId = request.globalServerId, .clientNonce = clientNonce}),
+                    .enabled = true,
+                };
+                if (!cfg.transport.noRelay) {
+                    relayConfig = net::UdpSessionTransport::RelayConfig{
+                        .host = cfg.discovery.directoryHost,
+                        .port = cfg.discovery.directoryUdpPort,
+                        .serverId = request.globalServerId,
+                        .clientNonce = clientNonce,
+                        .relayToken = relayToken,
+                        .enabled = true,
+                    };
+                } else {
+                    SDL_Log("Global punch assist succeeded for server %u; relay disabled, trying direct UDP only",
+                            request.globalServerId);
+                }
+            } else if (!punchError.empty()) {
+                SDL_Log("Global punch assist failed for server %u: %s", request.globalServerId, punchError.c_str());
+            }
+        }
+
+        SDL_Log("Attempting to join server at %s:%d...", result.serverIp.c_str(), result.serverPort);
+        result.error = joinClient.init(result.serverIp.c_str(),
+                                       result.serverPort,
+                                       cfg.transport,
+                                       k_joinConnectionTimeoutMs,
+                                       relayConfig,
+                                       punchAssist);
+        return result;
+    });
+}
+
+void App::pollJoinAttempt()
+{
+    if (!joinAttempt_.valid())
+        return;
+    if (joinAttempt_.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+        return;
+
+    JoinAttemptResult result = joinAttempt_.get();
+    if (auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get())) {
+        mainMenu->setJoinInProgress(false);
+    }
+    joinAttemptLabel_.clear();
+
+    if (result.error != ConnectError::None) {
+        SDL_Log("Failed to connect to server at %s:%d: %s",
+                result.serverIp.c_str(),
+                result.serverPort,
+                connectErrorLogName(result.error));
+        if (auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get())) {
+            mainMenu->setJoinError(joinErrorMessage(result.error));
+        }
+        return;
+    }
+
+    SDL_Log("Successfully connected to server at %s:%d", result.serverIp.c_str(), result.serverPort);
+    currentServerName = result.serverName.empty() ? result.serverIp : result.serverName;
+    transitionTo(Screen::Lobby);
+}
+
+void App::waitForJoinAttempt()
+{
+    if (!joinAttempt_.valid())
+        return;
+    const JoinAttemptResult result = joinAttempt_.get();
+    if (result.error != ConnectError::None) {
+        SDL_Log("Join attempt ended during shutdown: %s", connectErrorLogName(result.error));
+    }
+    joinAttemptLabel_.clear();
 }
 
 bool App::shutdownHostedServerGracefully()

@@ -260,6 +260,12 @@ void MainMenu::setJoinError(const std::string& error)
     joinError = error;
 }
 
+void MainMenu::setJoinInProgress(bool joining, const std::string& label)
+{
+    joinMenuState.joining = joining;
+    joinMenuState.joiningLabel = joining ? label : std::string{};
+}
+
 void MainMenu::setPopupMessage(const std::string& message)
 {
     popupMessage = message;

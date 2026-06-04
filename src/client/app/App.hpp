@@ -14,9 +14,12 @@
 
 #include <SDL3/SDL.h>
 
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
+
+struct JoinRequest;
 
 /// @brief Root application class; owns shared resources and manages screen transitions.
 ///
@@ -86,6 +89,17 @@ private:
     bool imguiContextOwned = false;                         ///< True once App has created the ImGui context.
     std::optional<PostMatchResult> pendingPostMatchResult_; ///< Result data used to open the post-match screen.
 
+    struct JoinAttemptResult
+    {
+        ConnectError error = ConnectError::ConnectFailed;
+        std::string serverIp;
+        uint16_t serverPort = 0;
+        std::string serverName;
+    };
+
+    std::future<JoinAttemptResult> joinAttempt_; ///< Background direct/global join attempt, if active.
+    std::string joinAttemptLabel_;               ///< Target label displayed by the main menu while joining.
+
     /// @brief Destroy all subsystems without asserting on partial-init state.
     void cleanup();
 
@@ -94,6 +108,15 @@ private:
 
     /// @brief Show a modal message on the active main menu screen, if it is active.
     void showMainMenuPopupMessage(const std::string& message);
+
+    /// @brief Start the non-blocking join worker for a main-menu join request.
+    void startJoinAttempt(const JoinRequest& request);
+
+    /// @brief Apply a completed join worker result, if one is ready.
+    void pollJoinAttempt();
+
+    /// @brief Wait for any active join worker before shutdown.
+    void waitForJoinAttempt();
 
     /// @brief Ask a locally hosted server to shut down before falling back to process termination.
     bool shutdownHostedServerGracefully();

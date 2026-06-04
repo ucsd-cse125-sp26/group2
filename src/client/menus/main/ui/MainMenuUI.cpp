@@ -31,12 +31,22 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
         ImGui::InputInt("Port", &state.serverPort);
 
         const ImVec2 actionSize(0.0f, 32.0f);
-        if (menu_theme::terminalActionRow("JOIN", "connect to entered address", actionSize)) {
+        ImGui::BeginDisabled(state.joining);
+        if (menu_theme::terminalActionRow(
+                state.joining ? "CONNECTING..." : "JOIN", "connect to entered address", actionSize))
+        {
             result.connectClicked = true;
         }
+        ImGui::EndDisabled();
+        if (state.joining) {
+            ImGui::Spacing();
+            ImGui::TextColored(menu_theme::settings().accent, "CONNECTING TO %s", state.joiningLabel.c_str());
+        }
+        ImGui::BeginDisabled(state.joining);
         if (menu_theme::terminalActionRow("HOST", "open local server config", actionSize)) {
             result.hostClicked = true;
         }
+        ImGui::EndDisabled();
         if (!errorMessage.empty()) {
             ImGui::Spacing();
             ImGui::TextColored(menu_theme::settings().dangerActive,
@@ -65,7 +75,7 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImGui::TableSetColumnIndex(3);
                 ImGui::PushID(i);
                 const bool lobbyFull = server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers;
-                ImGui::BeginDisabled(lobbyFull);
+                ImGui::BeginDisabled(lobbyFull || state.joining);
                 if (menu_theme::terminalActionRow("CONNECT", nullptr, ImVec2(0.0f, 0.0f))) {
                     result.localServerIndex = i;
                 }
@@ -77,11 +87,13 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
         }
 
         menu_theme::terminalSection("GLOBAL SERVERS");
+        ImGui::BeginDisabled(state.joining);
         if (menu_theme::terminalActionRow(
                 browserRefreshing ? "REFRESHING..." : "REFRESH", "query directory", ImVec2(0.0f, 30.0f)))
         {
             result.refreshClicked = true;
         }
+        ImGui::EndDisabled();
         if (!browserError.empty()) {
             ImGui::TextColored(
                 menu_theme::settings().textDim, "%.*s", static_cast<int>(browserError.size()), browserError.data());
@@ -114,7 +126,7 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImGui::TableSetColumnIndex(5);
                 ImGui::PushID(i);
                 const bool lobbyFull = server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers;
-                ImGui::BeginDisabled(lobbyFull);
+                ImGui::BeginDisabled(lobbyFull || state.joining);
                 if (menu_theme::terminalActionRow("CONNECT", nullptr, ImVec2(0.0f, 0.0f))) {
                     result.globalServerIndex = i;
                 }
@@ -126,9 +138,11 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
         }
 
         menu_theme::terminalStatusLine("BROWSER ONLINE", "ESC: SYSTEM MENU");
+        ImGui::BeginDisabled(state.joining);
         if (menu_theme::terminalActionRow("BACK", "return to title screen", ImVec2(0.0f, 32.0f))) {
             result.returnToTitleScreenClicked = true;
         }
+        ImGui::EndDisabled();
     }
     menu_theme::endPanel();
 
