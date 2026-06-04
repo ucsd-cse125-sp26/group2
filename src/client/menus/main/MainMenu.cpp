@@ -3,19 +3,13 @@
 
 #include "MainMenu.hpp"
 
-#include "menus/MenuTheme.hpp"
 #include "network/ServerName.hpp"
 #include "ui/MainMenuUI.hpp"
 #include "util/InputCapture.hpp"
 #include "util/LocalAddress.hpp"
 
-#include <SDL3/SDL_keycode.h>
-
 #include <algorithm>
-#include <backends/imgui_impl_sdl3.h>
-#include <backends/imgui_impl_sdlgpu3.h>
 #include <cctype>
-#include <glm/vec3.hpp>
 #include <imgui.h>
 #include <optional>
 #include <string_view>
@@ -187,23 +181,10 @@ bool MainMenu::init(AppContext& ctx, ServerBrowserTab initialTab)
 
 SDL_AppResult MainMenu::event(SDL_Event* event)
 {
-    ImGui_ImplSDL3_ProcessEvent(event);
-    if (event->type == SDL_EVENT_QUIT)
-        return SDL_APP_SUCCESS;
+    if (const SDL_AppResult result = processCommonImguiEvent(event); result != SDL_APP_CONTINUE)
+        return result;
 
-    if (settings != nullptr && event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat && event->key.key == SDLK_ESCAPE)
-    {
-        if (systemMenu_.isOpen()) {
-            systemMenu_.handleEscape(*settings);
-        } else {
-            systemMenu_.open();
-        }
-        return SDL_APP_CONTINUE;
-    }
-
-    if (systemMenu_.consumeEvent(*event))
-        return SDL_APP_CONTINUE;
-
+    handleSystemMenuEvent(event, systemMenu_, settings);
     return SDL_APP_CONTINUE;
 }
 
@@ -230,10 +211,7 @@ SDL_AppResult MainMenu::iterate()
     localDiscoveryClient->poll();
     localServers = localDiscoveryClient->getServers();
 
-    ImGui_ImplSDLGPU3_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
-    menu_theme::drawBackground(renderer ? renderer->getDevice() : nullptr);
+    beginMenuFrame(renderer);
     if (openPopupMessage) {
         ImGui::OpenPopup("Server Notice");
         openPopupMessage = false;
@@ -399,8 +377,7 @@ SDL_AppResult MainMenu::iterate()
         }
     }
 
-    ImGui::Render();
-    renderer->drawFrame(glm::vec3(0.0f), 0.0f, 0.0f, 0.0f);
+    presentMenuFrame(*renderer);
     return SDL_APP_CONTINUE;
 }
 

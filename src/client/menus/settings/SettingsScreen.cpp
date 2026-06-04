@@ -9,9 +9,6 @@
 #include <SDL3/SDL_keycode.h>
 
 #include <algorithm>
-#include <backends/imgui_impl_sdl3.h>
-#include <backends/imgui_impl_sdlgpu3.h>
-#include <glm/vec3.hpp>
 #include <imgui.h>
 
 bool SettingsScreen::init(AppContext& ctx)
@@ -29,9 +26,8 @@ bool SettingsScreen::init(AppContext& ctx)
 
 SDL_AppResult SettingsScreen::event(SDL_Event* event)
 {
-    ImGui_ImplSDL3_ProcessEvent(event);
-    if (event->type == SDL_EVENT_QUIT)
-        return SDL_APP_SUCCESS;
+    if (const SDL_AppResult result = processCommonImguiEvent(event); result != SDL_APP_CONTINUE)
+        return result;
 
     if (settings != nullptr && event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat && event->key.key == SDLK_ESCAPE)
     {
@@ -50,10 +46,7 @@ SDL_AppResult SettingsScreen::iterate()
     if (!renderer || !settings)
         return SDL_APP_FAILURE;
 
-    ImGui_ImplSDLGPU3_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
-    menu_theme::drawBackground(renderer->getDevice());
+    beginMenuFrame(renderer);
 
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     const float uiScale = std::clamp(menu_theme::scaleFor(display), 0.5f, 1.0f);
@@ -70,8 +63,7 @@ SDL_AppResult SettingsScreen::iterate()
     }
     menu_theme::endPanel();
 
-    ImGui::Render();
-    renderer->drawFrame(glm::vec3(0.0f), 0.0f, 0.0f, 0.0f);
+    presentMenuFrame(*renderer);
     return SDL_APP_CONTINUE;
 }
 

@@ -1116,6 +1116,8 @@ add_executable(group2
         src/client/app/AppContext.hpp
         src/client/app/App.hpp
         src/client/app/App.cpp
+        src/client/IScreen.hpp
+        src/client/IScreen.cpp
         src/client/menus/lobby/Lobby.hpp
         src/client/menus/lobby/Lobby.cpp
         src/client/menus/lobby/ui/LobbyUI.hpp

@@ -4,17 +4,11 @@
 
 #include "SDL3/SDL_init.h"
 #include "SDL3/SDL_timer.h"
-#include "menus/MenuTheme.hpp"
 #include "ui/LobbyUI.hpp"
 #include "util/InputCapture.hpp"
 #include "util/LocalAddress.hpp"
 
-#include <SDL3/SDL_keycode.h>
-
 #include <algorithm>
-#include <backends/imgui_impl_sdl3.h>
-#include <backends/imgui_impl_sdlgpu3.h>
-#include <glm/vec3.hpp>
 #include <imgui.h>
 
 bool Lobby::init(AppContext& ctx)
@@ -136,23 +130,10 @@ bool Lobby::init(AppContext& ctx)
 
 SDL_AppResult Lobby::event(SDL_Event* event)
 {
-    ImGui_ImplSDL3_ProcessEvent(event);
-    if (event->type == SDL_EVENT_QUIT)
-        return SDL_APP_SUCCESS;
+    if (const SDL_AppResult result = processCommonImguiEvent(event); result != SDL_APP_CONTINUE)
+        return result;
 
-    if (settings != nullptr && event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat && event->key.key == SDLK_ESCAPE)
-    {
-        if (systemMenu_.isOpen()) {
-            systemMenu_.handleEscape(*settings);
-        } else {
-            systemMenu_.open();
-        }
-        return SDL_APP_CONTINUE;
-    }
-
-    if (systemMenu_.consumeEvent(*event))
-        return SDL_APP_CONTINUE;
-
+    handleSystemMenuEvent(event, systemMenu_, settings);
     return SDL_APP_CONTINUE;
 }
 
@@ -165,10 +146,7 @@ SDL_AppResult Lobby::iterate()
         return SDL_APP_CONTINUE;
     }
 
-    ImGui_ImplSDLGPU3_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
-    menu_theme::drawBackground(renderer ? renderer->getDevice() : nullptr);
+    beginMenuFrame(renderer);
 
     updateStartCountdown();
 
@@ -214,10 +192,8 @@ SDL_AppResult Lobby::iterate()
         }
     }
 
-    ImGui::Render();
-
     // Default camera: lobby has no scene, so the renderer just draws sky + ImGui overlay.
-    renderer->drawFrame(glm::vec3(0.0f), 0.0f, 0.0f, 0.0f);
+    presentMenuFrame(*renderer);
     return SDL_APP_CONTINUE;
 }
 
