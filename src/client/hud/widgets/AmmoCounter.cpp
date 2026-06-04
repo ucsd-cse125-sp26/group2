@@ -13,8 +13,8 @@
 AmmoCounter::AmmoCounter()
 {
     anchor = HudAnchor::BottomRight;
-    offsetX = -80.f;
-    offsetY = -60.f;
+    offsetX = -50.f;
+    offsetY = -67.f;
     width = panelWidth;
     height = panelHeight;
 }

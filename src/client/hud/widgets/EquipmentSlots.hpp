@@ -32,10 +32,10 @@ struct EquipmentSlots : HudWidget
     float iconFrameWidth = 92.f;
     float iconFrameHeight = 87.f;
     float abilityIconSize = 54.f;
-    float barWidth = 235.f;
+    float barWidth = 220.f;
     float barHeight = 87.f;
     float iconBarGap = 10.f;
-    float centerGap = 12.f;
+    float centerGap = 0.f;
 
     std::array<AbilityElementTuning, 2> abilityElements{};
 

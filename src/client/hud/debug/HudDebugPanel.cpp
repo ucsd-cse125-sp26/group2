@@ -11,6 +11,7 @@
 #include "hud/widgets/DamageNumberWidget.hpp"
 #include "hud/widgets/EnemyWorldHealthBar.hpp"
 #include "hud/widgets/EquipmentSlots.hpp"
+#include "hud/widgets/EquippedWeaponsWidget.hpp"
 #include "hud/widgets/GravityIndicator.hpp"
 #include "hud/widgets/GrenadeSlotsWidget.hpp"
 #include "hud/widgets/HealthArmorBar.hpp"
@@ -24,6 +25,7 @@
 #include "hud/widgets/RailgunScopeWidget.hpp"
 #include "hud/widgets/RoundTimer.hpp"
 #include "hud/widgets/Scoreboard.hpp"
+#include "hud/widgets/ScreenDecalWidget.hpp"
 #include "hud/widgets/TeamStatusBar.hpp"
 #include "hud/widgets/VignetteWidget.hpp"
 
@@ -87,6 +89,8 @@ const char* widgetName(const HudWidget* widget)
         return "Enemy World Health Bar";
     if (dynamic_cast<const EquipmentSlots*>(widget))
         return "Ability Slots";
+    if (dynamic_cast<const EquippedWeaponsWidget*>(widget))
+        return "Equipped Weapons";
     if (dynamic_cast<const GravityIndicator*>(widget))
         return "Gravity Indicator";
     if (dynamic_cast<const GrenadeSlotsWidget*>(widget))
@@ -113,6 +117,10 @@ const char* widgetName(const HudWidget* widget)
         return "Round Timer";
     if (dynamic_cast<const Scoreboard*>(widget))
         return "Scoreboard";
+    if (dynamic_cast<const TopDecalWidget*>(widget))
+        return "Top Decal";
+    if (dynamic_cast<const BottomDecalWidget*>(widget))
+        return "Bottom Decal";
     if (dynamic_cast<const TeamStatusBar*>(widget))
         return "Team Status Bar";
     if (dynamic_cast<const VignetteWidget*>(widget))
@@ -215,6 +223,29 @@ void writeEquipmentElementParams(std::ostream& out,
     writeBoolParam(out, first, name + "BarFlipY", element.flipBarY);
 }
 
+void writeEquippedWeaponSvgTuningParam(std::ostream& out,
+                                       bool& first,
+                                       std::string_view prefix,
+                                       const EquippedWeaponsWidget::SvgPartTuning& tuning)
+{
+    const std::string name(prefix);
+    writeFloatParam(out, first, name + "Scale", tuning.scale);
+    writeFloatParam(out, first, name + "OffsetX", tuning.offsetX);
+    writeFloatParam(out, first, name + "OffsetY", tuning.offsetY);
+    writeFloatParam(out, first, name + "StretchX", tuning.stretchX);
+    writeFloatParam(out, first, name + "StretchY", tuning.stretchY);
+}
+
+void writeEquippedWeaponSlotParams(std::ostream& out,
+                                   bool& first,
+                                   std::string_view prefix,
+                                   const EquippedWeaponsWidget::WeaponSlotTuning& slot)
+{
+    const std::string name(prefix);
+    writeEquippedWeaponSvgTuningParam(out, first, name + "Frame", slot.frame);
+    writeEquippedWeaponSvgTuningParam(out, first, name + "Icon", slot.icon);
+}
+
 void editEquipmentSvgTuning(const char* label, EquipmentSlots::SvgComponentTuning& tuning)
 {
     if (!ImGui::TreeNode(label))
@@ -225,6 +256,29 @@ void editEquipmentSvgTuning(const char* label, EquipmentSlots::SvgComponentTunin
     editFloat("Offset Y", tuning.offsetY, 0.5f, -2000.0f, 2000.0f);
     editFloat("Stretch X", tuning.stretchX, 0.01f, 0.01f, 8.0f);
     editFloat("Stretch Y", tuning.stretchY, 0.01f, 0.01f, 8.0f);
+    ImGui::TreePop();
+}
+
+void editEquippedWeaponSvgTuning(const char* label, EquippedWeaponsWidget::SvgPartTuning& tuning)
+{
+    if (!ImGui::TreeNode(label))
+        return;
+
+    editFloat("Scale", tuning.scale, 0.01f, 0.01f, 8.0f);
+    editFloat("Offset X", tuning.offsetX, 0.5f, -2000.0f, 2000.0f);
+    editFloat("Offset Y", tuning.offsetY, 0.5f, -2000.0f, 2000.0f);
+    editFloat("Stretch X", tuning.stretchX, 0.01f, 0.01f, 8.0f);
+    editFloat("Stretch Y", tuning.stretchY, 0.01f, 0.01f, 8.0f);
+    ImGui::TreePop();
+}
+
+void editEquippedWeaponSlot(const char* label, EquippedWeaponsWidget::WeaponSlotTuning& slot)
+{
+    if (!ImGui::TreeNode(label))
+        return;
+
+    editEquippedWeaponSvgTuning("Frame SVG", slot.frame);
+    editEquippedWeaponSvgTuning("Weapon Icon SVG", slot.icon);
     ImGui::TreePop();
 }
 
@@ -296,6 +350,14 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "centerGap", equipment->centerGap);
         writeEquipmentElementParams(out, first, "left", equipment->abilityElements[0]);
         writeEquipmentElementParams(out, first, "right", equipment->abilityElements[1]);
+    } else if (const auto* equipped = dynamic_cast<const EquippedWeaponsWidget*>(&widget)) {
+        writeFloatParam(out, first, "frameWidth", equipped->frameWidth);
+        writeFloatParam(out, first, "frameHeight", equipped->frameHeight);
+        writeFloatParam(out, first, "frameGap", equipped->frameGap);
+        writeFloatParam(out, first, "weaponIconWidth", equipped->weaponIconWidth);
+        writeFloatParam(out, first, "weaponIconHeight", equipped->weaponIconHeight);
+        writeEquippedWeaponSlotParams(out, first, "primary", equipped->slots[0]);
+        writeEquippedWeaponSlotParams(out, first, "secondary", equipped->slots[1]);
     } else if (const auto* gravity = dynamic_cast<const GravityIndicator*>(&widget)) {
         writeFloatParam(out, first, "diskSize", gravity->diskSize);
     } else if (const auto* grenades = dynamic_cast<const GrenadeSlotsWidget*>(&widget)) {
@@ -374,6 +436,15 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "headerFontSize", scoreboard->headerFontSize);
         writeFloatParam(out, first, "rowFontSize", scoreboard->rowFontSize);
         writeFloatParam(out, first, "rowHeight", scoreboard->rowHeight);
+    } else if (const auto* decal = dynamic_cast<const ScreenDecalWidget*>(&widget)) {
+        writeFloatParam(out, first, "decalWidth", decal->decalWidth);
+        writeFloatParam(out, first, "decalHeight", decal->decalHeight);
+        writeFloatParam(out, first, "decalScale", decal->decalScale);
+        writeFloatParam(out, first, "decalOffsetX", decal->decalOffsetX);
+        writeFloatParam(out, first, "decalOffsetY", decal->decalOffsetY);
+        writeFloatParam(out, first, "decalStretchX", decal->decalStretchX);
+        writeFloatParam(out, first, "decalStretchY", decal->decalStretchY);
+        writeFloatParam(out, first, "decalRotationDeg", decal->decalRotationDeg);
     } else if (const auto* team = dynamic_cast<const TeamStatusBar*>(&widget)) {
         writeFloatParam(out, first, "indicatorSize", team->indicatorSize);
         writeFloatParam(out, first, "indicatorSpacing", team->indicatorSpacing);
@@ -506,6 +577,14 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Center Gap", equipment->centerGap, 0.5f, 0.0f, 200.0f);
         editEquipmentElement("Left Ability SVGs", equipment->abilityElements[0]);
         editEquipmentElement("Right Ability SVGs", equipment->abilityElements[1]);
+    } else if (auto* equipped = dynamic_cast<EquippedWeaponsWidget*>(&widget)) {
+        editFloat("Frame Width", equipped->frameWidth, 1.0f, 8.0f, 800.0f);
+        editFloat("Frame Height", equipped->frameHeight, 1.0f, 8.0f, 400.0f);
+        editFloat("Frame Gap", equipped->frameGap, 0.5f, 0.0f, 120.0f);
+        editFloat("Weapon Icon Width", equipped->weaponIconWidth, 1.0f, 4.0f, 600.0f);
+        editFloat("Weapon Icon Height", equipped->weaponIconHeight, 1.0f, 4.0f, 300.0f);
+        editEquippedWeaponSlot("Primary Slot SVGs", equipped->slots[0]);
+        editEquippedWeaponSlot("Secondary Slot SVGs", equipped->slots[1]);
     } else if (auto* gravity = dynamic_cast<GravityIndicator*>(&widget)) {
         editFloat("Disk Size", gravity->diskSize, 1.0f, 4.0f, 240.0f);
     } else if (auto* grenades = dynamic_cast<GrenadeSlotsWidget*>(&widget)) {
@@ -584,6 +663,15 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Header Font Size", scoreboard->headerFontSize, 0.5f, 4.0f, 120.0f);
         editFloat("Row Font Size", scoreboard->rowFontSize, 0.5f, 4.0f, 120.0f);
         editFloat("Row Height", scoreboard->rowHeight, 0.5f, 4.0f, 160.0f);
+    } else if (auto* decal = dynamic_cast<ScreenDecalWidget*>(&widget)) {
+        editFloat("Decal Width", decal->decalWidth, 1.0f, 8.0f, 4000.0f);
+        editFloat("Decal Height", decal->decalHeight, 1.0f, 8.0f, 1000.0f);
+        editFloat("Decal Scale", decal->decalScale, 0.01f, 0.01f, 8.0f);
+        editFloat("Decal Offset X", decal->decalOffsetX, 0.5f, -2000.0f, 2000.0f);
+        editFloat("Decal Offset Y", decal->decalOffsetY, 0.5f, -2000.0f, 2000.0f);
+        editFloat("Decal Stretch X", decal->decalStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("Decal Stretch Y", decal->decalStretchY, 0.01f, 0.01f, 8.0f);
+        editFloat("Decal Rotation", decal->decalRotationDeg, 0.5f, -180.0f, 180.0f);
     } else if (auto* team = dynamic_cast<TeamStatusBar*>(&widget)) {
         editFloat("Indicator Size", team->indicatorSize, 0.5f, 2.0f, 120.0f);
         editFloat("Indicator Spacing", team->indicatorSpacing, 0.5f, 0.0f, 80.0f);
