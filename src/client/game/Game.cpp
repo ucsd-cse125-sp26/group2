@@ -5718,13 +5718,13 @@ SDL_AppResult Game::iterate()
                 ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
                                    "Spine2 not found in rig — weapon hold disabled.");
 
-            ImGui::SeparatorText("Arm FK (pitch, yaw degrees per bone)");
+            ImGui::SeparatorText("Arm FK (pitch, yaw, roll degrees per bone)");
             auto editArm = [&](const char* label, ArmHoldPose& arm) {
                 if (!ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen))
                     return;
                 ImGui::PushID(label);
                 for (std::size_t i = 0; i < kArmHoldBoneCount; ++i)
-                    ImGui::DragFloat2(
+                    ImGui::DragFloat3(
                         kArmHoldBoneDisplayNames[i], &arm.boneAngles[i].x, 1.0f, -180.0f, 180.0f, "%.1f");
                 static const char* k_fingerNames[kGripPoseFingerCount] = {
                     "Thumb", "Index", "Middle", "Ring", "Pinky"};
@@ -5735,7 +5735,7 @@ SDL_AppResult Game::iterate()
                         if (ImGui::TreeNode(k_fingerNames[f])) {
                             for (std::size_t j = 0; j < kGripPoseBonesPerFinger; ++j) {
                                 ImGui::PushID(static_cast<int>(j));
-                                ImGui::DragFloat2(k_jointNames[j],
+                                ImGui::DragFloat3(k_jointNames[j],
                                                   &arm.fingerAngles[GripPose::index(f, j)].x,
                                                   1.0f,
                                                   -180.0f,
@@ -5766,13 +5766,16 @@ SDL_AppResult Game::iterate()
             }
             ImGui::SameLine();
             if (ImGui::Button("Mirror R -> L")) {
-                // Yaw flips sign across the body midline; pitch keeps its sign.
+                // Yaw + roll flip sign across the body midline; pitch keeps its sign.
                 hold.leftArm.boneAngles = hold.rightArm.boneAngles;
-                for (auto& a : hold.leftArm.boneAngles)
+                for (auto& a : hold.leftArm.boneAngles) {
                     a.y = -a.y;
-                for (std::size_t i = 0; i < kGripPoseJointCount; ++i)
-                    hold.leftArm.fingerAngles[i] =
-                        glm::vec2{hold.rightArm.fingerAngles[i].x, -hold.rightArm.fingerAngles[i].y};
+                    a.z = -a.z;
+                }
+                for (std::size_t i = 0; i < kGripPoseJointCount; ++i) {
+                    const glm::vec3 r = hold.rightArm.fingerAngles[i];
+                    hold.leftArm.fingerAngles[i] = glm::vec3{r.x, -r.y, -r.z};
+                }
             }
             ImGui::SameLine();
             if (ImGui::Button("Reload TOML")) {
