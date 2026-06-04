@@ -1,0 +1,184 @@
+# ---------------------------------------------------------------------------- #
+#  Repackage Release Assets                                                     #
+#                                                                              #
+#  Manually-triggered workflow (Actions → "Repackage Release Assets" →         #
+#  "Run workflow"). Takes an existing release's platform zips, swaps in the     #
+#  freshly-rsync'd assets from the CSE125 server, and publishes a NEW release   #
+#  with the updated assets — WITHOUT recompiling. Useful when only the shared   #
+#  art/audio assets changed and the binaries are unchanged.                     #
+#                                                                              #
+#  The release zips are laid out as: group2-<platform>/{group2,server,         #
+#  shaders/,shaders-new/,config.toml,assets/}. Only assets/ is replaced.       #
+# ---------------------------------------------------------------------------- #
+name: Repackage Release Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: "Release tag to repackage (blank = latest release)."
+        required: false
+        type: string
+      new_version:
+        description: "New release tag, e.g. v0.19.4 (blank = auto-bump patch)."
+        required: false
+        type: string
+
+# Avoid two repackage runs racing to create the same tag.
+concurrency:
+  group: repackage-assets
+  cancel-in-progress: false
+
+jobs:
+  repackage:
+    name: Repackage with updated assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      # ----------------------------------------------------------------- #
+      #  Resolve which release to repackage (input, or the latest).        #
+      # ----------------------------------------------------------------- #
+      - name: Resolve source release
+        id: src
+        run: |
+          SRC="${{ github.event.inputs.source_tag }}"
+          if [[ -z "$SRC" ]]; then
+            SRC="$(gh release view --json tagName -q .tagName)"
+          fi
+          if [[ -z "$SRC" ]]; then
+            echo "::error::No source release found to repackage."
+            exit 1
+          fi
+          echo "tag=${SRC}" >> "$GITHUB_OUTPUT"
+          echo "### Source release: \`${SRC}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # ----------------------------------------------------------------- #
+      #  Compute the new version tag (explicit input, or auto patch-bump   #
+      #  from the latest existing version tag — same scheme as ci.yml).    #
+      # ----------------------------------------------------------------- #
+      - name: Compute new version
+        id: version
+        run: |
+          NEW="${{ github.event.inputs.new_version }}"
+          if [[ -z "$NEW" ]]; then
+            LATEST="$(gh release list --json tagName -q '.[].tagName' \
+              | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)"
+            if [[ -z "$LATEST" ]]; then
+              echo "::error::Could not determine latest version tag for auto-bump."
+              exit 1
+            fi
+            VER="${LATEST#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
+            NEW="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+          fi
+          # Normalise to a leading 'v'.
+          [[ "$NEW" == v* ]] || NEW="v${NEW}"
+          if gh release view "$NEW" >/dev/null 2>&1; then
+            echo "::error::Release ${NEW} already exists — pass a different new_version."
+            exit 1
+          fi
+          echo "tag=${NEW}" >> "$GITHUB_OUTPUT"
+          echo "### New release: \`${NEW}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # ----------------------------------------------------------------- #
+      #  Pull the up-to-date shared assets from the CSE125 server.         #
+      #  (Identical to ci.yml's fetch-assets job.)                         #
+      # ----------------------------------------------------------------- #
+      - name: Set up SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p 222 cse125.ucsd.edu >> ~/.ssh/known_hosts
+
+      - name: Fetch updated assets via rsync
+        run: |
+          mkdir -p fresh-assets
+          rsync -avz \
+            -e "ssh -i ~/.ssh/deploy_key -p 222 -o StrictHostKeyChecking=yes" \
+            dkatulevskiy@cse125.ucsd.edu:/home/dkatulevskiy/group2-assets/ \
+            ./fresh-assets/
+          echo "Asset size: $(du -sh fresh-assets | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      # ----------------------------------------------------------------- #
+      #  Download the source release's platform zips.                      #
+      # ----------------------------------------------------------------- #
+      - name: Download source release archives
+        run: |
+          mkdir -p downloaded
+          gh release download "${{ steps.src.outputs.tag }}" \
+            --dir downloaded --pattern '*.zip'
+          echo "Downloaded:" >> "$GITHUB_STEP_SUMMARY"
+          ls -1 downloaded >> "$GITHUB_STEP_SUMMARY"
+
+      # ----------------------------------------------------------------- #
+      #  For each zip: extract, replace assets/, re-zip. The zip's single  #
+      #  top-level folder is named after the zip (e.g. group2-macos).      #
+      # ----------------------------------------------------------------- #
+      - name: Repackage archives with updated assets
+        run: |
+          set -euo pipefail
+          mkdir -p repacked
+          shopt -s nullglob
+          zips=(downloaded/*.zip)
+          if (( ${#zips[@]} == 0 )); then
+            echo "::error::Source release ${{ steps.src.outputs.tag }} has no .zip archives."
+            exit 1
+          fi
+          for zip in "${zips[@]}"; do
+            base="$(basename "$zip" .zip)"   # e.g. group2-linux-x86_64
+            echo "::group::Repackaging ${base}"
+            rm -rf extract && mkdir -p extract
+            unzip -q "$zip" -d extract
+
+            # The archive contains exactly one top-level dir; prefer the one
+            # matching the zip name, else fall back to the sole entry.
+            top="extract/${base}"
+            if [[ ! -d "$top" ]]; then
+              top="$(find extract -maxdepth 1 -mindepth 1 -type d | head -n1)"
+            fi
+            if [[ -z "$top" || ! -d "$top" ]]; then
+              echo "::error::Could not find package root inside ${zip}"
+              exit 1
+            fi
+
+            # Swap in the fresh assets.
+            rm -rf "${top}/assets"
+            cp -r fresh-assets "${top}/assets"
+
+            # Re-zip preserving the top-level folder layout.
+            ( cd extract && zip -qr "../repacked/${base}.zip" "$(basename "$top")" )
+            echo "::endgroup::"
+          done
+          echo "Repacked archives:" >> "$GITHUB_STEP_SUMMARY"
+          ls -lh repacked >> "$GITHUB_STEP_SUMMARY"
+
+      # ----------------------------------------------------------------- #
+      #  Publish the new release with the repackaged archives.             #
+      # ----------------------------------------------------------------- #
+      - name: Create new release
+        env:
+          SRC_TAG: ${{ steps.src.outputs.tag }}
+          NEW_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          DATE="$(date -u +%Y-%m-%d)"
+          cat > notes.md <<EOF
+          Repackaged from [\`${SRC_TAG}\`](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${SRC_TAG}) with updated assets rsync'd from the CSE125 server.
+
+          The binaries are identical to \`${SRC_TAG}\`; only the bundled \`assets/\` were refreshed.
+          EOF
+
+          gh release create "$NEW_TAG" \
+            --title "${NEW_TAG} (${DATE}) — assets refresh" \
+            --notes-file notes.md \
+            --latest \
+            repacked/*.zip
+
+          echo "### Published [\`${NEW_TAG}\`](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${NEW_TAG})" >> "$GITHUB_STEP_SUMMARY"
