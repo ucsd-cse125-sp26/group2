@@ -170,6 +170,11 @@ static bool isWeaponMountPointName(const std::string& nodeName)
     return nodeName.rfind("ik_", 0) == 0 || nodeName.rfind("socket_", 0) == 0 || nodeName == "is_muzzle";
 }
 
+static bool isCollisionOnlyName(const std::string& name)
+{
+    return name.rfind("COL_", 0) == 0;
+}
+
 glm::quat rotationFromTransform(const glm::mat4& transform)
 {
     glm::mat3 basis(transform);
@@ -258,18 +263,20 @@ bool AssetLoader::loadModel(const ModelIdInt id,
         const uint32_t currentModelNodeIndex = nodeTraversalStack.top();
         nodeTraversalStack.pop();
 
-        // // Skip if collider or gameplay entity
-        if (hasMetadataKey(currentNode, "entity_type") || hasMetadataKey(currentNode, "is_collision")) {
-            continue;
-        }
-
         glm::mat4 parentTransform = transformStack.top();
         transformStack.pop();
+
+        const std::string nodeName(currentNode.mName.C_Str());
+
+        // // Skip if collider or gameplay entity
+        if (hasMetadataKey(currentNode, "entity_type") || hasMetadataKey(currentNode, "is_collision") ||
+            isCollisionOnlyName(nodeName)) {
+            continue;
+        }
 
         glm::mat4 localTransform = glmFromAiTransform(currentNode.mTransformation);
         glm::mat4 nodeModelTransform = parentTransform * localTransform;
 
-        const std::string nodeName(currentNode.mName.C_Str());
         const glm::vec3 nodeModelPos = glm::vec3(nodeModelTransform * glm::vec4(0, 0, 0, 1));
         if (const auto lightIt = pointLightsByNodeName.find(nodeName); lightIt != pointLightsByNodeName.end()) {
             const aiLight& light = *lightIt->second;
@@ -417,6 +424,12 @@ void AssetLoader::pushAiNodeMeshesToModelElements(const std::string& meshNameSpa
         uint32_t mesh_j_IdAi = nodeAi.mMeshes[j];
 
         const aiMesh& mesh_j_Ai = *sceneAi.mMeshes[mesh_j_IdAi];
+        if (isCollisionOnlyName(nodeNameStr) || isCollisionOnlyName(mesh_j_Ai.mName.C_Str())) {
+            SDL_Log("AssetLoader: skipping collision-only render mesh node='%s' mesh='%s'",
+                    nodeNameStr.c_str(),
+                    mesh_j_Ai.mName.C_Str());
+            continue;
+        }
 
         MaterialIdInt matId =
             Asset::getMaterialIdFromString(meshNameSpace + "material_" + std::to_string(mesh_j_Ai.mMaterialIndex));
