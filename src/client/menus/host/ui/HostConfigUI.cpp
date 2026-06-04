@@ -17,7 +17,7 @@ namespace
 constexpr float k_labelColumnWidth = 190.0f;
 }
 
-HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
+HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs, bool showBackRow)
 {
     HostConfigResult result{};
     HostConfigState& draft = inputs.draft;
@@ -36,9 +36,10 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
     menu_theme::terminalStatusLine(statusLeft, inputs.hasUnsavedServerChanges ? "UNSAVED CHANGES" : "CONFIG CLEAN");
 
     const float spacingY = ImGui::GetStyle().ItemSpacing.y;
-    const int footerRows = 2;
-    const float footerHeight = static_cast<float>(footerRows) * 32.0f + spacingY * static_cast<float>(footerRows + 2) +
-                               ImGui::GetTextLineHeightWithSpacing();
+    const int footerRows = showBackRow ? 2 : 1;
+    const float trailingStatusHeight = showBackRow ? ImGui::GetTextLineHeightWithSpacing() : 0.0f;
+    const float footerHeight =
+        static_cast<float>(footerRows) * 32.0f + spacingY * static_cast<float>(footerRows + 2) + trailingStatusHeight;
 
     menu_theme::beginScrollBody("##HostConfigBody", footerHeight);
     menu_theme::terminalSection("SETTINGS");
@@ -185,12 +186,14 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs)
         ImGui::EndDisabled();
     }
 
-    menu_theme::terminalStatusLine("HOST CONFIG READY", "ARROWS / ENTER");
-    ImGui::BeginDisabled(inputs.serverRunning);
-    if (menu_theme::terminalActionRow("BACK", "return to main menu", ImVec2(0.0f, btnHeight))) {
-        result.backToMainMenuClicked = true;
+    if (showBackRow) {
+        menu_theme::terminalStatusLine("HOST CONFIG READY", "ARROWS / ENTER");
+        ImGui::BeginDisabled(inputs.serverRunning);
+        if (menu_theme::terminalActionRow("BACK", "return to main menu", ImVec2(0.0f, btnHeight))) {
+            result.backToMainMenuClicked = true;
+        }
+        ImGui::EndDisabled();
     }
-    ImGui::EndDisabled();
 
     return result;
 }

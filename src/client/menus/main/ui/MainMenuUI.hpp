@@ -16,6 +16,7 @@ enum class ServerBrowserTab
 {
     LocalListing,
     GlobalListing,
+    DirectConnect,
     HostConfig,
 };
 

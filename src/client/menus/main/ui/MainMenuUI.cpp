@@ -17,7 +17,7 @@ void drawDirectConnect(JoinMenuState& state,
                        JoinMenuResult& result,
                        bool directConnectDisabled)
 {
-    menu_theme::terminalSection("DIRECT ADDRESS");
+    menu_theme::terminalSection("DIRECT CONNECT");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
     ImGui::InputTextWithHint("##ServerAddress", "Input Server Address", &state.serverAddress);
 
@@ -157,50 +157,92 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
 {
     JoinMenuResult result{};
 
-    if (menu_theme::beginPanel(
-            "Server Browser", menu_theme::k_frontendPanelBaseWidth, menu_theme::k_frontendPanelBaseHeight, true))
+    if (menu_theme::beginPanel("Server Browser",
+                               menu_theme::k_frontendPanelBaseWidth,
+                               menu_theme::k_frontendPanelBaseHeight,
+                               true,
+                               ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
     {
         menu_theme::terminalStatusLine("NETSCAN READY", "SELECT TAB OR TYPE ADDRESS");
         if (ImGui::BeginTabBar("ServerBrowserTabs")) {
             ImGuiTabItemFlags localFlags = ImGuiTabItemFlags_None;
             ImGuiTabItemFlags globalFlags = ImGuiTabItemFlags_None;
+            ImGuiTabItemFlags directFlags = ImGuiTabItemFlags_None;
             ImGuiTabItemFlags hostFlags = ImGuiTabItemFlags_None;
             if (state.applyInitialTabSelection && state.activeTab == ServerBrowserTab::LocalListing)
                 localFlags = ImGuiTabItemFlags_SetSelected;
             if (state.applyInitialTabSelection && state.activeTab == ServerBrowserTab::GlobalListing)
                 globalFlags = ImGuiTabItemFlags_SetSelected;
+            if (state.applyInitialTabSelection && state.activeTab == ServerBrowserTab::DirectConnect)
+                directFlags = ImGuiTabItemFlags_SetSelected;
             if (state.applyInitialTabSelection && state.activeTab == ServerBrowserTab::HostConfig)
                 hostFlags = ImGuiTabItemFlags_SetSelected;
             state.applyInitialTabSelection = false;
 
+            // Reserve room below the tab for the BACK action row + its status line,
+            // so the list tabs scroll internally and BACK stays pinned at the panel bottom.
+            const float spacingY = ImGui::GetStyle().ItemSpacing.y;
+            const float backRowHeight = std::max(32.0f, ImGui::GetFontSize() + 16.0f);
+            const float footerReserve = backRowHeight + ImGui::GetTextLineHeightWithSpacing() + spacingY * 3.0f;
+
             if (ImGui::BeginTabItem("Local", nullptr, localFlags)) {
                 state.activeTab = ServerBrowserTab::LocalListing;
-                drawLocalServers(state, localServers, result, directConnectDisabled);
-                drawDirectConnect(state, errorMessage, result, directConnectDisabled);
+                if (ImGui::BeginChild("##LocalScroll",
+                                      ImVec2(0.0f, -footerReserve),
+                                      ImGuiChildFlags_None,
+                                      ImGuiWindowFlags_NavFlattened))
+                {
+                    drawLocalServers(state, localServers, result, directConnectDisabled);
+                }
+                ImGui::EndChild();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Global", nullptr, globalFlags)) {
                 state.activeTab = ServerBrowserTab::GlobalListing;
-                drawGlobalServers(state, globalServers, browserError, browserRefreshing, result, directConnectDisabled);
-                drawDirectConnect(state, errorMessage, result, directConnectDisabled);
+                if (ImGui::BeginChild("##GlobalScroll",
+                                      ImVec2(0.0f, -footerReserve),
+                                      ImGuiChildFlags_None,
+                                      ImGuiWindowFlags_NavFlattened))
+                {
+                    drawGlobalServers(
+                        state, globalServers, browserError, browserRefreshing, result, directConnectDisabled);
+                }
+                ImGui::EndChild();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Direct", nullptr, directFlags)) {
+                state.activeTab = ServerBrowserTab::DirectConnect;
+                if (ImGui::BeginChild("##DirectScroll",
+                                      ImVec2(0.0f, -footerReserve),
+                                      ImGuiChildFlags_None,
+                                      ImGuiWindowFlags_NavFlattened))
+                {
+                    drawDirectConnect(state, errorMessage, result, directConnectDisabled);
+                }
+                ImGui::EndChild();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Host", nullptr, hostFlags)) {
                 state.activeTab = ServerBrowserTab::HostConfig;
-                result.hostConfig = host_config_ui::buildHostConfigContents(hostInputs);
+                if (ImGui::BeginChild("##HostScroll",
+                                      ImVec2(0.0f, -footerReserve),
+                                      ImGuiChildFlags_None,
+                                      ImGuiWindowFlags_NavFlattened))
+                {
+                    result.hostConfig = host_config_ui::buildHostConfigContents(hostInputs, false);
+                }
+                ImGui::EndChild();
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
         }
 
-        if (state.activeTab != ServerBrowserTab::HostConfig) {
-            menu_theme::terminalStatusLine("BROWSER ONLINE", "ESC: SYSTEM MENU");
-            ImGui::BeginDisabled(state.joining);
-            if (menu_theme::terminalActionRow("BACK", "return to title screen", ImVec2(0.0f, 32.0f))) {
-                result.returnToTitleScreenClicked = true;
-            }
-            ImGui::EndDisabled();
+        menu_theme::terminalStatusLine("BROWSER ONLINE", "ESC: SYSTEM MENU");
+        ImGui::BeginDisabled(state.joining);
+        if (menu_theme::terminalActionRow("BACK", "return to title screen", ImVec2(0.0f, 32.0f))) {
+            result.returnToTitleScreenClicked = true;
         }
+        ImGui::EndDisabled();
     }
     menu_theme::endPanel();
 
