@@ -30,6 +30,8 @@
 #include "widgets/ShotgunPelletWidget.hpp"
 #include "widgets/VignetteWidget.hpp"
 
+#include <algorithm>
+
 bool Hud::init(SDL_GPUDevice* device,
                SDL_GPUShaderFormat shaderFormat,
                const SdfAtlas& sdfAtlas,
@@ -113,6 +115,19 @@ void Hud::render()
         context_.tintVertices(widgetStartVertex, w->tint);
 
         w->visible = originalVisible;
+    }
+
+    if (debugShowAlignmentBorder_) {
+        const float s = screenH_ / 1080.f;
+        const float thickness = std::max(1.f, 2.f * s);
+        const float maxOffsetX = std::max(0.f, screenW_ * 0.5f - thickness);
+        const float maxOffsetY = std::max(0.f, screenH_ * 0.5f - thickness);
+        const float offsetX = std::clamp(debugAlignmentBorderOffsetX_ * s, 0.f, maxOffsetX);
+        const float offsetY = std::clamp(debugAlignmentBorderOffsetY_ * s, 0.f, maxOffsetY);
+        const float borderW = screenW_ - offsetX * 2.f;
+        const float borderH = screenH_ - offsetY * 2.f;
+
+        context_.rectOutline(offsetX, offsetY, borderW, borderH, thickness, {0.22f, 0.9f, 1.f, 0.85f});
     }
 
     // Flush any remaining unflushed vertices (e.g. minimap drawn after last clip pop).
