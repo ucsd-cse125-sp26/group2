@@ -8,6 +8,7 @@
 #include "host/HostedServer.hpp"
 #include "menus/MenuTheme.hpp"
 #include "menus/host/HostConfig.hpp"
+#include "menus/loading/LoadingScreen.hpp"
 #include "menus/lobby/Lobby.hpp"
 #include "menus/main/MainMenu.hpp"
 #include "menus/postmatch/PostMatchScoreboard.hpp"
@@ -162,14 +163,14 @@ bool App::init()
             return false;
         }
         AppContext ctx = screenContext();
-        auto game = std::make_unique<Game>();
-        if (!game->initDebugUI(ctx) || !game->init(ctx)) {
-            game->quit();
+        auto loading = std::make_unique<LoadingScreen>();
+        if (!loading->init(ctx)) {
+            loading->quit();
             cleanup();
             return false;
         }
-        screen_ = std::move(game);
-        current = Screen::InGame;
+        screen_ = std::move(loading);
+        current = Screen::Loading;
     } else {
         AppContext ctx = screenContext();
         auto titleScreen = std::make_unique<TitleScreen>();
@@ -422,6 +423,16 @@ SDL_AppResult App::iterate()
 
         if (lobby->shouldStartMatch()) {
             lobby->consumeStartMatchState();
+            transitionTo(Screen::Loading);
+        }
+        break;
+    }
+    case Screen::Loading: {
+        auto* loading = dynamic_cast<LoadingScreen*>(screen_.get());
+        if (!loading)
+            break;
+
+        if (loading->readyToStartGame()) {
             transitionTo(Screen::InGame);
         }
         break;
@@ -529,6 +540,25 @@ void App::transitionTo(Screen next)
             current = next;
         } else {
             game->quit();
+            client.shutdown();
+            auto mainMenu = std::make_unique<MainMenu>();
+            if (mainMenu->init(ctx)) {
+                mainMenu->setPopupMessage("Failed to initialize match");
+                screen_ = std::move(mainMenu);
+                current = Screen::MainMenu;
+            } else {
+                mainMenu->quit();
+            }
+        }
+        break;
+    }
+    case Screen::Loading: {
+        auto loading = std::make_unique<LoadingScreen>();
+        if (loading->init(ctx)) {
+            screen_ = std::move(loading);
+            current = next;
+        } else {
+            loading->quit();
         }
         break;
     }

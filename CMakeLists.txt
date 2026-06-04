@@ -1120,6 +1120,8 @@ add_executable(group2
         src/client/menus/lobby/Lobby.cpp
         src/client/menus/lobby/ui/LobbyUI.hpp
         src/client/menus/lobby/ui/LobbyUI.cpp
+        src/client/menus/loading/LoadingScreen.hpp
+        src/client/menus/loading/LoadingScreen.cpp
         src/client/menus/postmatch/PostMatchResult.hpp
         src/client/menus/postmatch/PostMatchScoreboard.hpp
         src/client/menus/postmatch/PostMatchScoreboard.cpp

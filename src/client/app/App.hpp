@@ -49,6 +49,7 @@ public:
         MainMenu,    ///< Join/server-browser main menu screen.
         HostConfig,  ///< Local hosting configuration screen.
         Lobby,       ///< Pre-match lobby waiting room.
+        Loading,     ///< Match-loading screen shown before synchronous game init.
         PostMatch,   ///< Dedicated scoreboard shown after a completed match.
         InGame       ///< Active match session.
     };
