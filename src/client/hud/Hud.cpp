@@ -21,6 +21,7 @@
 #include "widgets/HitMarkerWidget.hpp"
 #include "widgets/KillcamBoxWidget.hpp"
 #include "widgets/KillFeed.hpp"
+#include "widgets/LevelBarWidget.hpp"
 #include "widgets/Minimap.hpp"
 #include "widgets/PickupNotification.hpp"
 #include "widgets/PickupPrompt.hpp"
@@ -231,6 +232,7 @@ void Hud::createWidgets()
     // Bottom-row chrome.
     widgets_.push_back(std::make_unique<HealthArmorBar>()); // Vitals (bottom-left)
     widgets_.push_back(std::make_unique<EquipmentSlots>()); // bottom-center
+    widgets_.push_back(std::make_unique<LevelBarWidget>());
     widgets_.push_back(std::make_unique<GrenadeSlotsWidget>());
     widgets_.push_back(std::make_unique<PopupNotification>());
     widgets_.push_back(std::make_unique<EquippedWeaponsWidget>());

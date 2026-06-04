@@ -424,6 +424,27 @@ bool HudContext::svgFlipped(HudIcon id, float x, float y, float w, float h, bool
     return true;
 }
 
+bool HudContext::svgPartialX(HudIcon id, float x, float y, float w, float h, float fraction, HudColor tint)
+{
+    if (!svgAtlas_ || w <= 0.f || h <= 0.f)
+        return false;
+
+    const float clamped = std::clamp(fraction, 0.f, 1.f);
+    if (clamped <= 0.f)
+        return true;
+
+    const int rasterW = std::max(1, static_cast<int>(std::ceil(w)));
+    const int rasterH = std::max(1, static_cast<int>(std::ceil(h)));
+    const auto sprite = svgAtlas_->sprite(id, rasterW, rasterH);
+    if (!sprite)
+        return false;
+
+    const float visibleW = w * clamped;
+    const float u1 = sprite->u0 + (sprite->u1 - sprite->u0) * clamped;
+    emitQuad(x, y, visibleW, h, sprite->u0, sprite->v0, u1, sprite->v1, tint, 2.f);
+    return true;
+}
+
 bool HudContext::svgMask(HudIcon id, float x, float y, float w, float h, HudColor color)
 {
     return svgMaskFlipped(id, x, y, w, h, false, false, color);
@@ -445,6 +466,27 @@ bool HudContext::svgMaskFlipped(HudIcon id, float x, float y, float w, float h, 
     const float v0 = flipY ? sprite->v1 : sprite->v0;
     const float v1 = flipY ? sprite->v0 : sprite->v1;
     emitQuad(x, y, w, h, u0, v0, u1, v1, color, 7.f);
+    return true;
+}
+
+bool HudContext::svgMaskPartialX(HudIcon id, float x, float y, float w, float h, float fraction, HudColor color)
+{
+    if (!svgAtlas_ || w <= 0.f || h <= 0.f)
+        return false;
+
+    const float clamped = std::clamp(fraction, 0.f, 1.f);
+    if (clamped <= 0.f)
+        return true;
+
+    const int rasterW = std::max(1, static_cast<int>(std::ceil(w)));
+    const int rasterH = std::max(1, static_cast<int>(std::ceil(h)));
+    const auto sprite = svgAtlas_->sprite(id, rasterW, rasterH);
+    if (!sprite)
+        return false;
+
+    const float visibleW = w * clamped;
+    const float u1 = sprite->u0 + (sprite->u1 - sprite->u0) * clamped;
+    emitQuad(x, y, visibleW, h, sprite->u0, sprite->v0, u1, sprite->v1, color, 7.f);
     return true;
 }
 
