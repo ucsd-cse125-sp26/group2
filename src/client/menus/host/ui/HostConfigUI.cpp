@@ -16,7 +16,9 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
     HostConfigResult result{};
     HostConfigState& draft = inputs.draft;
 
-    if (menu_theme::beginPanel("Host Game", 680.0f, 610.0f, true)) {
+    if (menu_theme::beginPanel(
+            "Host Game", menu_theme::k_frontendPanelBaseWidth, menu_theme::k_frontendPanelBaseHeight, true))
+    {
         menu_theme::terminalStatusLine(inputs.serverRunning ? "SERVER SESSION ACTIVE" : "SERVER OFFLINE",
                                        inputs.hasUnsavedServerChanges ? "UNSAVED CHANGES" : "CONFIG CLEAN");
         menu_theme::terminalSection("SETTINGS");

@@ -72,7 +72,9 @@ SDL_AppResult PostMatchScoreboard::iterate()
     ImGui::NewFrame();
     menu_theme::drawBackground(renderer ? renderer->getDevice() : nullptr);
 
-    if (menu_theme::beginPanel("Match Complete", 700.0f, 520.0f, false)) {
+    if (menu_theme::beginPanel(
+            "Match Complete", menu_theme::k_frontendPanelBaseWidth, menu_theme::k_frontendPanelBaseHeight, false))
+    {
         const ImGuiIO& io = ImGui::GetIO();
         const float scale = menu_theme::scaleFor(io.DisplaySize);
         const menu_theme::ThemeSettings& theme = menu_theme::settings();
@@ -84,13 +86,13 @@ SDL_AppResult PostMatchScoreboard::iterate()
         const float titleX = (ImGui::GetContentRegionAvail().x - titleSize.x) * 0.5f;
         if (titleX > 0.0f)
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + titleX);
-        ImGui::PushStyleColor(ImGuiCol_Text, resultColor);
+        ImGui::PushStyleColor(ImGuiCol_Text, result_.won ? ImVec4{0.35f, 0.95f, 0.48f, 1.0f} : resultColor);
         ImGui::TextUnformatted(resultText);
         ImGui::PopStyleColor();
         ImGui::SetWindowFontScale(scale);
 
         ImGui::Spacing();
-        menu_theme::heading("Final Scoreboard");
+        menu_theme::terminalSection("FINAL SCOREBOARD");
 
         const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                                       ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings;
@@ -116,10 +118,9 @@ SDL_AppResult PostMatchScoreboard::iterate()
             ImGui::EndTable();
         }
 
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-        if (menu_theme::accentButton("Return to Lobby", ImVec2(ImGui::GetContentRegionAvail().x, 0.0f))) {
+        menu_theme::terminalStatusLine("MATCH ARCHIVE COMPLETE", "ARROWS / ENTER");
+        if (menu_theme::terminalActionRow("RETURN TO LOBBY", nullptr, ImVec2(ImGui::GetContentRegionAvail().x, 34.0f)))
+        {
             returnToLobby_ = true;
         }
     }

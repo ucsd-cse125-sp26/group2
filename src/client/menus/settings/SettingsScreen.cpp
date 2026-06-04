@@ -14,12 +14,6 @@
 #include <glm/vec3.hpp>
 #include <imgui.h>
 
-namespace
-{
-constexpr float k_settingsPanelBaseWidth = 900.0f;
-constexpr float k_settingsPanelBaseHeight = 660.0f;
-} // namespace
-
 bool SettingsScreen::init(AppContext& ctx)
 {
     renderer = &ctx.renderer;
@@ -63,8 +57,11 @@ SDL_AppResult SettingsScreen::iterate()
 
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     const float uiScale = std::clamp(menu_theme::scaleFor(display), 0.5f, 1.0f);
-    if (menu_theme::beginPanel(
-            "Settings", k_settingsPanelBaseWidth, k_settingsPanelBaseHeight, false, ImGuiWindowFlags_NoResize))
+    if (menu_theme::beginPanel("Settings",
+                               menu_theme::k_frontendPanelBaseWidth,
+                               menu_theme::k_frontendPanelBaseHeight,
+                               false,
+                               ImGuiWindowFlags_NoResize))
     {
         const SettingsEditorResult result = editor.render(*settings, settingsPath, uiScale);
         if (result.closeRequested) {

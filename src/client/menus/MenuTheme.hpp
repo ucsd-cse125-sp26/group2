@@ -12,6 +12,9 @@ struct SDL_GPUDevice;
 
 namespace menu_theme
 {
+inline constexpr float k_frontendPanelBaseWidth = 900.0f;
+inline constexpr float k_frontendPanelBaseHeight = 660.0f;
+
 struct ThemeSettings
 {
     ImVec4 accent{0.96f, 0.96f, 0.92f, 1.00f};

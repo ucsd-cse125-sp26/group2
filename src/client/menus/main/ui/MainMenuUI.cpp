@@ -20,7 +20,9 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
     JoinMenuResult result;
     result.connectClicked = false;
 
-    if (menu_theme::beginPanel("Join Game", 760.0f, 560.0f, true)) {
+    if (menu_theme::beginPanel(
+            "Join Game", menu_theme::k_frontendPanelBaseWidth, menu_theme::k_frontendPanelBaseHeight, true))
+    {
         menu_theme::terminalStatusLine("NETSCAN READY", "TYPE ADDRESS OR SELECT HOST");
         menu_theme::terminalSection("DIRECT CONNECT");
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);

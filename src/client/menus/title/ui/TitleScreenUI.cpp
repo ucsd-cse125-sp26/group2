@@ -13,7 +13,9 @@ TitleScreenResult buildTitleScreen()
 {
     TitleScreenResult result{};
 
-    if (menu_theme::beginPanel("Metal: Orbital Arena", 560.0f, 430.0f, true)) {
+    if (menu_theme::beginPanel(
+            "Metal: Orbital Arena", menu_theme::k_frontendPanelBaseWidth, menu_theme::k_frontendPanelBaseHeight, true))
+    {
         menu_theme::terminalStatusLine("SYSTEM BOOT: ARENA FRONTEND", "NAV: ARROWS / ENTER");
         menu_theme::terminalSection("COMMANDS");
         const ImVec2 rowSize(0.0f, 38.0f);
