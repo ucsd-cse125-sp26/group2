@@ -21,6 +21,15 @@
 #include <entt/entt.hpp>
 #include <type_traits>
 
+/// @brief Master switch for the ragdoll feature (creation, physics, rendering).
+///
+/// When false, dead characters simply disappear instead of spawning a corpse:
+/// `spawnRagdoll` is skipped, `runRagdolls`/PBD stepping is skipped, and the
+/// renderer draws no ragdoll body. The ragdoll code is left intact so the
+/// feature can be re-enabled by flipping this to true. Disabled because the
+/// simulation didn't look good enough to be worth the cost.
+inline constexpr bool kRagdollsEnabled = false;
+
 /// @brief Standard humanoid bone indices for the 15-body ragdoll.
 /// Order matches the joint table in `Ragdoll::buildHumanoid`.
 enum class RagdollBone : uint8_t

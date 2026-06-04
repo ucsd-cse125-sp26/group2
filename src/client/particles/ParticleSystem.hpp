@@ -9,6 +9,7 @@
 #include "ecs/registry/Registry.hpp"
 #include "effects/BulletHoleDecal.hpp"
 #include "effects/EnergyTeslaArcEffect.hpp"
+#include "effects/DeathDissolveEffect.hpp"
 #include "effects/ExplosionVfxEffect.hpp"
 #include "effects/HitscanEffect.hpp"
 #include "effects/ImpactEffect.hpp"
@@ -77,6 +78,12 @@ public:
 
     /// @brief Spawn rocket explosion at pos.
     void spawnExplosion(glm::vec3 pos, float blastRadius);
+
+    /// @brief Spawn a "Thanos snap" death dissolve from a character's posed mesh.
+    /// @param worldPoints World-space points sampled from the death pose.
+    /// @param center      Body center (world) for the radial/sweep basis.
+    /// @param color       Particle tint (mesh has no texture; ~light grey).
+    void spawnDeathDissolve(const std::vector<glm::vec3>& worldPoints, glm::vec3 center, glm::vec4 color);
 
     /// @brief Spawn a fresh typed explosion VFX profile at pos.
     void spawnExplosionVfx(glm::vec3 pos,
@@ -169,6 +176,7 @@ private:
     ImpactEffect impact_;
     BulletHoleDecal decals_;
     ExplosionVfxEffect explosionVfx_;
+    DeathDissolveEffect death_;
     SdfRenderer sdf_;
 
     // Cached each frame from Camera

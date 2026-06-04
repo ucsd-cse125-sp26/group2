@@ -3,15 +3,11 @@
 
 #include "HostConfig.hpp"
 
-#include "menus/MenuTheme.hpp"
 #include "network/ServerName.hpp"
 #include "ui/HostConfigUI.hpp"
 #include "util/InputCapture.hpp"
 
 #include <algorithm>
-#include <backends/imgui_impl_sdl3.h>
-#include <backends/imgui_impl_sdlgpu3.h>
-#include <glm/vec3.hpp>
 #include <imgui.h>
 
 bool HostConfig::init(AppContext& ctx)
@@ -21,6 +17,8 @@ bool HostConfig::init(AppContext& ctx)
     client = &ctx.client;
     hostedServer = &ctx.hostedServer;
     draft = &ctx.hostConfigState;
+    settings = &ctx.userSettings;
+    settingsPath = ctx.userSettingsPath;
 
     // Defensive: menus always run with a free desktop cursor.
     input_capture::releaseGameplayInputCapture(window);
@@ -44,10 +42,10 @@ bool HostConfig::init(AppContext& ctx)
 
 SDL_AppResult HostConfig::event(SDL_Event* event)
 {
-    ImGui_ImplSDL3_ProcessEvent(event);
-    if (event->type == SDL_EVENT_QUIT)
-        return SDL_APP_SUCCESS;
+    if (const SDL_AppResult result = processCommonImguiEvent(event); result != SDL_APP_CONTINUE)
+        return result;
 
+    handleSystemMenuEvent(event, systemMenu_, settings);
     return SDL_APP_CONTINUE;
 }
 
@@ -63,10 +61,7 @@ SDL_AppResult HostConfig::iterate()
     if (!renderer || !hostedServer || !draft)
         return SDL_APP_FAILURE;
 
-    ImGui_ImplSDLGPU3_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
-    menu_theme::drawBackground(renderer ? renderer->getDevice() : nullptr);
+    beginMenuFrame(renderer);
 
     const bool ownsLocalProcess = hostedServer->isRunning();
     const bool serverRunning = ownsLocalProcess || (client && client->isConnected());
@@ -104,8 +99,8 @@ SDL_AppResult HostConfig::iterate()
             pendingGoToLobby = true;
         }
     }
-    if (result.backToHomeClicked) {
-        pendingBackToHome = true;
+    if (result.backToMainMenuClicked) {
+        pendingBackToMainMenu = true;
     }
 
     const ConfirmResult confirmResult = confirm_.drawAndPoll();
@@ -129,8 +124,14 @@ SDL_AppResult HostConfig::iterate()
         pendingConfirmAction = PendingConfirmAction::None;
     }
 
-    ImGui::Render();
-    renderer->drawFrame(glm::vec3(0.0f), 0.0f, 0.0f, 0.0f);
+    if (settings != nullptr) {
+        const SystemMenuOverlayResult menuResult = systemMenu_.render(*settings, settingsPath);
+        if (menuResult.exitToDesktop) {
+            pendingExitRequest = true;
+        }
+    }
+
+    presentMenuFrame(*renderer);
     return SDL_APP_CONTINUE;
 }
 
@@ -161,12 +162,21 @@ bool HostConfig::consumeGoToLobbyRequest()
     return true;
 }
 
-bool HostConfig::consumeBackToHomeRequest()
+bool HostConfig::consumeBackToMainMenuRequest()
 {
-    if (!pendingBackToHome)
+    if (!pendingBackToMainMenu)
         return false;
 
-    pendingBackToHome = false;
+    pendingBackToMainMenu = false;
+    return true;
+}
+
+bool HostConfig::consumeExitRequest()
+{
+    if (!pendingExitRequest)
+        return false;
+
+    pendingExitRequest = false;
     return true;
 }
 

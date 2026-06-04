@@ -1482,9 +1482,10 @@ void DebugUI::buildHitboxUI(
                     ImGui::PopStyleColor();
 
                     if (open) {
-                        ImGui::DragFloat3("Offset", &def.localOffset.x, 0.5f, -100.0f, 100.0f, "%.1f");
-                        ImGui::DragFloat("Radius", &def.radius, 0.1f, 0.5f, 30.0f, "%.1f");
-                        ImGui::DragFloat("Half Height", &def.halfHeight, 0.1f, 0.5f, 40.0f, "%.1f");
+                        // Values are WORLD units (player ≈ 72 tall); keep precision fine for tweaking.
+                        ImGui::DragFloat3("Offset", &def.localOffset.x, 0.05f, -40.0f, 40.0f, "%.2f");
+                        ImGui::DragFloat("Radius", &def.radius, 0.05f, 0.05f, 20.0f, "%.2f");
+                        ImGui::DragFloat("Half Height", &def.halfHeight, 0.05f, 0.0f, 20.0f, "%.2f");
                         ImGui::DragFloat3("Axis", &def.localAxis.x, 0.05f, -1.0f, 1.0f, "%.2f");
                         ImGui::TreePop();
                     }

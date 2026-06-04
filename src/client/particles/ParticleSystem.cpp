@@ -108,6 +108,7 @@ void ParticleSystem::update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec
     explosionVfx_.update(dt, reg, camPos_, camForward_);
     impact_.update(dt);
     decals_.update(dt);
+    death_.update(dt);
 
     // Clear SDF queues for this frame (re-filled by drawWorldText/drawScreenText calls)
     sdf_.clear();
@@ -118,6 +119,7 @@ void ParticleSystem::update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec
 void ParticleSystem::uploadToGpu(SDL_GPUCommandBuffer* cmd)
 {
     renderer_.uploadBillboards(cmd, impact_.data(), impact_.count());
+    renderer_.uploadDissolve(cmd, death_.data(), death_.count());
     renderer_.uploadTracers(cmd, tracers_.data(), tracers_.count());
     renderer_.uploadRibbon(cmd, ribbons_.data(), ribbons_.count());
     renderer_.uploadHitscan(cmd, hitscan_.beamData(), hitscan_.beamCount());
@@ -240,6 +242,11 @@ void ParticleSystem::debugEnergyTeslaPreview(glm::vec3 origin,
                                              float lockStrength)
 {
     energyTesla_.debugPreview(origin, guidePoint, hitPoint, locked, lockStrength);
+}
+
+void ParticleSystem::spawnDeathDissolve(const std::vector<glm::vec3>& worldPoints, glm::vec3 center, glm::vec4 color)
+{
+    death_.spawn(worldPoints, center, color);
 }
 
 // SDF text

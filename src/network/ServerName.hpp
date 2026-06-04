@@ -10,7 +10,7 @@
 namespace server_name
 {
 constexpr std::size_t k_maxBytes = 32;
-constexpr std::string_view k_default = "Group 2 Server";
+constexpr std::string_view k_default = "Server";
 
 inline std::string clampUtf8Bytes(std::string_view value)
 {

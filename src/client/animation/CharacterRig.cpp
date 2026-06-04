@@ -43,6 +43,7 @@ struct CharacterRig::Impl
     std::vector<RigMeshData> meshes;
     std::unordered_map<std::string, int> jointMap;
     std::unordered_map<std::string, anim_utils::JointRestPose> restPoses;
+    glm::quat orientationFix{1.0f, 0.0f, 0.0f, 0.0f}; ///< Applied to the skeleton root; mirrored in verticalBounds.
     bool loaded = false;
 };
 
@@ -90,12 +91,17 @@ void CharacterRig::verticalBounds(float& outMinY, float& outMaxY) const
 {
     outMinY = std::numeric_limits<float>::max();
     outMaxY = std::numeric_limits<float>::lowest();
+    // Measure in the rendered orientation: the skeleton root carries
+    // `orientationFix`, so the rest-pose vertex actually drawn is
+    // `orientationFix * position`. Auto-scale must use that Y extent or it
+    // would scale to the wrong (pre-rotation) axis.
     for (const auto& mesh : impl_->meshes) {
         for (const auto& vert : mesh.baseVertices) {
-            if (vert.position.y < outMinY)
-                outMinY = vert.position.y;
-            if (vert.position.y > outMaxY)
-                outMaxY = vert.position.y;
+            const float y = (impl_->orientationFix * vert.position).y;
+            if (y < outMinY)
+                outMinY = y;
+            if (y > outMaxY)
+                outMaxY = y;
         }
     }
     if (outMinY > outMaxY) {
@@ -105,17 +111,23 @@ void CharacterRig::verticalBounds(float& outMinY, float& outMaxY) const
     }
 }
 
-bool CharacterRig::loadFromFBX(const std::string& path)
+bool CharacterRig::loadFromFBX(const std::string& path, const glm::quat& orientationFix, bool flipNormals, bool flipUVs)
 {
+    impl_->orientationFix = orientationFix;
+
     Assimp::Importer importer;
 
     // Collapse FBX-specific pivot / pre-rotation nodes into the parent's
     // transform so the node hierarchy cleanly matches the bone hierarchy.
     importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false);
 
-    const auto flags =
+    auto flags =
         static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace |
                                   aiProcess_JoinIdenticalVertices | aiProcess_LimitBoneWeights);
+    // Match the static model loader's flipUVs convention (glTF vs DCC); needed
+    // so skinned viewmodel meshes sample their textures right-side-up.
+    if (flipUVs)
+        flags |= static_cast<unsigned int>(aiProcess_FlipUVs);
 
     const aiScene* scene = importer.ReadFile(path, flags);
     if (!scene || !scene->mRootNode) {
@@ -140,8 +152,28 @@ bool CharacterRig::loadFromFBX(const std::string& path)
     ozz::animation::offline::RawSkeleton rawSkeleton;
     {
         ozz::animation::offline::RawSkeleton::Joint rootJoint;
-        if (anim_utils::buildJoint(scene->mRootNode, boneNames, rootJoint, impl_->restPoses))
+        if (anim_utils::buildJoint(scene->mRootNode, boneNames, rootJoint, impl_->restPoses)) {
+            // Prepend the orientation fix to the root joint. ozz propagates it
+            // to every descendant in model space, so the whole rig re-orients
+            // consistently (render mesh, joint frames used for weapon IK, and
+            // hitbox capsules all derive from these matrices). The structural
+            // root has no animation channel, so clips never overwrite it.
+            if (orientationFix != glm::quat(1.0f, 0.0f, 0.0f, 0.0f)) {
+                const auto& tr = rootJoint.transform;
+                const glm::vec3 t = orientationFix * glm::vec3(tr.translation.x, tr.translation.y, tr.translation.z);
+                const glm::quat r =
+                    orientationFix * glm::quat(tr.rotation.w, tr.rotation.x, tr.rotation.y, tr.rotation.z);
+                rootJoint.transform.translation = ozz::math::Float3{t.x, t.y, t.z};
+                rootJoint.transform.rotation = ozz::math::Quaternion{r.x, r.y, r.z, r.w};
+                // Mirror into the rest-pose map: the structural root is filled
+                // from rest (no channel), so the animated pose must see the fix.
+                if (auto rp = impl_->restPoses.find(std::string(rootJoint.name.c_str())); rp != impl_->restPoses.end()) {
+                    rp->second.translation = ozz::math::Float3{t.x, t.y, t.z};
+                    rp->second.rotation = ozz::math::Quaternion{r.x, r.y, r.z, r.w};
+                }
+            }
             rawSkeleton.roots.push_back(std::move(rootJoint));
+        }
     }
     if (!rawSkeleton.Validate()) {
         SDL_Log("CharacterRig: raw skeleton validation failed");
@@ -181,6 +213,7 @@ bool CharacterRig::loadFromFBX(const std::string& path)
             continue;
 
         RigMeshData rigMesh;
+        rigMesh.materialIndex = mesh->mMaterialIndex;
         rigMesh.baseVertices.resize(mesh->mNumVertices);
         rigMesh.skinWeights.resize(mesh->mNumVertices);
 
@@ -188,8 +221,11 @@ bool CharacterRig::loadFromFBX(const std::string& path)
         for (unsigned v = 0; v < mesh->mNumVertices; ++v) {
             ModelVertex& vert = rigMesh.baseVertices[v];
             vert.position = glm::vec3(mesh->mVertices[v].x, mesh->mVertices[v].y, mesh->mVertices[v].z);
-            if (mesh->HasNormals())
+            if (mesh->HasNormals()) {
                 vert.normal = glm::vec3(mesh->mNormals[v].x, mesh->mNormals[v].y, mesh->mNormals[v].z);
+                if (flipNormals)
+                    vert.normal = -vert.normal;
+            }
             if (mesh->mTextureCoords[0] != nullptr)
                 vert.texCoord = glm::vec2(mesh->mTextureCoords[0][v].x, mesh->mTextureCoords[0][v].y);
 

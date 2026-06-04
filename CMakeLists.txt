@@ -819,6 +819,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionVfxEffect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionVfxEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/DeathDissolveEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/DeathDissolveEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfFont.hpp"
@@ -858,6 +860,8 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/WeaponViewmodelAnim.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/WeaponViewmodelAnim.hpp"
     # HUD system
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTypes.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.cpp"
@@ -924,6 +928,12 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/LevelBarWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/LevelBarWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquippedWeaponsWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquippedWeaponsWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ScreenDecalWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ScreenDecalWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EnemyWorldHealthBar.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EnemyWorldHealthBar.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupNotification.cpp"
@@ -1067,6 +1077,8 @@ add_executable(group2
         src/ecs/components/ViewmodelConfig.hpp
         src/ecs/components/GripPose.hpp
         src/ecs/components/GripPose.cpp
+        src/ecs/components/WeaponHoldPose.hpp
+        src/ecs/components/WeaponHoldPose.cpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
         src/ecs/components/Explosion.hpp
@@ -1118,15 +1130,32 @@ add_executable(group2
         src/client/app/AppContext.hpp
         src/client/app/App.hpp
         src/client/app/App.cpp
+        src/client/IScreen.hpp
+        src/client/IScreen.cpp
         src/client/menus/lobby/Lobby.hpp
         src/client/menus/lobby/Lobby.cpp
         src/client/menus/lobby/ui/LobbyUI.hpp
         src/client/menus/lobby/ui/LobbyUI.cpp
+        src/client/menus/loading/LoadingScreen.hpp
+        src/client/menus/loading/LoadingScreen.cpp
+        src/client/menus/postmatch/PostMatchResult.hpp
+        src/client/menus/postmatch/PostMatchScoreboard.hpp
+        src/client/menus/postmatch/PostMatchScoreboard.cpp
+        src/client/menus/title/TitleScreen.hpp
+        src/client/menus/title/TitleScreen.cpp
+        src/client/menus/title/ui/TitleScreenUI.hpp
+        src/client/menus/title/ui/TitleScreenUI.cpp
         src/client/renderer-new/RendererTypes.hpp
-        src/client/menus/home/Home.hpp
-        src/client/menus/home/Home.cpp
-        src/client/menus/home/ui/HomeUI.hpp
-        src/client/menus/home/ui/HomeUI.cpp
+        src/client/menus/main/MainMenu.hpp
+        src/client/menus/main/MainMenu.cpp
+        src/client/menus/main/ui/MainMenuUI.hpp
+        src/client/menus/main/ui/MainMenuUI.cpp
+        src/client/menus/settings/SettingsEditor.hpp
+        src/client/menus/settings/SettingsEditor.cpp
+        src/client/menus/settings/SystemMenuOverlay.hpp
+        src/client/menus/settings/SystemMenuOverlay.cpp
+        src/client/menus/settings/SettingsScreen.hpp
+        src/client/menus/settings/SettingsScreen.cpp
         src/client/menus/MenuTheme.hpp
         src/client/menus/MenuTheme.cpp
         src/ecs/components/PowerupSpawner.hpp
@@ -1405,6 +1434,8 @@ add_executable(server
         src/ecs/components/ViewmodelConfig.hpp
         src/ecs/components/GripPose.hpp
         src/ecs/components/GripPose.cpp
+        src/ecs/components/WeaponHoldPose.hpp
+        src/ecs/components/WeaponHoldPose.cpp
         src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp

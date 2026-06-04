@@ -120,18 +120,27 @@ void updateHitboxes(Registry& registry, const HitboxRig& hitboxRig, float rigSca
                 // Bone not resolved — place degenerate capsule at entity origin.
                 capsule.pointA = pos.value;
                 capsule.pointB = pos.value;
-                capsule.radius = def.radius * rigScale;
+                capsule.radius = def.radius;
                 continue;
             }
 
             // Full transform: worldTransform * boneModelSpaceMatrix
             const glm::mat4 boneMat = worldTransform * joints.matrices[static_cast<size_t>(def.boneIndex)];
 
-            // Transform capsule endpoints from bone-local space to world space.
+            // HitboxDef dimensions are in WORLD units (scale-invariant). The bone
+            // matrix carries the rig's model-space scale (rigScale AND any scale
+            // baked into the joint hierarchy, e.g. an armature import scale), so we
+            // can't just transform a local offset by it. Instead take the bone's
+            // world POSITION from the matrix and its NORMALIZED axes (scale removed)
+            // and lay the offset/half-height out along those axes in world units.
+            const glm::vec3 bonePos = glm::vec3(boneMat[3]);
+            const glm::mat3 boneRot(glm::normalize(glm::vec3(boneMat[0])),
+                                    glm::normalize(glm::vec3(boneMat[1])),
+                                    glm::normalize(glm::vec3(boneMat[2])));
             const glm::vec3 axisScaled = def.localAxis * def.halfHeight;
-            capsule.pointA = glm::vec3(boneMat * glm::vec4(def.localOffset + axisScaled, 1.0f));
-            capsule.pointB = glm::vec3(boneMat * glm::vec4(def.localOffset - axisScaled, 1.0f));
-            capsule.radius = def.radius * rigScale;
+            capsule.pointA = bonePos + boneRot * (def.localOffset + axisScaled);
+            capsule.pointB = bonePos + boneRot * (def.localOffset - axisScaled);
+            capsule.radius = def.radius;
         }
     };
 

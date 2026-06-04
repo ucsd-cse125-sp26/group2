@@ -34,21 +34,18 @@ ConfirmResult ConfirmModal::drawAndPoll()
     }
 
     ConfirmResult result = ConfirmResult::Pending;
-    ImGui::SetNextWindowSize({360.0f, 0.0f}, ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize({420.0f, 0.0f}, ImGuiCond_Appearing);
     if (ImGui::BeginPopupModal(request_.title.c_str(), nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+        menu_theme::terminalStatusLine("CONFIRMATION REQUIRED", "ESC CANCELS");
         ImGui::TextWrapped("%s", request_.message.c_str());
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
+        menu_theme::terminalSection("COMMANDS");
 
-        const float buttonWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-        if (ImGui::Button(request_.cancelText.c_str(), {buttonWidth, 34.0f})) {
+        const float buttonWidth = ImGui::GetContentRegionAvail().x;
+        if (menu_theme::terminalActionRow(request_.cancelText.c_str(), nullptr, {buttonWidth, 34.0f})) {
             result = ConfirmResult::Cancelled;
         }
-        ImGui::SameLine();
-        const bool confirmPressed = request_.confirmIsDanger
-                                        ? menu_theme::dangerButton(request_.confirmText.c_str(), {buttonWidth, 34.0f})
-                                        : menu_theme::accentButton(request_.confirmText.c_str(), {buttonWidth, 34.0f});
+        const bool confirmPressed = menu_theme::terminalActionRow(
+            request_.confirmText.c_str(), nullptr, {buttonWidth, 34.0f}, request_.confirmIsDanger);
         if (confirmPressed) {
             result = ConfirmResult::Confirmed;
         }

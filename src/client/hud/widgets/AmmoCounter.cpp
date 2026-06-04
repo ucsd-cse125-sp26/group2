@@ -8,11 +8,13 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+
 AmmoCounter::AmmoCounter()
 {
     anchor = HudAnchor::BottomRight;
-    offsetX = -80.f;
-    offsetY = -60.f;
+    offsetX = -50.f;
+    offsetY = -67.f;
     width = panelWidth;
     height = panelHeight;
 }
@@ -34,6 +36,16 @@ void AmmoCounter::draw(HudContext& ctx, float anchorX, float anchorY)
     const float ph = panelHeight * s;
     const float x = anchorX - pw;
     const float y = anchorY - ph;
+
+    const float safeBgScale = std::max(0.01f, backgroundScale);
+    const float safeBgStretchX = std::max(0.01f, backgroundStretchX);
+    const float safeBgStretchY = std::max(0.01f, backgroundStretchY);
+    const float bgW = panelWidth * s * safeBgScale * safeBgStretchX;
+    const float bgH = panelHeight * s * safeBgScale * safeBgStretchY;
+    const float bgX = x + backgroundOffsetX * s;
+    const float bgY = y + backgroundOffsetY * s;
+
+    ctx.svg(HudIcon::BulletCountBox, bgX, bgY, bgW, bgH);
 
     const float clipFs = clipFontSize * s;
     const float reserveFs = reserveFontSize * s;

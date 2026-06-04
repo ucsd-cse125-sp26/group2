@@ -527,16 +527,18 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                 return;
             }
 
-            // Sticky grenades home in on wall-running players: a gentle,
-            // capped-turn-rate curve toward the nearest wall-runner in range.
-            // Skill-rewarding — it can still miss, and does nothing when no
-            // wall-runner is nearby (the grenade flies ballistic). Only applies
-            // to in-flight stickies (not yet stuck).
+            // Sticky grenades gently home toward the nearest enemy in the
+            // grenade's forward cone. Cone check uses horizontal (XZ) direction
+            // so gravity-induced downward velocity doesn't break the test.
             if (projectile.sticky && !projectile.stuck) {
-                constexpr float k_homingRadius = 700.0f;
-                constexpr float k_homingTurnRate = 1.5708f; // ~90°/s max turn (radians).
+                constexpr float k_homingRadius = 500.0f;
+                constexpr float k_homingTurnRate = 1.0472f; // ~60°/s max turn (radians).
+                constexpr float k_homingCone = 0.707f;      // cos(45°) — forward hemisphere.
                 const float speed = glm::length(vel.value);
-                if (speed > 1e-3f) {
+                const float horzSpeedSq = vel.value.x * vel.value.x + vel.value.z * vel.value.z;
+                if (speed > 1e-3f && horzSpeedSq > 1e-6f) {
+                    // Horizontal flight direction (ignore gravity's Y contribution).
+                    const glm::vec3 flyDirXZ = glm::vec3{vel.value.x, 0.0f, vel.value.z} / std::sqrt(horzSpeedSq);
                     entt::entity target = entt::null;
                     float bestDistSq = k_homingRadius * k_homingRadius;
                     glm::vec3 targetPos{0.0f};
@@ -544,31 +546,29 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                         [&](entt::entity pe, const Position& ppos, const PlayerVisState& pvis) {
                             if (pe == projectile.owner || pvis.isDead)
                                 return;
-                            if (pvis.moveMode != MoveMode::WallRunning)
-                                return;
                             const glm::vec3 d = ppos.value - pos.value;
                             const float dsq = glm::dot(d, d);
-                            if (dsq < bestDistSq) {
-                                bestDistSq = dsq;
-                                target = pe;
-                                targetPos = ppos.value;
-                            }
+                            if (dsq >= bestDistSq || dsq < 1e-4f)
+                                return;
+                            // Horizontal cone check — is the player roughly ahead of us?
+                            const glm::vec3 dXZ{d.x, 0.0f, d.z};
+                            const float dXZlen = glm::length(dXZ);
+                            if (dXZlen < 1e-3f || glm::dot(dXZ / dXZlen, flyDirXZ) < k_homingCone)
+                                return;
+                            bestDistSq = dsq;
+                            target = pe;
+                            targetPos = ppos.value;
                         });
                     if (target != entt::null) {
                         const glm::vec3 curDir = vel.value / speed;
-                        const glm::vec3 toTarget = targetPos - pos.value;
-                        const float tlen = glm::length(toTarget);
-                        if (tlen > 1e-3f) {
-                            const glm::vec3 desiredDir = toTarget / tlen;
-                            const float angle = std::acos(glm::clamp(glm::dot(curDir, desiredDir), -1.0f, 1.0f));
-                            const float maxStep = k_homingTurnRate * dt;
-                            glm::vec3 newDir = desiredDir;
-                            if (angle > maxStep && angle > 1e-4f) {
-                                // Rotate curDir toward desiredDir by at most maxStep.
-                                newDir = glm::normalize(glm::mix(curDir, desiredDir, maxStep / angle));
-                            }
-                            vel.value = newDir * speed; // preserve speed, only steer direction
+                        const glm::vec3 toTarget = glm::normalize(targetPos - pos.value);
+                        const float angle = std::acos(glm::clamp(glm::dot(curDir, toTarget), -1.0f, 1.0f));
+                        const float maxStep = k_homingTurnRate * dt;
+                        glm::vec3 newDir = toTarget;
+                        if (angle > maxStep && angle > 1e-4f) {
+                            newDir = glm::normalize(glm::mix(curDir, toTarget, maxStep / angle));
                         }
+                        vel.value = newDir * speed;
                     }
                 }
             }
@@ -593,9 +593,14 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
 
                 // Sweep against players too, so projectiles collide with bodies (rocket direct
                 // impact, sticky-to-player) and not just static world geometry.
+                // Sticky grenades use an inflated hitbox against players for a
+                // "magnetism" feel — near-misses register as hits without any
+                // visible mid-air curving. World collision uses the real shape.
                 entt::entity hitPlayer = entt::null;
+                const glm::vec3 playerSweepExtents =
+                    (projectile.sticky && !projectile.stuck) ? shape.halfExtents + glm::vec3{15.0f} : shape.halfExtents;
                 const physics::HitResult k_playerHit =
-                    sweepPlayers(registry, shape.halfExtents, pos.value, k_target, projectile.owner, hitPlayer);
+                    sweepPlayers(registry, playerSweepExtents, pos.value, k_target, projectile.owner, hitPlayer);
 
                 // Resolve whichever surface is struck first.
                 const bool playerFirst =
@@ -619,9 +624,18 @@ void runCollision(Registry& registry, float dt, const physics::WorldGeometry& wo
                     projectile.sticky = false;
                     projectile.stuck = true;
                     if (playerFirst) {
-                        // Ride this player and guarantee a kill on detonation.
+                        // Snap grenade onto the player's actual body surface.
+                        // The inflated sweep hitbox detects the hit early, so
+                        // clamp pos to the player's real AABB so it visually
+                        // sits on their model instead of floating in mid-air.
+                        const Position& hitPos = registry.get<Position>(hitPlayer);
+                        const CollisionShape& hitShape = registry.get<CollisionShape>(hitPlayer);
+                        const glm::vec3 pmin = hitPos.value - hitShape.halfExtents;
+                        const glm::vec3 pmax = hitPos.value + hitShape.halfExtents;
+                        pos.value = glm::clamp(pos.value, pmin - shape.halfExtents, pmax + shape.halfExtents);
+
                         projectile.stuckTo = hitPlayer;
-                        projectile.stuckOffset = pos.value - registry.get<Position>(hitPlayer).value;
+                        projectile.stuckOffset = pos.value - hitPos.value;
                     }
                     if (projectile.fuseTimer < 0.0f) {
                         const GrenadeConfig& cfg = getGrenadeConfig(projectile.type);

@@ -6,6 +6,7 @@
 #include "hud/HudWidget.hpp"
 
 #include <array>
+#include <string>
 
 struct EquipmentSlots : HudWidget
 {
@@ -23,6 +24,8 @@ struct EquipmentSlots : HudWidget
         SvgComponentTuning iconFrame;
         SvgComponentTuning icon;
         SvgComponentTuning bar;
+        float bindingOffsetX = 0.f;
+        float bindingOffsetY = 0.f;
         bool flipIconX = false;
         bool flipIconY = false;
         bool flipBarX = false;
@@ -32,10 +35,11 @@ struct EquipmentSlots : HudWidget
     float iconFrameWidth = 92.f;
     float iconFrameHeight = 87.f;
     float abilityIconSize = 54.f;
-    float barWidth = 235.f;
+    float bindingFontSize = 20.f;
+    float barWidth = 220.f;
     float barHeight = 87.f;
-    float iconBarGap = 10.f;
-    float centerGap = 12.f;
+    float iconBarGap = 0.f;
+    float centerGap = 0.f;
 
     std::array<AbilityElementTuning, 2> abilityElements{};
 
@@ -45,4 +49,5 @@ struct EquipmentSlots : HudWidget
 
 private:
     HudEquipmentState state_;
+    std::array<std::string, 2> bindingLabels_{"", ""};
 };

@@ -58,6 +58,15 @@ public:
     /// @brief Debug override: render inactive widgets, excluding the railgun scope.
     [[nodiscard]] bool& debugRenderInactiveWidgets() { return debugRenderInactiveWidgets_; }
 
+    /// @brief Debug overlay: draw a screen-space alignment border.
+    [[nodiscard]] bool& debugShowAlignmentBorder() { return debugShowAlignmentBorder_; }
+
+    /// @brief Horizontal inset for the alignment border from left and right edges.
+    [[nodiscard]] float& debugAlignmentBorderOffsetX() { return debugAlignmentBorderOffsetX_; }
+
+    /// @brief Vertical inset for the alignment border from top and bottom edges.
+    [[nodiscard]] float& debugAlignmentBorderOffsetY() { return debugAlignmentBorderOffsetY_; }
+
 private:
     HudRenderer renderer_;
     HudSvgAtlas svgAtlas_;
@@ -65,6 +74,9 @@ private:
     HudTweenPool tweens_;
     std::vector<std::unique_ptr<HudWidget>> widgets_;
     bool debugRenderInactiveWidgets_ = false;
+    bool debugShowAlignmentBorder_ = false;
+    float debugAlignmentBorderOffsetX_ = 80.f;
+    float debugAlignmentBorderOffsetY_ = 60.f;
 
     float screenW_ = 0.f, screenH_ = 0.f;
 

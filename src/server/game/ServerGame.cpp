@@ -35,6 +35,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/PowerupState.hpp"
+#include "ecs/components/Ragdoll.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/RespawnTimer.hpp"
@@ -60,8 +61,8 @@
 #include "ecs/systems/KillzoneSystem.hpp"
 #include "ecs/systems/MatchSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
-#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
@@ -401,7 +402,10 @@ void ServerGame::eventHandler(const Event& event)
             deletePlayerEntity(event.clientId);
             break;
         }
-        lobbyManager.addPlayer(event.clientId);
+        const char* joinedDisplayName = "";
+        if (const auto* playerName = registry.try_get<PlayerName>(clientEntities[event.clientId]))
+            joinedDisplayName = playerName->c_str();
+        lobbyManager.addPlayer(event.clientId, joinedDisplayName);
         server->sendMatchConfigToClient(event.clientId, matchController.getMatchConfig());
         // Lobby updates already cover joins before the match starts. Once the
         // match is active, send a lightweight roster popup event instead.
@@ -784,7 +788,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         // Phase 13: age out ragdolls so gameplay can fade / despawn corpses.
         GROUP2_PROF_SCOPE("ragdolls");
-        systems::runRagdolls(registry, dt);
+        if (kRagdollsEnabled)
+            systems::runRagdolls(registry, dt);
     }
     {
         GROUP2_PROF_SCOPE("explosion");
@@ -1119,9 +1124,13 @@ void ServerGame::initAnimation()
 {
     const char* base = SDL_GetBasePath();
     const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
-    const std::string rigPath = assetsDir + "standard_walk.fbx";
+    const std::string rigPath = assetsDir + "character_rigged_new.glb";
 
-    if (!serverRig_.loadFromFBX(rigPath)) {
+    // Match the client's rig orientation fix (see Game.cpp) so server-side
+    // hitbox capsules line up with the rendered, re-oriented body. Normals are
+    // irrelevant server-side, so no flip needed here.
+    const glm::quat rigOrientationFix = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    if (!serverRig_.loadFromFBX(rigPath, rigOrientationFix)) {
         SDL_Log("[server] WARNING: rig load failed — skeleton hitboxes disabled, falling back to AABB");
         return;
     }
@@ -1149,13 +1158,28 @@ void ServerGame::initAnimation()
                 static_cast<double>(rigScale_));
     }
 
-    // Load animation clips.
+    // Load animation clips with full (unit-scaled) translations to match the
+    // client (see Game.cpp) so server hitbox poses track the rendered body,
+    // including crouch/slide vertical motion.
     for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
         const ClipId id = static_cast<ClipId>(i);
         const std::string clipPath = assetsDir + clipFile(id);
         if (!serverAnimLibrary_.loadClipFromFBX(serverRig_, id, clipPath)) {
             SDL_Log("[server] WARNING: failed to load clip '%s'", clipName(id));
             continue;
+        }
+    }
+
+    // Ground hitboxes off the IDLE pose, not the T-pose bind (matches the
+    // client; see Game.cpp) so capsules track the rendered, grounded body.
+    {
+        const float groundedMinY =
+            computeIdleGroundedMinY(serverRig_, serverAnimLibrary_, rigOrientationFix, rigMeshMinY_);
+        if (groundedMinY != rigMeshMinY_) {
+            SDL_Log("[server] rig grounding: idle-referenced minY %.3f -> %.3f",
+                    static_cast<double>(rigMeshMinY_),
+                    static_cast<double>(groundedMinY));
+            rigMeshMinY_ = groundedMinY;
         }
     }
 
@@ -1509,11 +1533,10 @@ void ServerGame::resetPlayersForCountdown()
 bool ServerGame::isGameplayInputAllowed(MatchPhase phase) const
 {
     switch (phase) {
-    case MatchPhase::COUNTDOWN:
-    case MatchPhase::FINISHED:
-        return false;
-    default:
+    case MatchPhase::IN_PROGRESS:
         return true;
+    default:
+        return false;
     }
 }
 

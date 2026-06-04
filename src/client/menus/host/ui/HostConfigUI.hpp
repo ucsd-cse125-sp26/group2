@@ -23,11 +23,11 @@ struct HostConfigUIInputs
 /// @brief User actions emitted by the host-configuration UI for one frame.
 struct HostConfigResult
 {
-    bool launchClicked = false;     ///< True if the user pressed "Launch" this frame.
-    bool updateClicked = false;     ///< True if the user pressed "Update Settings" this frame.
-    bool shutdownClicked = false;   ///< True if the user pressed "Shutdown" this frame.
-    bool goToLobbyClicked = false;  ///< True if the user wants to enter the lobby.
-    bool backToHomeClicked = false; ///< True if the user wants to return to the main menu.
+    bool launchClicked = false;         ///< True if the user pressed "Launch" this frame.
+    bool updateClicked = false;         ///< True if the user pressed "Update Settings" this frame.
+    bool shutdownClicked = false;       ///< True if the user pressed "Shutdown" this frame.
+    bool goToLobbyClicked = false;      ///< True if the user wants to enter the lobby.
+    bool backToMainMenuClicked = false; ///< True if the user wants to return to the main menu.
 };
 
 namespace host_config_ui
@@ -37,4 +37,9 @@ namespace host_config_ui
 /// @param inputs Current host settings and hosted-server status.
 /// @return Buttons/actions selected by the user this frame.
 HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs);
+
+/// @brief Render host-configuration controls inside an already-open ImGui window/tab.
+/// @param inputs Current host settings and hosted-server status.
+/// @return Buttons/actions selected by the user this frame.
+HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs, bool showBackRow = true);
 } // namespace host_config_ui

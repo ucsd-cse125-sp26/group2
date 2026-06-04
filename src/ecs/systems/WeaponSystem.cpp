@@ -1060,14 +1060,18 @@ inline void handleFire(Registry& registry,
         }
 
     } else {
-        // Spawn projectile
+        // Raycast to find where the crosshair hits, then aim from muzzle toward that point.
+        const auto worldHit = physics::raycastWorld(eye, direction, physics::activeWorld());
+        const glm::vec3 target = worldHit.hit ? worldHit.point : (eye + direction * 5000.0f);
+        const glm::vec3 projDir = glm::normalize(target - muzzle);
+
         ProjectileConfig projConfig = getProjectileConfig(gun.type);
         const entt::entity projectile = registry.create();
         registry.emplace<Projectile>(
             projectile,
             Projectile{.type = gun.type, .damage = config.damage, .owner = shooter, .explosive = config.explosive});
         registry.emplace<Position>(projectile, Position{.value = muzzle});
-        registry.emplace<Velocity>(projectile, Velocity{.value = direction * config.initialProjectileSpeed});
+        registry.emplace<Velocity>(projectile, Velocity{.value = projDir * config.initialProjectileSpeed});
         registry.emplace<CollisionShape>(projectile, projConfig.shape);
     }
 }
