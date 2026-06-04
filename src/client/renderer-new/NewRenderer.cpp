@@ -166,6 +166,8 @@ bool NewRenderer::init(SDL_Window* window)
 
     SDL_GPUTextureFormat hdrFormat = getHdrFormat();
     skinnedRenderer_.init(device_, hdrFormat, shaderFormat_);
+    viewmodelSkinned_.init(device_, hdrFormat, shaderFormat_, true);
+    viewmodelArmsSkinned_.init(device_, hdrFormat, shaderFormat_, true);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
     if (!dynamicShadowMaps_) {
@@ -501,6 +503,8 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
         if (copyPass) {
             skinnedRenderer_.uploadFrame(cmd, copyPass);
+            viewmodelSkinned_.uploadFrame(cmd, copyPass);
+            viewmodelArmsSkinned_.uploadFrame(cmd, copyPass);
             SDL_EndGPUCopyPass(copyPass);
         }
     }
@@ -709,6 +713,8 @@ void NewRenderer::drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffe
     bindLightShadowInfo(geometryPass, cmd);
 
     drawWeapon(geometryPass, cmd,camera_.getViewProjectionFrustumPlane());
+    viewmodelSkinned_.draw(geometryPass, cmd);
+    viewmodelArmsSkinned_.draw(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
 }
@@ -1086,6 +1092,8 @@ void NewRenderer::quit()
         }
 
         skinnedRenderer_.shutdown();
+        viewmodelSkinned_.shutdown();
+        viewmodelArmsSkinned_.shutdown();
 
         if (geometryPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, geometryPipeline_);
@@ -1390,6 +1398,68 @@ void NewRenderer::setSkinnedFrame(const std::vector<glm::mat4>& palette, const s
     // us every character and SkinnedRenderer keeps only the ones whose bounding
     // sphere is on screen, using this frame's camera frustum planes.
     skinnedRenderer_.setFrame(palette, instances, camera_.getViewProjectionFrustumPlane());
+}
+
+bool NewRenderer::setViewmodelRig(const std::vector<RigMeshSource>& meshes, int numJoints)
+{
+    return viewmodelSkinned_.setRig(meshes, numJoints);
+}
+
+void NewRenderer::setViewmodelFrame(const std::vector<glm::mat4>& palette,
+                                    const std::vector<SkinnedInstance>& instances)
+{
+    viewmodelSkinned_.setFrame(palette, instances);
+}
+
+void NewRenderer::setViewmodelTexture(int modelInstanceIndex)
+{
+    if (modelInstanceIndex < 0 || static_cast<size_t>(modelInstanceIndex) >= Asset::modelInstances_.size())
+        return;
+    const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
+    auto modelIt = Asset::models_.find(modelId);
+    if (modelIt == Asset::models_.end())
+        return;
+    for (const Asset::ModelElement& element : modelIt->second.modelElements_) {
+        auto matIt = Asset::materials_.find(element.materialId_);
+        if (matIt == Asset::materials_.end())
+            continue;
+        auto texIt = Asset::textures_.find(matIt->second.diffuseTexture);
+        if (texIt == Asset::textures_.end() || texIt->second.tex == nullptr)
+            continue;
+        viewmodelSkinned_.setDiffuseTexture(texIt->second.tex, sampler_);
+        return;
+    }
+}
+
+bool NewRenderer::setViewmodelArmsRig(const std::vector<RigMeshSource>& meshes, int numJoints)
+{
+    return viewmodelArmsSkinned_.setRig(meshes, numJoints);
+}
+
+void NewRenderer::setViewmodelArmsFrame(const std::vector<glm::mat4>& palette,
+                                        const std::vector<SkinnedInstance>& instances)
+{
+    viewmodelArmsSkinned_.setFrame(palette, instances);
+}
+
+void NewRenderer::setViewmodelArmsTexture(int modelInstanceIndex)
+{
+    if (modelInstanceIndex < 0 || static_cast<size_t>(modelInstanceIndex) >= Asset::modelInstances_.size())
+        return;
+    const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
+    auto modelIt = Asset::models_.find(modelId);
+    if (modelIt == Asset::models_.end())
+        return;
+    for (const Asset::ModelElement& element : modelIt->second.modelElements_) {
+        auto matIt = Asset::materials_.find(element.materialId_);
+        if (matIt == Asset::materials_.end())
+            continue;
+        auto texIt = Asset::textures_.find(matIt->second.diffuseTexture);
+        if (texIt == Asset::textures_.end() || texIt->second.tex == nullptr)
+            continue;
+        viewmodelArmsSkinned_.setDiffuseTexture(texIt->second.tex, sampler_);
+        return;
+    }
 }
 
 

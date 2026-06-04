@@ -113,6 +113,10 @@ const char* clipName(ClipId id)
         return "Emote: Hip Hop";
     case ClipId::EmoteNorthernSoul:
         return "Emote: Northern Soul";
+    case ClipId::R301IdleUpper:
+        return "R301 Idle Upper";
+    case ClipId::R301ReloadUpper:
+        return "R301 Reload Upper";
     case ClipId::_Count:
         return "(none)";
     }
@@ -192,6 +196,10 @@ const char* clipFile(ClipId id)
         return "../emotes/Hip Hop Dancing.fbx";
     case ClipId::EmoteNorthernSoul:
         return "../emotes/Northern Soul Floor Combo.fbx";
+    case ClipId::R301IdleUpper:
+        return "anims_apex/apex_idle_stand.glb";
+    case ClipId::R301ReloadUpper:
+        return "anims_apex/apex_reload_rifle.glb";
     case ClipId::_Count:
         return "";
     }

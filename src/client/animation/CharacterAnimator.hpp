@@ -34,6 +34,9 @@ struct AnimationInputs
     bool crouching = false; ///< Crouch currently held (phase 1: note-only).
     int moveMode = 0;       ///< MoveMode value: 0=OnFoot, 1=Sliding, 2=WallRunning.
     int wallRunSide = 0;    ///< WallSide value: 0=None, 1=Left, 2=Right.
+    bool r301UpperActive = false; ///< True while holding the R301 gameplay rig/weapon pair.
+    bool reloading = false;       ///< Equipped weapon is inside its reload timer.
+    float reloadProgress = 0.0f;  ///< Normalized reload progress in [0,1].
     /// @brief Full-body emote clip to force this frame, as the integer value of a
     /// `ClipId`. Values < `ClipId::_Count` select an emote that overrides
     /// locomotion (played at full weight through the override slot); the default

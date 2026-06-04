@@ -13,6 +13,11 @@ CURRENT_ARMATURE = "CURRENT_mixamo_reference_rig"
 APEX_ARMATURE = "APEX_wraith_gameplay_arm_rig"
 COMBINED_ARMATURE = "RUNTIME_mixamo_apex_combined_rig"
 APEX_PARENT_BONE = "mixamorig:Spine2"
+APEX_HELPER_BONES = {
+    "ja_c_propGun",
+    "weapon_bone",
+    "muzzle_flash",
+}
 
 
 def require_object(name: str, expected_type: str):
@@ -308,6 +313,31 @@ def retarget_meshes_to_combined(meshes, combined):
         preserve_world_parent_to(mesh, combined)
 
 
+def create_socket_keepalive_mesh(combined, bone_names: set[str]):
+    keep_bones = [name for name in sorted(bone_names) if name in combined.data.bones]
+    if not keep_bones:
+        return None
+
+    existing = bpy.data.objects.get("RUNTIME_socket_keepalive")
+    if existing is not None:
+        bpy.data.objects.remove(existing, do_unlink=True)
+
+    mesh_data = bpy.data.meshes.new("RUNTIME_socket_keepalive_mesh")
+    mesh_data.from_pydata([(0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)], [], [(0, 1, 2)])
+    mesh_data.update()
+    mesh = bpy.data.objects.new("RUNTIME_socket_keepalive", mesh_data)
+    bpy.context.collection.objects.link(mesh)
+
+    for name in keep_bones:
+        group = mesh.vertex_groups.new(name=name)
+        group.add([0, 1, 2], 1.0, "ADD")
+
+    modifier = mesh.modifiers.new("Armature", "ARMATURE")
+    modifier.object = combined
+    preserve_world_parent_to(mesh, combined)
+    return mesh
+
+
 def export_runtime_glb(combined, meshes):
     bpy.ops.object.mode_set(mode="OBJECT")
     bpy.ops.object.select_all(action="DESELECT")
@@ -340,12 +370,16 @@ def main():
     if not meshes:
         raise RuntimeError("No visible meshes found for runtime export")
 
-    apex_groups = add_ancestors(apex, weighted_apex_groups(meshes))
+    apex_groups = weighted_apex_groups(meshes) | {name for name in APEX_HELPER_BONES if name in apex.data.bones}
+    apex_groups = add_ancestors(apex, apex_groups)
     combined = duplicate_current_armature(current)
     created = copy_apex_bones_into_combined(apex, combined, apex_groups)
     baked = bake_apex_frame_pose_into_rest(apex, current, combined, apex_groups)
     baked_vertices = bake_apex_weighted_vertices_to_source_pose(meshes, combined)
     retarget_meshes_to_combined(meshes, combined)
+    socket_keepalive = create_socket_keepalive_mesh(combined, APEX_HELPER_BONES)
+    if socket_keepalive is not None:
+        meshes.append(socket_keepalive)
 
     current.hide_viewport = True
     current.hide_render = True

@@ -1113,6 +1113,45 @@ bool Game::init(AppContext& ctx)
             SDL_Log("[client] WARNING: viewmodel hand assets failed to load — first-person hands disabled");
         }
 
+        {
+            constexpr std::size_t kRifleIndex = static_cast<std::size_t>(WeaponType::Rifle);
+            const WeaponViewmodelAssets& r301Assets = kWeaponViewmodelAssets[kRifleIndex];
+            const char* base = SDL_GetBasePath();
+            const std::string assetsDir = std::string(base ? base : "") + "assets/";
+            if (r301Assets.viewmodelGlb && r301Assets.viewmodelGlb[0] != '\0') {
+                const std::string gunPath = assetsDir + r301Assets.viewmodelGlb;
+                if (r301ViewmodelGun_.load(gunPath, r301Assets.flipUVs)) {
+                    r301ViewmodelReady_ =
+                        renderer->setViewmodelRig(r301ViewmodelGun_.buildRigSources(), r301ViewmodelGun_.numJoints());
+                    renderer->setViewmodelTexture(weaponModelIndices_[kRifleIndex]);
+                    r301ViewmodelGun_.playRestPose();
+                    r301ViewmodelGun_.update(0.0f);
+                    r301PropGunBindValid_ = r301ViewmodelGun_.boneModelMatrix("ja_c_propGun", r301PropGunBind_);
+                    SDL_Log("[client] R301 animated viewmodel gun loaded — %d joints, ready=%d",
+                            r301ViewmodelGun_.numJoints(),
+                            r301ViewmodelReady_ ? 1 : 0);
+                    if (!r301PropGunBindValid_)
+                        SDL_Log("[client] WARNING: R301 viewmodel missing ja_c_propGun bind — 3p mount uses wrist fallback");
+                } else {
+                    SDL_Log("[client] WARNING: R301 animated viewmodel gun failed to load from '%s'", gunPath.c_str());
+                }
+            }
+            if (r301Assets.armsGlb && r301Assets.armsGlb[0] != '\0') {
+                const std::string armsPath = assetsDir + r301Assets.armsGlb;
+                if (r301ViewmodelArms_.load(armsPath, r301Assets.flipUVs)) {
+                    renderer->setViewmodelArmsRig(r301ViewmodelArms_.buildRigSources(), r301ViewmodelArms_.numJoints());
+                    r301ViewmodelArmsModelIdx_ =
+                        renderer->loadSceneModel(r301Assets.armsGlb, glm::vec3{0.0f}, 1.0f, r301Assets.flipUVs);
+                    renderer->setModelScenePass(r301ViewmodelArmsModelIdx_, false);
+                    renderer->setViewmodelArmsTexture(r301ViewmodelArmsModelIdx_);
+                    SDL_Log("[client] R301 animated viewmodel arms loaded — %d joints",
+                            r301ViewmodelArms_.numJoints());
+                } else {
+                    SDL_Log("[client] WARNING: R301 animated viewmodel arms failed to load from '%s'", armsPath.c_str());
+                }
+            }
+        }
+
         handMountDebugMarkerModelIdx_ = renderer->loadSceneModel("debug_red_dot.glb", glm::vec3{0.0f}, 1.0f, false);
         renderer->setModelScenePass(handMountDebugMarkerModelIdx_, false);
         if (handMountDebugMarkerModelIdx_ < 0)
@@ -1501,6 +1540,12 @@ bool Game::init(AppContext& ctx)
                 SDL_Log("[client] Spine2 bone index = %d", spine2JointIdx_);
             } else {
                 SDL_Log("[client] WARNING: Spine2 bone not found — chest-anchored right-hand IK disabled");
+            }
+            if (auto it = charRig_.jointMap().find("ja_c_propGun"); it != charRig_.jointMap().end()) {
+                charPropGunIdx_ = it->second;
+                SDL_Log("[client] R301 prop-gun socket index = %d", charPropGunIdx_);
+            } else {
+                SDL_Log("[client] WARNING: ja_c_propGun not found — R301 3p mount uses wrist fallback");
             }
             // Load per-weapon hand grip poses (Phase C of the AAA IK overhaul).
             // Each weapon's grip lives at assets/weapons/<name>.grip.toml. Missing
@@ -3513,6 +3558,7 @@ SDL_AppResult Game::iterate()
             // free-matrix weapon entity render path.
             bool hasWeapon = false;
             int weaponModelIdx = -1;
+            WeaponType weaponType = WeaponType::Rifle;
             glm::mat4 weaponWorld{1.0f};
             // Per-weapon authoring data needed to derive weaponWorld from the right-hand
             // bone matrix (palm offset/rotation in weapon-local frame, weapon scale).
@@ -3709,6 +3755,13 @@ SDL_AppResult Game::iterate()
                 // still animate sanely.
                 if (const auto* ws2 = registry.try_get<WeaponState>(e); ws2 != nullptr) {
                     const GunInstance& gun2 = getEquippedGun(*ws2);
+                    const WeaponConfig& cfg2 = getWeaponConfig(gun2.type);
+                    c.ai.r301UpperActive = gun2.type == WeaponType::Rifle;
+                    c.ai.reloading = c.ai.r301UpperActive && gun2.isReloading;
+                    c.ai.reloadProgress =
+                        (c.ai.reloading && cfg2.reloadTime > 0.0f)
+                            ? std::clamp(1.0f - (gun2.reloadTime / cfg2.reloadTime), 0.0f, 1.0f)
+                            : 0.0f;
                     if (isRenderableGunType(gun2.type)) {
                         const auto& tp2 = tpWeaponParams_[static_cast<int>(gun2.type)];
                         c.ai.spineBendMultiplier = tp2.spineBendMultiplier;
@@ -3827,6 +3880,7 @@ SDL_AppResult Game::iterate()
                             // Capture per-weapon authoring data needed to derive the weaponWorld
                             // matrix from the right-hand bone matrix in the writeback loop.
                             c.hasWeapon = true;
+                            c.weaponType = gun.type;
                             c.weaponModelIdx = weaponModelIndices_[static_cast<std::size_t>(gun.type)];
                             c.weaponScale = tp.scale;
                             c.rightPalmAuthored = mounts.rightHand.palm;
@@ -3931,13 +3985,27 @@ SDL_AppResult Game::iterate()
                     if (c.handIk.right.enabled || c.handIk.right.orientationEnabled)
                         c.ac->animator->applyArmIk(/*isLeft=*/false, c.handIk.right);
 
-                    // ── 3. Derive the weapon world from the freshly-IK'd
-                    // right-hand bone. Same algebra as before: solve
-                    // weapon × R(palm) = hand, so weapon = hand × inv(R(palm)),
-                    // origin = hand_pos − weapon_rot × palm.offset.
-                    if (c.hasWeapon && rightHandJointIdx_ >= 0) {
+                    // ── 3. Derive the weapon world. R301 prefers the Apex
+                    // prop-gun socket so the mesh follows authored idle/reload
+                    // motion; other weapons keep the old Mixamo wrist/palm solve.
+                    if (c.hasWeapon) {
                         const auto& joints = c.ac->animator->jointModelMatrices();
-                        if (rightHandJointIdx_ < static_cast<int>(joints.size())) {
+                        glm::vec3 weaponOrigin(0.0f);
+                        glm::mat3 weaponRot(1.0f);
+                        bool haveWeaponWorld = false;
+
+                        if (c.weaponType == WeaponType::Rifle && charPropGunIdx_ >= 0 && r301PropGunBindValid_ &&
+                            charPropGunIdx_ < static_cast<int>(joints.size()))
+                        {
+                            c.weaponWorld =
+                                c.worldTransform * joints[static_cast<size_t>(charPropGunIdx_)] *
+                                glm::inverse(r301PropGunBind_);
+                            weaponOrigin = glm::vec3(c.weaponWorld[3]);
+                            weaponRot = glm::mat3(glm::normalize(glm::vec3(c.weaponWorld[0])),
+                                                  glm::normalize(glm::vec3(c.weaponWorld[1])),
+                                                  glm::normalize(glm::vec3(c.weaponWorld[2])));
+                            haveWeaponWorld = true;
+                        } else if (rightHandJointIdx_ >= 0 && rightHandJointIdx_ < static_cast<int>(joints.size())) {
                             const glm::mat4 handWorld =
                                 c.worldTransform * joints[static_cast<size_t>(rightHandJointIdx_)];
                             const glm::vec3 handPos(handWorld[3]);
@@ -3947,14 +4015,17 @@ SDL_AppResult Game::iterate()
 
                             const glm::mat3 invPalmRot =
                                 glm::inverse(glm::mat3(handMountRotation(c.rightPalmAuthored)));
-                            const glm::mat3 weaponRot = handRot * invPalmRot;
-                            const glm::vec3 weaponOrigin = handPos - weaponRot * c.rightPalmAuthored.offset;
+                            weaponRot = handRot * invPalmRot;
+                            weaponOrigin = handPos - weaponRot * c.rightPalmAuthored.offset;
 
                             glm::mat4 weaponWorldMat =
                                 glm::translate(glm::mat4(1.0f), weaponOrigin) * glm::mat4(weaponRot);
                             weaponWorldMat = glm::scale(weaponWorldMat, glm::vec3(c.weaponScale));
                             c.weaponWorld = weaponWorldMat;
+                            haveWeaponWorld = true;
+                        }
 
+                        if (haveWeaponWorld) {
                             // ── 4. Derive the left-hand IK target from the
                             // ACTUAL weapon world. The authored leftPalm is
                             // weapon-local (offset = m units in the weapon
@@ -4881,12 +4952,16 @@ SDL_AppResult Game::iterate()
     // Build weapon viewmodel
     {
         WeaponViewmodel vm;
+        bool submittedAnimatedR301 = false;
         const auto localDeadView = registry.view<LocalPlayer, RespawnTimer>();
-        if (currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end() &&
-            !hideRailgunViewmodelForScope && !hideViewmodelForEmote)
-        {
-            vm.modelIndex = currentWeaponModelIdx;
-            vm.visible = true;
+        const bool canShowViewmodel = currentWeaponModelIdx >= 0 && localDeadView.begin() == localDeadView.end() &&
+                                      !hideRailgunViewmodelForScope && !hideViewmodelForEmote;
+        if (canShowViewmodel) {
+            const bool useAnimatedR301 = r301ViewmodelReady_ && currentEquippedType_ == WeaponType::Rifle;
+            if (!useAnimatedR301) {
+                vm.modelIndex = currentWeaponModelIdx;
+                vm.visible = true;
+            }
 
             const float cosPitch = std::cos(renderPitch);
             const glm::vec3 forward{
@@ -5222,8 +5297,10 @@ SDL_AppResult Game::iterate()
             weaponPos += right * bobX + up * bobY;
             // Apply recoil pushback
             weaponPos -= forward * recoilPushBack_;
-            // Apply reload downward offset
-            weaponPos -= up * reloadDownwardOffset_;
+            // The animated R301 viewmodel uses its authored reload clip;
+            // keep the old procedural dip for the legacy static viewmodels.
+            if (!useAnimatedR301)
+                weaponPos -= up * reloadDownwardOffset_;
             // Apply grenade throw downward offset
             weaponPos -= up * grenadeThrowDownwardOffset_;
 
@@ -5252,74 +5329,78 @@ SDL_AppResult Game::iterate()
             const auto& fpHands = fpHandMountParams_[static_cast<int>(currentEquippedType_)];
             const Asset::Model* currentWeaponModel = modelFromRendererIndex(currentWeaponModelIdx);
             cachedRightPalmValid_ = false;
-            if (viewmodelRightHandModelIdx_ >= 0) {
-                vm.hands.right.modelIndex = viewmodelRightHandModelIdx_;
-                vm.hands.right.visible = true;
-                vm.hands.right.transform = makeViewmodelHandTransform(weaponPos,
-                                                                      weaponWorld,
-                                                                      weaponOrientation,
-                                                                      currentWeaponModel,
-                                                                      "ik_r_palm",
-                                                                      fpHands.rightArm.palm,
-                                                                      fpHands.scale);
-                // Cache the right palm's world position (translation column) so
-                // the muzzle flash can spawn relative to it (see muzzleFlashOrigin).
-                cachedRightPalmWorld_ = glm::vec3(vm.hands.right.transform[3]);
-                cachedRightPalmValid_ = true;
-            }
-            if (viewmodelLeftHandModelIdx_ >= 0) {
-                vm.hands.left.modelIndex = viewmodelLeftHandModelIdx_;
-                vm.hands.left.visible = true;
-                vm.hands.left.transform = makeViewmodelHandTransform(weaponPos,
-                                                                     weaponWorld,
-                                                                     weaponOrientation,
-                                                                     currentWeaponModel,
-                                                                     "ik_l_palm",
-                                                                     fpHands.leftArm.palm,
-                                                                     fpHands.scale);
-            }
+            if (!useAnimatedR301) {
+                if (viewmodelRightHandModelIdx_ >= 0) {
+                    vm.hands.right.modelIndex = viewmodelRightHandModelIdx_;
+                    vm.hands.right.visible = true;
+                    vm.hands.right.transform = makeViewmodelHandTransform(weaponPos,
+                                                                          weaponWorld,
+                                                                          weaponOrientation,
+                                                                          currentWeaponModel,
+                                                                          "ik_r_palm",
+                                                                          fpHands.rightArm.palm,
+                                                                          fpHands.scale);
+                    // Cache the right palm's world position (translation column) so
+                    // the muzzle flash can spawn relative to it (see muzzleFlashOrigin).
+                    cachedRightPalmWorld_ = glm::vec3(vm.hands.right.transform[3]);
+                    cachedRightPalmValid_ = true;
+                }
+                if (viewmodelLeftHandModelIdx_ >= 0) {
+                    vm.hands.left.modelIndex = viewmodelLeftHandModelIdx_;
+                    vm.hands.left.visible = true;
+                    vm.hands.left.transform = makeViewmodelHandTransform(weaponPos,
+                                                                         weaponWorld,
+                                                                         weaponOrientation,
+                                                                         currentWeaponModel,
+                                                                         "ik_l_palm",
+                                                                         fpHands.leftArm.palm,
+                                                                         fpHands.scale);
+                }
 
-            if (handMountDebugMarkerModelIdx_ >= 0 && handMountDebugTarget_.space == HandMountDebugSpace::FirstPerson &&
-                handMountDebugTarget_.weaponIdx == static_cast<int>(currentEquippedType_))
-            {
-                const FirstPersonArmMountSet& arm = handMountDebugTarget_.left ? fpHands.leftArm : fpHands.rightArm;
-                glm::vec3 debugOffset = arm.palm.offset;
-                bool fingerTarget = false;
-                std::size_t fingerIndex = 0;
-                switch (handMountDebugTarget_.point) {
-                case HandMountDebugPoint::Shoulder:
-                    debugOffset = arm.shoulderOffset;
-                    break;
-                case HandMountDebugPoint::Elbow:
-                    debugOffset = arm.elbowOffset;
-                    break;
-                case HandMountDebugPoint::Palm:
-                    debugOffset = arm.palm.offset;
-                    break;
-                case HandMountDebugPoint::Finger0:
-                case HandMountDebugPoint::Finger1:
-                case HandMountDebugPoint::Finger2:
-                case HandMountDebugPoint::Finger3:
-                case HandMountDebugPoint::Finger4: {
-                    const auto index = static_cast<std::size_t>(handMountDebugTarget_.point) -
-                                       static_cast<std::size_t>(HandMountDebugPoint::Finger0);
-                    if (index < arm.fingers.size()) {
-                        fingerTarget = true;
-                        fingerIndex = index;
+                if (handMountDebugMarkerModelIdx_ >= 0 &&
+                    handMountDebugTarget_.space == HandMountDebugSpace::FirstPerson &&
+                    handMountDebugTarget_.weaponIdx == static_cast<int>(currentEquippedType_))
+                {
+                    const FirstPersonArmMountSet& arm = handMountDebugTarget_.left ? fpHands.leftArm : fpHands.rightArm;
+                    glm::vec3 debugOffset = arm.palm.offset;
+                    bool fingerTarget = false;
+                    std::size_t fingerIndex = 0;
+                    switch (handMountDebugTarget_.point) {
+                    case HandMountDebugPoint::Shoulder:
+                        debugOffset = arm.shoulderOffset;
+                        break;
+                    case HandMountDebugPoint::Elbow:
+                        debugOffset = arm.elbowOffset;
+                        break;
+                    case HandMountDebugPoint::Palm:
+                        debugOffset = arm.palm.offset;
+                        break;
+                    case HandMountDebugPoint::Finger0:
+                    case HandMountDebugPoint::Finger1:
+                    case HandMountDebugPoint::Finger2:
+                    case HandMountDebugPoint::Finger3:
+                    case HandMountDebugPoint::Finger4: {
+                        const auto index = static_cast<std::size_t>(handMountDebugTarget_.point) -
+                                           static_cast<std::size_t>(HandMountDebugPoint::Finger0);
+                        if (index < arm.fingers.size()) {
+                            fingerTarget = true;
+                            fingerIndex = index;
+                        }
+                        break;
                     }
-                    break;
-                }
-                }
+                    }
 
-                glm::vec3 debugPoint = weaponPos + transformDirection(weaponOrientation, debugOffset);
-                if (fingerTarget) {
-                    const glm::mat4 palmOrientation = weaponOrientation * handMountRotation(arm.palm);
-                    const glm::vec3 palmPoint = weaponPos + transformDirection(weaponOrientation, arm.palm.offset);
-                    debugPoint = palmPoint + transformDirection(palmOrientation, arm.fingers[fingerIndex].offset);
+                    glm::vec3 debugPoint = weaponPos + transformDirection(weaponOrientation, debugOffset);
+                    if (fingerTarget) {
+                        const glm::mat4 palmOrientation = weaponOrientation * handMountRotation(arm.palm);
+                        const glm::vec3 palmPoint = weaponPos + transformDirection(weaponOrientation, arm.palm.offset);
+                        debugPoint = palmPoint + transformDirection(palmOrientation, arm.fingers[fingerIndex].offset);
+                    }
+                    vm.debugPoint.modelIndex = handMountDebugMarkerModelIdx_;
+                    vm.debugPoint.visible = true;
+                    vm.debugPoint.transform =
+                        glm::scale(glm::translate(glm::mat4(1.0f), debugPoint), glm::vec3(2.0f));
                 }
-                vm.debugPoint.modelIndex = handMountDebugMarkerModelIdx_;
-                vm.debugPoint.visible = true;
-                vm.debugPoint.transform = glm::scale(glm::translate(glm::mat4(1.0f), debugPoint), glm::vec3(2.0f));
             }
 
             cachedMuzzleValid_ = false;
@@ -5328,6 +5409,77 @@ SDL_AppResult Game::iterate()
                 cachedMuzzleWorld_ = glm::vec3(weaponWorld * glm::vec4(currentWeaponModel->muzzleLocalPos, 1.0f));
                 cachedMuzzleValid_ = true;
             }
+
+            if (useAnimatedR301) {
+                bool localReloading = false;
+                float localReloadTotal = 0.0f;
+                registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
+                    const GunInstance& gun = getEquippedGun(ws);
+                    if (gun.type != WeaponType::Rifle)
+                        return;
+                    const WeaponConfig& cfg = getWeaponConfig(gun.type);
+                    localReloading = gun.isReloading;
+                    localReloadTotal = cfg.reloadTime;
+                });
+
+                auto firstAvailableGunClip = [&](const char* preferred, const char* fallback) -> std::string {
+                    if (preferred != nullptr && r301ViewmodelGun_.hasClip(preferred))
+                        return preferred;
+                    if (fallback != nullptr && r301ViewmodelGun_.hasClip(fallback))
+                        return fallback;
+                    return {};
+                };
+                auto playGunAndArms = [&](const std::string& clip, bool loop, float speed) {
+                    if (clip.empty())
+                        return;
+                    r301ViewmodelGun_.playClip(clip, loop, speed);
+                    if (r301ViewmodelArms_.isLoaded() && r301ViewmodelArms_.hasClip(clip))
+                        r301ViewmodelArms_.playClip(clip, loop, speed);
+                };
+
+                if (!r301ViewmodelEquipped_) {
+                    const std::string drawClip = firstAvailableGunClip("drawfirst", "draw");
+                    playGunAndArms(drawClip, false, 1.0f);
+                    r301ViewmodelEquipped_ = true;
+                    r301ViewmodelReloadActive_ = false;
+                }
+
+                if (localReloading && !r301ViewmodelReloadActive_) {
+                    const std::string reloadClip = firstAvailableGunClip("reload", "reload_empty");
+                    float speed = 1.0f;
+                    if (!reloadClip.empty() && localReloadTotal > 0.0001f) {
+                        const float duration = r301ViewmodelGun_.clipDuration(reloadClip);
+                        if (duration > 0.0001f)
+                            speed = duration / localReloadTotal;
+                    }
+                    playGunAndArms(reloadClip, false, speed);
+                    r301ViewmodelReloadActive_ = true;
+                } else if (!localReloading && r301ViewmodelReloadActive_) {
+                    r301ViewmodelReloadActive_ = false;
+                }
+
+                r301ViewmodelGun_.update(frameTime);
+                if (r301ViewmodelArms_.isLoaded())
+                    r301ViewmodelArms_.update(frameTime);
+
+                SkinnedInstance inst{};
+                inst.worldTransform = weaponWorld;
+                inst.paletteBase = 0;
+                inst.tint = glm::vec4{1.0f, 1.0f, 1.0f, 0.0f};
+                const std::vector<SkinnedInstance> instances{inst};
+                renderer->setViewmodelFrame(r301ViewmodelGun_.skinMatrices(), instances);
+                if (r301ViewmodelArms_.isLoaded())
+                    renderer->setViewmodelArmsFrame(r301ViewmodelArms_.skinMatrices(), instances);
+                else
+                    renderer->setViewmodelArmsFrame({}, {});
+                submittedAnimatedR301 = true;
+            }
+        }
+        if (!submittedAnimatedR301) {
+            r301ViewmodelEquipped_ = false;
+            r301ViewmodelReloadActive_ = false;
+            renderer->setViewmodelFrame({}, {});
+            renderer->setViewmodelArmsFrame({}, {});
         }
         renderer->setWeaponViewmodel(vm);
     }

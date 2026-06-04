@@ -21,9 +21,11 @@
 
 void SkinnedRenderer::init(SDL_GPUDevice* device,
                            SDL_GPUTextureFormat& colorTarget,
-                           const SDL_GPUShaderFormat& shaderFormat)
+                           const SDL_GPUShaderFormat& shaderFormat,
+                           bool textured)
 {
     device_ = device;
+    textured_ = textured;
     colorFormat_ = colorTarget;
     shaderFormat_ = shaderFormat;
     // No GPU allocations here — buffers and pipeline are created on demand
@@ -35,6 +37,12 @@ void SkinnedRenderer::init(SDL_GPUDevice* device,
     createSkinningPipeline(colorTarget, shaderFormat);
     createSkinnedDepthPipeline(shaderFormat);
     createChamsPipeline();
+}
+
+void SkinnedRenderer::setDiffuseTexture(SDL_GPUTexture* tex, SDL_GPUSampler* sampler)
+{
+    diffuseTex_ = tex;
+    diffuseSampler_ = sampler;
 }
 
 void SkinnedRenderer::shutdown()
@@ -316,6 +324,15 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
     recordChams();
 }
 
+void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
+{
+    framePalette_ = palette;
+    frameInstances_ = instances;
+    visibleInstanceCount_ = static_cast<Uint32>(instances.size());
+    chamsIndices_.clear();
+    frameDirty_ = !frameInstances_.empty();
+}
+
 bool SkinnedRenderer::ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes)
 {
     auto growBuf = [&](SDL_GPUBuffer*& buf, Uint32& cap, Uint32 want, SDL_GPUBufferUsageFlags use) {
@@ -420,6 +437,12 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
 
     SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
+    if (textured_ && diffuseTex_ && diffuseSampler_) {
+        SDL_GPUTextureSamplerBinding binding{};
+        binding.texture = diffuseTex_;
+        binding.sampler = diffuseSampler_;
+        SDL_BindGPUFragmentSamplers(renderPass, 0, &binding, 1);
+    }
     for (auto sm : skinnedMeshes_) {
         if (!sm.vb || !sm.boneVb || !sm.ib) {
             continue;
@@ -556,8 +579,9 @@ bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, 
     vertexShader.storageBufferCount = 2;
 
     Boilerplate::ShaderInfo fragmentShader{};
-    fragmentShader.path = "shaders-new/debug.frag";
+    fragmentShader.path = textured_ ? "shaders-new/skinned_geometry_textured.frag" : "shaders-new/debug.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = textured_ ? 1u : 0u;
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;

@@ -76,6 +76,13 @@ void testTransitionTrackerDetectsStartStopAndPivot()
     assert(stop.preferredClip == ClipId::StopLeft);
 }
 
+void testR301UpperBodyClipIdsAreCatalogued()
+{
+    static_assert(static_cast<int>(ClipId::R301IdleUpper) < static_cast<int>(ClipId::_Count));
+    static_assert(static_cast<int>(ClipId::R301ReloadUpper) < static_cast<int>(ClipId::_Count));
+    static_assert(ClipId::R301IdleUpper != ClipId::R301ReloadUpper);
+}
+
 } // namespace
 
 int main()
@@ -85,5 +92,6 @@ int main()
     testForwardGameplaySpeedUsesRun();
     testCrouchForwardAndBackwardUseDifferentClips();
     testTransitionTrackerDetectsStartStopAndPivot();
+    testR301UpperBodyClipIdsAreCatalogued();
     return 0;
 }

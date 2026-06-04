@@ -379,6 +379,7 @@ struct CharacterAnimator::Impl
     // intentionally excluded: it is the rig root, so blending it would carry the
     // strafe rotation into the whole upper body and defeat the masking.
     std::vector<bool> lowerBodyMask;
+    std::vector<bool> upperBodyMask;
 
     // Per-joint blend weights (SoA, num_soa_joints entries) rebuilt each frame
     // when the strafe slot is active. locoJointWeights drive slots 0/1 (loco),
@@ -388,6 +389,9 @@ struct CharacterAnimator::Impl
     // forward/strafe crossfade while the torso stays pure forward-loco.
     std::vector<ozz::math::SimdFloat4> locoJointWeights;
     std::vector<ozz::math::SimdFloat4> strafeJointWeights;
+    std::vector<ozz::math::SimdFloat4> upperBodyJointWeights;
+    float r301UpperWeight = 0.0f;
+    float r301UpperIdlePhase = 0.0f;
 
     // Lateral-vs-total speed ratio in [0,1] used to weight the strafe mask on
     // the legs. Set by update() (smoothed) for the local player + server, and
@@ -495,6 +499,36 @@ CharacterAnimator::CharacterAnimator(const CharacterRig& rig, const AnimationLib
                 SDL_Log("CharacterAnimator: strafe lower-body mask bound (%d/2 leg roots)", legRoots);
             } else {
                 impl_->lowerBodyMask.clear(); // No legs found — disables masking gracefully.
+            }
+        }
+
+        // R301 upper-body overlays: include the Mixamo torso chain plus the
+        // grafted Apex arm hierarchy. The stitched rig parents Apex arms to the
+        // body, but explicitly unioning the roots keeps the mask robust if the
+        // export hierarchy changes during prototype iteration.
+        {
+            impl_->upperBodyMask.assign(static_cast<size_t>(numJoints), false);
+            int upperRoots = 0;
+            for (const char* upperRootName :
+                 {"mixamorig:Spine", "jx_c_delta", "def_l_shoulder", "def_r_shoulder"})
+            {
+                const auto it = jm.find(upperRootName);
+                if (it == jm.end())
+                    continue;
+                const std::vector<bool> sub = buildDescendantMask(rig.skeleton(), it->second);
+                const size_t n = std::min(sub.size(), impl_->upperBodyMask.size());
+                for (size_t j = 0; j < n; ++j)
+                    impl_->upperBodyMask[j] = impl_->upperBodyMask[j] || sub[j];
+                ++upperRoots;
+            }
+            const int numSoa = rig.skeleton() ? rig.skeleton()->num_soa_joints() : 0;
+            impl_->locoJointWeights.resize(static_cast<size_t>(numSoa));
+            impl_->strafeJointWeights.resize(static_cast<size_t>(numSoa));
+            impl_->upperBodyJointWeights.resize(static_cast<size_t>(numSoa));
+            if (upperRoots > 0) {
+                SDL_Log("CharacterAnimator: R301 upper-body mask bound (%d roots)", upperRoots);
+            } else {
+                impl_->upperBodyMask.clear();
             }
         }
 
@@ -1298,6 +1332,47 @@ void CharacterAnimator::update(const AnimationInputs& inputs, float dt)
         sOvr.weight = 0.0f;
     }
 
+    // R301 gameplay upper body. Reuses the override slot only when no
+    // full-body override is active, so locomotion remains Mixamo-driven while
+    // the grafted Apex arms get their authored idle/reload pose.
+    {
+        const bool onFoot = impl_->currentMode == Mode::Locomotion || impl_->currentMode == Mode::Crouch;
+        const bool canUseR301Upper = inputs.r301UpperActive && onFoot && overrideClip == ClipId::_Count;
+        const float targetWeight = canUseR301Upper ? 1.0f : 0.0f;
+        const float alpha = anim_locomotion::smoothingAlpha(dt, 0.10f);
+        impl_->r301UpperWeight += (targetWeight - impl_->r301UpperWeight) * alpha;
+
+        if (canUseR301Upper && impl_->r301UpperWeight > 1e-4f) {
+            const ClipId upperClip = inputs.reloading ? ClipId::R301ReloadUpper : ClipId::R301IdleUpper;
+            if (impl_->library->has(upperClip)) {
+                float ratio = 0.0f;
+                float speedMul = 1.0f;
+                if (inputs.reloading) {
+                    ratio = std::clamp(inputs.reloadProgress, 0.0f, 1.0f);
+                    const float dur = impl_->library->duration(upperClip);
+                    speedMul = dur > 0.0001f ? dur : 1.0f;
+                } else {
+                    const float dur = impl_->library->duration(upperClip);
+                    if (dur > 0.0001f) {
+                        impl_->r301UpperIdlePhase += dt / dur;
+                        if (impl_->r301UpperIdlePhase >= 1.0f)
+                            impl_->r301UpperIdlePhase -= std::floor(impl_->r301UpperIdlePhase);
+                    }
+                    ratio = impl_->r301UpperIdlePhase;
+                }
+
+                sOvr.id = upperClip;
+                sOvr.timeRatio = ratio;
+                sOvr.weight = impl_->r301UpperWeight;
+                sOvr.playbackSpeed = speedMul;
+                sOvr.active = true;
+            } else if (!impl_->missingClipLogged[static_cast<size_t>(upperClip)]) {
+                SDL_Log("CharacterAnimator: clip '%s' not loaded — skipping R301 upper overlay", clipName(upperClip));
+                impl_->missingClipLogged[static_cast<size_t>(upperClip)] = true;
+            }
+        }
+    }
+
     // --- 6. Wallrun mirror state. ---
     impl_->wallRunMirror =
         (impl_->currentMode == Mode::WallRun && inputs.wallRunSide == WallSideLeft) ||
@@ -1417,22 +1492,39 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
         // weight strafeBlend, loco weight (1 - strafeBlend) → original crossfade.
         const bool maskStrafe =
             impl_->samplers[k_slotStrafe].active && !impl_->lowerBodyMask.empty() && !impl_->locoJointWeights.empty();
-        if (maskStrafe) {
-            const float sb = std::clamp(impl_->strafeBlend, 0.0f, 1.0f);
+        const bool overrideIsR301Upper =
+            impl_->samplers[k_slotOverride].active &&
+            (impl_->samplers[k_slotOverride].id == ClipId::R301IdleUpper ||
+             impl_->samplers[k_slotOverride].id == ClipId::R301ReloadUpper);
+        const bool maskUpper = overrideIsR301Upper && !impl_->upperBodyMask.empty() &&
+                               !impl_->upperBodyJointWeights.empty() && !impl_->locoJointWeights.empty();
+        if (maskStrafe || maskUpper) {
+            const float sb = maskStrafe ? std::clamp(impl_->strafeBlend, 0.0f, 1.0f) : 0.0f;
+            const float ub = maskUpper ? std::clamp(impl_->samplers[k_slotOverride].weight, 0.0f, 1.0f) : 0.0f;
             const size_t numSoa = impl_->locoJointWeights.size();
-            const size_t numJoints = impl_->lowerBodyMask.size();
             for (size_t g = 0; g < numSoa; ++g) {
                 float lLoco[4];
                 float lStrafe[4];
+                float lUpper[4];
                 for (int lane = 0; lane < 4; ++lane) {
                     const size_t j = g * 4 + static_cast<size_t>(lane);
-                    const bool lower = (j < numJoints) && impl_->lowerBodyMask[j];
-                    lLoco[lane] = lower ? (1.0f - sb) : 1.0f;
-                    lStrafe[lane] = lower ? sb : 0.0f;
+                    const bool lower = maskStrafe && j < impl_->lowerBodyMask.size() && impl_->lowerBodyMask[j];
+                    const bool upper = maskUpper && j < impl_->upperBodyMask.size() && impl_->upperBodyMask[j];
+                    if (upper) {
+                        lLoco[lane] = 1.0f - ub;
+                        lStrafe[lane] = 0.0f;
+                        lUpper[lane] = 1.0f;
+                    } else {
+                        lLoco[lane] = lower ? (1.0f - sb) : 1.0f;
+                        lStrafe[lane] = lower ? sb : 0.0f;
+                        lUpper[lane] = 0.0f;
+                    }
                 }
                 impl_->locoJointWeights[g] = ozz::math::simd_float4::Load(lLoco[0], lLoco[1], lLoco[2], lLoco[3]);
                 impl_->strafeJointWeights[g] =
                     ozz::math::simd_float4::Load(lStrafe[0], lStrafe[1], lStrafe[2], lStrafe[3]);
+                impl_->upperBodyJointWeights[g] =
+                    ozz::math::simd_float4::Load(lUpper[0], lUpper[1], lUpper[2], lUpper[3]);
             }
         }
 
@@ -1445,11 +1537,15 @@ void CharacterAnimator::runSamplingAndSkinning(const AnimationInputs& inputs)
             auto& layer = layers[static_cast<size_t>(layerCount)];
             layer.weight = samp.weight;
             layer.transform = ozz::make_span(impl_->perSamplerLocals[i]);
-            if (maskStrafe) {
+            if (maskStrafe || maskUpper) {
                 if (i == k_slotLocoA || i == k_slotLocoB)
                     layer.joint_weights = ozz::make_span(impl_->locoJointWeights);
                 else if (i == k_slotStrafe)
                     layer.joint_weights = ozz::make_span(impl_->strafeJointWeights);
+                else if (maskUpper && i == k_slotOverride)
+                    layer.joint_weights = ozz::make_span(impl_->upperBodyJointWeights);
+                else if (maskUpper && i == k_slotTransition)
+                    layer.joint_weights = ozz::make_span(impl_->locoJointWeights);
             }
             ++layerCount;
         }

@@ -1389,6 +1389,16 @@ void ServerGame::updateAnimationAndHitboxes(float dt)
             ai.emoteClip = ps->activeEmote >= 0 ? static_cast<int>(emoteClipForIndex(ps->activeEmote))
                                                 : static_cast<int>(ClipId::_Count);
         }
+        if (const auto* ws = registry.try_get<WeaponState>(entity)) {
+            const GunInstance& gun = getEquippedGun(*ws);
+            const WeaponConfig& cfg = getWeaponConfig(gun.type);
+            ai.r301UpperActive = gun.type == WeaponType::Rifle;
+            ai.reloading = ai.r301UpperActive && gun.isReloading;
+            ai.reloadProgress =
+                (ai.reloading && cfg.reloadTime > 0.0f)
+                    ? std::clamp(1.0f - (gun.reloadTime / cfg.reloadTime), 0.0f, 1.0f)
+                    : 0.0f;
+        }
 
         animator->update(ai, dt);
 

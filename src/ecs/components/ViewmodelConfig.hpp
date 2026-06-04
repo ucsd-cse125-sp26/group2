@@ -161,13 +161,13 @@ struct RecoilParams
 inline const ViewmodelParams& getViewmodelParams(WeaponType type)
 {
     static constexpr std::array<ViewmodelParams, kRenderableWeaponTypeCount> k_params{{
-        // Rifle — existing tuning
-        {.scale = 39.0f,
-         .forward = 78.0f,
-         .right = 37.0f,
-         .down = -11.0f,
+        // Rifle — Apex R-301 animated viewmodel is authored in camera space.
+        {.scale = 1.0f,
+         .forward = 0.0f,
+         .right = 0.0f,
+         .down = 0.0f,
          .yawOffset = 0.0f,
-         .pitchOffset = -1.0f,
+         .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
         // Rocket — fallback to rifle tuning
         {.scale = 39.0f,
@@ -228,7 +228,7 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
         // Rifle — middleweight, full spine bend, moderate recoil.
         // Locomotion anchor hand-tuned via the 3P Weapon Tweaker; other
         // stances stay on the generic defaults until they're tuned.
-        {.scale = 10.0f,
+        {.scale = 1.0f,
          .spineBendMultiplier = 1.0f,
          .hipLeanMultiplier = 0.1f,
          .recoilKickRad = 0.05f,

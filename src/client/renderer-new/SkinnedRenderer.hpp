@@ -51,7 +51,13 @@ public:
     /// the device exists.  Does NOT allocate any GPU resources yet; those
     /// are created lazily on the first `setRig` / `setFrame` call.
     /// @param device  Borrowed; the device must outlive this SkinnedRenderer.
-    void init(SDL_GPUDevice* device, SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat);
+    void init(SDL_GPUDevice* device,
+              SDL_GPUTextureFormat& colorTarget,
+              const SDL_GPUShaderFormat& shaderFormat,
+              bool textured = false);
+
+    /// @brief Diffuse texture + sampler bound for all meshes in textured mode.
+    void setDiffuseTexture(SDL_GPUTexture* tex, SDL_GPUSampler* sampler);
 
     /// @brief Install the shared character rig.  Call ONCE after `init`.
     /// @param meshes     One source-mesh entry per skinned mesh in the rig (typically 1-3 for humanoid rigs).
@@ -107,6 +113,11 @@ public:
     void setFrame(const std::vector<glm::mat4>& palette,
                   const std::vector<SkinnedInstance>& instances,
                   const FrustumPlanes& frustum);
+
+    /// @brief Push a skinned frame without frustum culling. Used for first-person
+    /// viewmodels, whose camera-relative bounds should never be culled by the
+    /// world camera sphere test.
+    void setFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
 
     /// @brief Upload this frame's palette + instance buffers to the GPU.
     /// @param cmd       Frame command buffer.
@@ -232,6 +243,10 @@ private:
     bool rigInstalled_ = false;
     int numJoints_ = 0;
     std::vector<SkinnedMesh> skinnedMeshes_;
+
+    bool textured_ = false;
+    SDL_GPUTexture* diffuseTex_ = nullptr;     ///< Borrowed.
+    SDL_GPUSampler* diffuseSampler_ = nullptr; ///< Borrowed.
 
     // Bind-pose bounding sphere (rig-local space), computed in `setRig` and used
     // by `setFrame` to frustum-cull instances.  The radius carries an animation

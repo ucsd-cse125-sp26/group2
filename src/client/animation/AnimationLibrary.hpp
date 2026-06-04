@@ -54,6 +54,11 @@ enum class ClipId : uint8_t
     EmoteGangnam,
     EmoteHipHop,
     EmoteNorthernSoul,
+    // R301 gameplay upper-body overlays. These are Apex-authored clips that
+    // drive the grafted Apex arm bones while the Mixamo lower body keeps using
+    // the normal locomotion graph.
+    R301IdleUpper,
+    R301ReloadUpper,
     _Count, ///< Sentinel; also used as "no clip / no override".
 };
 

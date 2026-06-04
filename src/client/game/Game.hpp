@@ -8,6 +8,7 @@
 #include "animation/AnimationTesterUI.hpp"
 #include "animation/CharacterRig.hpp"
 #include "animation/SkinningBackend.hpp"
+#include "animation/WeaponViewmodelAnim.hpp"
 #include "app/AppContext.hpp"
 #include "debug/ClientPerfRecorder.hpp"
 #include "debug/DebugUI.hpp"
@@ -370,6 +371,7 @@ private:
     int weaponAssetIds_[kRenderableWeaponTypeCount] = {-1, -1, -1, -1, -1};
     int viewmodelLeftHandModelIdx_ = -1;
     int viewmodelRightHandModelIdx_ = -1;
+    int r301ViewmodelArmsModelIdx_ = -1;
     int handMountDebugMarkerModelIdx_ = -1;
 
     int rocketProjectileModelIdx_ = -1;
@@ -400,6 +402,11 @@ private:
     WeaponType currentEquippedType_ = WeaponType::Rifle; ///< Cached each frame.
     WeaponType lastEquippedType_ = WeaponType::Rifle; ///< Previous frame's weapon — triggers default reload on change.
     bool viewmodelDefaultsApplied_ = false;
+    WeaponViewmodelAnim r301ViewmodelGun_;
+    WeaponViewmodelAnim r301ViewmodelArms_;
+    bool r301ViewmodelReady_ = false;
+    bool r301ViewmodelEquipped_ = false;
+    bool r301ViewmodelReloadActive_ = false;
 
     // Sound state tracking
     bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.
@@ -652,6 +659,9 @@ private:
                                  ///< third-person weapon mesh to the right-hand bone after IK.
     int spine2JointIdx_ = -1;    ///< Cached "mixamorig:Spine2" joint index. Anchors the chest-relative right-hand IK
                                  ///< target so the gun is held in front of the chest instead of hanging at the side.
+    int charPropGunIdx_ = -1;    ///< Cached Apex "ja_c_propGun" socket for R301 third-person weapon mounting.
+    glm::mat4 r301PropGunBind_{1.0f}; ///< R301 viewmodel bind-space prop socket matrix.
+    bool r301PropGunBindValid_ = false;
     std::array<WeaponGripPose, kRenderableWeaponTypeCount>
         weaponGripPoses_{};      ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from
                                  ///< assets/weapons/<name>.grip.toml at startup. Joint data is per-joint (pitch, yaw)

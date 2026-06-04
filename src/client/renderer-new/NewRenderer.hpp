@@ -344,6 +344,14 @@ public:
     bool setRig(const std::vector<RigMeshSource>& meshes, int numJoints);
 
     void setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
+
+    bool setViewmodelRig(const std::vector<RigMeshSource>& meshes, int numJoints);
+    void setViewmodelFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
+    void setViewmodelTexture(int modelInstanceIndex);
+    bool setViewmodelArmsRig(const std::vector<RigMeshSource>& meshes, int numJoints);
+    void setViewmodelArmsFrame(const std::vector<glm::mat4>& palette,
+                               const std::vector<SkinnedInstance>& instances);
+    void setViewmodelArmsTexture(int modelInstanceIndex);
     // ─── Public settings members (mutable directly from Game / debug UI) ─────
     //
     // The legacy renderer exposed these as direct member access.  Keep the
@@ -495,6 +503,8 @@ private:
 
     // Skinned-character subsystem (see SkinnedRenderer.hpp) ──────────────────
     SkinnedRenderer skinnedRenderer_;
+    SkinnedRenderer viewmodelSkinned_;
+    SkinnedRenderer viewmodelArmsSkinned_;
 
     // Telemetry counters (filled by drawFrame) ────────────────────────────────
     float lastAcquireMs_ = 0.0f;

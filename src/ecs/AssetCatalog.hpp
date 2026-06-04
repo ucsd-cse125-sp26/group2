@@ -59,10 +59,10 @@ inline const AssetDefinition kMedkitModel{
 
 inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAssets{{
     {.name = "weapon_rifle",
-     .filename = "assault_rifle.glb",
+     .filename = "apex_r301.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
-     .renderScale = {20.0f, 20.0f, 20.0f}},
+     .renderScale = {1.0f, 1.0f, 1.0f}},
     {.name = "weapon_rocket",
      .filename = "rocket_launcher.glb",
      .role = AssetRole::Entity,
@@ -92,4 +92,19 @@ inline const std::array<AssetDefinition, 3> kEffectAssets{{
     {.name = "glow_sphere", .role = AssetRole::Effect},
     {.name = "glow_sphere_movable", .role = AssetRole::Effect},
     {.name = "glow_cylinder", .role = AssetRole::Effect},
+}};
+
+struct WeaponViewmodelAssets
+{
+    const char* viewmodelGlb = "";
+    const char* armsGlb = "";
+    bool flipUVs = true;
+};
+
+inline const std::array<WeaponViewmodelAssets, kRenderableWeaponTypeCount> kWeaponViewmodelAssets{{
+    {.viewmodelGlb = "apex_r301.glb", .armsGlb = "apex_r301_arms.glb", .flipUVs = true},
+    {},
+    {},
+    {},
+    {},
 }};

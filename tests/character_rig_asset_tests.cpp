@@ -174,7 +174,7 @@ int main()
                          2.4f,
                          3.2f,
                          true,
-                         {"jx_c_delta", "def_l_shoulder", "def_r_shoulder"}) &&
+                         {"jx_c_delta", "def_l_shoulder", "def_r_shoulder", "ja_c_propGun"}) &&
          ok;
     ok = requireApexRigScalesFromMixamoBody(legacyOrientationFix) && ok;
     return ok ? 0 : 1;
