@@ -111,7 +111,7 @@ EquipmentSlots::EquipmentSlots()
 {
     anchor = HudAnchor::BottomCenter;
     offsetX = 0.f;
-    offsetY = -40.f;
+    offsetY = -75.f;
     width = iconFrameWidth * 2.f + barWidth * 2.f + iconBarGap * 2.f + centerGap;
     height = std::max(iconFrameHeight, barHeight);
 

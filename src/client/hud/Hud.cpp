@@ -15,6 +15,7 @@
 #include "widgets/EmoteWheelWidget.hpp"
 #include "widgets/EnemyWorldHealthBar.hpp"
 #include "widgets/EquipmentSlots.hpp"
+#include "widgets/EquippedWeaponsWidget.hpp"
 #include "widgets/GrenadeSlotsWidget.hpp"
 #include "widgets/HealthArmorBar.hpp"
 #include "widgets/HitMarkerWidget.hpp"
@@ -28,6 +29,7 @@
 #include "widgets/RailgunScopeWidget.hpp"
 #include "widgets/Scoreboard.hpp"
 #include "widgets/ShotgunPelletWidget.hpp"
+#include "widgets/ScreenDecalWidget.hpp"
 #include "widgets/VignetteWidget.hpp"
 
 #include <algorithm>
@@ -199,6 +201,8 @@ void Hud::createWidgets()
 
     // Vignette goes first (full-screen overlay behind everything else).
     widgets_.push_back(std::make_unique<VignetteWidget>());
+    widgets_.push_back(std::make_unique<TopDecalWidget>());
+    widgets_.push_back(std::make_unique<BottomDecalWidget>());
 
     // World-space markers — drawn on top of the scene but before screen-space
     // chrome so the chrome can occlude them at edges.
@@ -229,6 +233,7 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<EquipmentSlots>()); // bottom-center
     widgets_.push_back(std::make_unique<GrenadeSlotsWidget>());
     widgets_.push_back(std::make_unique<PopupNotification>());
+    widgets_.push_back(std::make_unique<EquippedWeaponsWidget>());
     widgets_.push_back(std::make_unique<AmmoCounter>()); // weapon panel (bottom-right)
     widgets_.push_back(std::make_unique<ChatWidget>());  // chat should sit above gameplay chrome
 

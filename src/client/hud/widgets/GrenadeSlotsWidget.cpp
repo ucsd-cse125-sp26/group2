@@ -25,31 +25,14 @@ void drawSpacedText(HudContext& ctx, const char* text, float x, float y, float s
     }
 }
 
-void drawMolotovIcon(HudContext& ctx, float x, float y, float size, HudColor color)
-{
-    const float u = size / 16.f;
-    ctx.rotatedRect(x + 8.f * u, y + 9.f * u, 5.f * u, 9.f * u, -18.f, color);
-    ctx.rotatedRect(x + 6.2f * u, y + 3.8f * u, 3.f * u, 4.f * u, -18.f, color);
-    ctx.triangle(x + 8.f * u, y + 0.5f * u, x + 11.f * u, y + 5.f * u, x + 6.f * u, y + 5.f * u, color);
-}
-
-void drawStickyIcon(HudContext& ctx, float x, float y, float size, HudColor color)
-{
-    using namespace voidfall::icons;
-    const float cx = x + size * 0.5f;
-    const float cy = y + size * 0.54f;
-    strokedCircle(ctx, cx, cy, size * 0.34f, std::max(1.f, size * 0.10f), 18, color);
-    filledCircle(ctx, cx, cy, size * 0.11f, 10, color);
-}
-
 void drawGrenadeTypeIcon(HudContext& ctx, const std::string& name, float x, float y, float size, HudColor color)
 {
     if (name == "MOLOTOV") {
-        drawMolotovIcon(ctx, x, y, size, color);
+        ctx.svg(HudIcon::MolotovGrenadeIcon, x, y, size, size, color);
     } else if (name == "STICKY") {
-        drawStickyIcon(ctx, x, y, size, color);
+        ctx.svg(HudIcon::StickyGrenadeIcon, x, y, size, size, color);
     } else {
-        voidfall::icons::grenade(ctx, x, y, size, color);
+        ctx.svg(HudIcon::FragGrenadeIcon, x, y, size, size, color);
     }
 }
 } // namespace

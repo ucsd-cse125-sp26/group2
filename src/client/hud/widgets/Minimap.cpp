@@ -29,8 +29,8 @@ void drawCircleOutline(HudContext& ctx, float cx, float cy, float radius, float 
 Minimap::Minimap()
 {
     anchor = HudAnchor::BottomLeft;
-    offsetX = 60.f;
-    offsetY = -300.f;
+    offsetX = 2.f;
+    offsetY = -298.f;
     width = 200.f;
     height = 200.f;
     mapSize = 275.f;
