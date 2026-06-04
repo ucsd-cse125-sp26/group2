@@ -87,6 +87,17 @@ public:
     bool svgMask(HudIcon id, float x, float y, float w, float h, HudColor color);
     bool svgMaskFlipped(HudIcon id, float x, float y, float w, float h, bool flipX, bool flipY, HudColor color);
     bool svgMaskPartialX(HudIcon id, float x, float y, float w, float h, float fraction, HudColor color);
+    bool svgMaskRangeX(HudIcon id, float x, float y, float w, float h, float startFraction, float endFraction, HudColor color);
+    bool svgMaskPartialXFlipped(HudIcon id,
+                                float x,
+                                float y,
+                                float w,
+                                float h,
+                                float fraction,
+                                bool fromRight,
+                                bool flipX,
+                                bool flipY,
+                                HudColor color);
 
     // ── Crosshair ───────────────────────────────────────────────────────
 

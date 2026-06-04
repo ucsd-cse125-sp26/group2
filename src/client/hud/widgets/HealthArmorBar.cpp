@@ -8,6 +8,11 @@
 
 #include <algorithm>
 
+namespace
+{
+constexpr HudColor k_healthFill{1.0f, 0.35f, 0.32f, 1.0f};
+}
+
 HealthArmorBar::HealthArmorBar()
 {
     anchor = HudAnchor::TopCenter;
@@ -45,23 +50,8 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
 
     ctx.svg(HudIcon::HealthFrameBack, frameX, frameY, frameW, frameH);
 
-    const float totalMax = static_cast<float>(maxHealth_ + maxArmor_);
-    const float healthSegment = (static_cast<float>(maxHealth_) * healthFill_) / totalMax;
-    const float shieldSegment = (static_cast<float>(maxArmor_) * armorFill_) / totalMax;
-    const float healthRight = frameX + frameW * std::clamp(healthSegment, 0.f, 1.f);
-    const float shieldRight = frameX + frameW * std::clamp(healthSegment + shieldSegment, 0.f, 1.f);
-
-    if (healthRight > frameX) {
-        ctx.pushClipRect(frameX, frameY, healthRight - frameX, frameH);
-        ctx.svgMask(HudIcon::HealthFrameBack, frameX, frameY, frameW, frameH, k_health);
-        ctx.popClipRect();
-    }
-
-    if (shieldRight > healthRight) {
-        ctx.pushClipRect(healthRight, frameY, shieldRight - healthRight, frameH);
-        ctx.svgMask(HudIcon::HealthFrameBack, frameX, frameY, frameW, frameH, k_cyan);
-        ctx.popClipRect();
-    }
+    ctx.svgMaskRangeX(HudIcon::HealthFrameBack, frameX, frameY, frameW, frameH, 0.f, healthFill_, k_healthFill);
+    ctx.svgMaskRangeX(HudIcon::HealthFrameBack, frameX, frameY, frameW, frameH, 0.f, armorFill_, k_primary);
 
     ctx.svg(HudIcon::HealthFrameFront, frameX, frameY, frameW, frameH);
 }
