@@ -117,6 +117,9 @@ public:
     /// @brief Multiply already-emitted vertex colors by a tint.
     void tintVertices(std::size_t startVertex, HudColor tint);
 
+    /// @brief Rotate vertices emitted since startVertex around a screen-space point.
+    void rotateVertices(std::size_t startVertex, float cx, float cy, float angleDeg);
+
     // ── Access for HudRenderer ──────────────────────────────────────────
 
     [[nodiscard]] const std::vector<HudVertex>& vertices() const { return vertices_; }

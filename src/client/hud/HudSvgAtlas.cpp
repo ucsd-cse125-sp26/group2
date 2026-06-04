@@ -122,7 +122,6 @@ std::optional<HudSvgSprite> HudSvgAtlas::allocate(HudIcon id, int width, int hei
         rowH_ = 0;
     }
     if (cursorY_ + slotH > kAtlasSize) {
-        SDL_Log("HudSvgAtlas: atlas full while packing SVG sprite %dx%d", width, height);
         return std::nullopt;
     }
 
