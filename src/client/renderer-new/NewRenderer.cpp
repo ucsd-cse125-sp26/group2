@@ -1192,19 +1192,19 @@ int NewRenderer::loadSceneModel(
 
     Asset::modelInstances_.push_back(sceneInstance);
 
-    // if (!model.pointLights.empty()) {
-    //     std::vector<PointLight> pointLights;
-    //     pointLights.reserve(model.pointLights.size());
-    //     for (const Asset::PointLight& light : model.pointLights) {
-    //         PointLight pointLight{};
-    //         pointLight.position = glm::vec3(modelTransform * glm::vec4(light.position, 1.0f));
-    //         pointLight.intensity = light.intensity;
-    //         pointLight.color = light.color;
-    //         pointLight.range = light.range * scale;
-    //         pointLights.push_back(pointLight);
-    //     }
-    //     setStaticPointLights(std::move(pointLights));
-    // }
+    if (!model.pointLights.empty()) {
+        std::vector<PointLight> pointLights;
+        pointLights.reserve(model.pointLights.size());
+        for (const Asset::PointLight& light : model.pointLights) {
+            PointLight pointLight{};
+            pointLight.position = glm::vec3(modelTransform * glm::vec4(light.position, 1.0f));
+            pointLight.intensity = light.intensity;
+            pointLight.color = light.color;
+            pointLight.range = light.range * scale;
+            pointLights.push_back(pointLight);
+        }
+        setStaticPointLights(std::move(pointLights));
+    }
 
     std::vector<Boilerplate::BufferUpload> uploads;
     auto uploadTexture = [&](TexIdInt texId, SDL_GPUTextureFormat format) {
