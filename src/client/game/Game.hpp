@@ -382,6 +382,9 @@ private:
 
     int rocketProjectileModelIdx_ = -1;
     int grenadeModelIdx_ = -1;
+    int heGrenadeModelIdx_ = -1;
+    int stickyGrenadeModelIdx_ = -1;
+    int molotovModelIdx_ = -1;
     int medkitModelIdx_ = -1;
 
     // Dynamic lighting test controls (ImGui-tunable)

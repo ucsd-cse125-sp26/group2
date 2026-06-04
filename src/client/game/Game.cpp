@@ -1036,8 +1036,50 @@ bool Game::init(AppContext& ctx)
                 kGrenadeModel.filename, kGrenadeModel.loadTranslation, kGrenadeModel.loadScale, kGrenadeModel.flipUVs);
             assets_.setModelIndex(id, grenadeModelIdx_);
 
-            if (grenadeModelIdx_ < 0)
+            if (grenadeModelIdx_ >= 0)
+                renderer->setModelScenePass(grenadeModelIdx_, false);
+            else
                 SDL_Log("[client] WARNING: grenade model '%s' failed to load", kGrenadeModel.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kHEGrenadeModel);
+            heGrenadeModelIdx_ = renderer->loadSceneModel(kHEGrenadeModel.filename,
+                                                          kHEGrenadeModel.loadTranslation,
+                                                          kHEGrenadeModel.loadScale,
+                                                          kHEGrenadeModel.flipUVs);
+            assets_.setModelIndex(id, heGrenadeModelIdx_);
+
+            if (heGrenadeModelIdx_ >= 0)
+                renderer->setModelScenePass(heGrenadeModelIdx_, false);
+            else
+                SDL_Log("[client] WARNING: HE grenade model '%s' failed to load", kHEGrenadeModel.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kStickyGrenadeModel);
+            stickyGrenadeModelIdx_ = renderer->loadSceneModel(kStickyGrenadeModel.filename,
+                                                              kStickyGrenadeModel.loadTranslation,
+                                                              kStickyGrenadeModel.loadScale,
+                                                              kStickyGrenadeModel.flipUVs);
+            assets_.setModelIndex(id, stickyGrenadeModelIdx_);
+
+            if (stickyGrenadeModelIdx_ >= 0)
+                renderer->setModelScenePass(stickyGrenadeModelIdx_, false);
+            else
+                SDL_Log("[client] WARNING: sticky grenade model '%s' failed to load", kStickyGrenadeModel.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kMolotovModel);
+            molotovModelIdx_ = renderer->loadSceneModel(
+                kMolotovModel.filename, kMolotovModel.loadTranslation, kMolotovModel.loadScale, kMolotovModel.flipUVs);
+            assets_.setModelIndex(id, molotovModelIdx_);
+
+            if (molotovModelIdx_ >= 0)
+                renderer->setModelScenePass(molotovModelIdx_, false);
+            else
+                SDL_Log("[client] WARNING: molotov model '%s' failed to load", kMolotovModel.filename);
         }
 
         {
@@ -6900,9 +6942,15 @@ void Game::refreshRemoteProjectileRenderables()
                                                                              const Velocity& vel,
                                                                              const CollisionShape& /*shape*/) {
         auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-        if (isGrenadeType(projectile.type)) {
-            rend.modelIndex = grenadeModelIdx_;
-            rend.scale = kGrenadeModel.renderScale;
+        if (projectile.type == WeaponType::HEGrenade) {
+            rend.modelIndex = heGrenadeModelIdx_;
+            rend.scale = kHEGrenadeModel.renderScale;
+        } else if (projectile.type == WeaponType::Sticky) {
+            rend.modelIndex = stickyGrenadeModelIdx_;
+            rend.scale = kStickyGrenadeModel.renderScale;
+        } else if (projectile.type == WeaponType::Molotov) {
+            rend.modelIndex = molotovModelIdx_;
+            rend.scale = kMolotovModel.renderScale;
         } else {
             rend.modelIndex = rocketProjectileModelIdx_;
             rend.scale = glm::vec3(kRocketProjectile.loadScale);
@@ -6918,6 +6966,11 @@ void Game::refreshRemoteProjectileRenderables()
             constexpr glm::vec3 modelCenter{0.0f, -1.668982f, 4.484283f};
             rend.translation = rend.orientation * (modelCenter * kRocketProjectile.loadScale);
         }
+
+        if (isGrenadeType(projectile.type) && !projectile.stuck) {
+            float spinAngle = projectile.currentLifeTime * 8.0f;
+            rend.orientation = rend.orientation * glm::angleAxis(spinAngle, glm::vec3{-1, 0, 0});
+        }
     });
 }
 
@@ -6930,12 +6983,19 @@ void Game::refreshRemoteRespawnRenderables()
             const bool grenadeSpawner = isGrenadeType(spawner.type);
 
             if (grenadeSpawner) {
-                if (grenadeModelIdx_ < 0) {
+                int grenadeIdx = grenadeModelIdx_;
+                if (spawner.type == WeaponType::HEGrenade)
+                    grenadeIdx = heGrenadeModelIdx_;
+                else if (spawner.type == WeaponType::Sticky)
+                    grenadeIdx = stickyGrenadeModelIdx_;
+                else if (spawner.type == WeaponType::Molotov)
+                    grenadeIdx = molotovModelIdx_;
+                if (grenadeIdx < 0) {
                     rend.modelIndex = -1;
                     rend.visible = false;
                     return;
                 }
-                rend.modelIndex = grenadeModelIdx_;
+                rend.modelIndex = grenadeIdx;
                 const WeaponSpawnerModelParams& params = defaultSpawnerModelParams(spawner.type);
                 rend.scale = params.scale;
 
