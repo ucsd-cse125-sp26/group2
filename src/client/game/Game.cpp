@@ -1407,8 +1407,7 @@ bool Game::init(AppContext& ctx)
                 weaponVmLoaded_[t] = true;
                 // Hidden static gun model: registers the gun GLB's embedded
                 // materials/textures so the skinned viewmodel can bind them per-mesh.
-                weaponVmModelIdx_[t] =
-                    renderer->loadSceneModel(vma.viewmodelGlb, glm::vec3{0.0f}, 1.0f, vma.flipUVs);
+                weaponVmModelIdx_[t] = renderer->loadSceneModel(vma.viewmodelGlb, glm::vec3{0.0f}, 1.0f, vma.flipUVs);
                 if (weaponVmModelIdx_[t] >= 0)
                     renderer->setModelScenePass(weaponVmModelIdx_[t], false);
                 // First-person arms (same baked clips) + their textures.
@@ -1423,7 +1422,8 @@ bool Game::init(AppContext& ctx)
                 }
             } else {
                 SDL_Log("[client] WARNING: viewmodel '%s' failed to load — weapon %zu uses static fallback",
-                        vma.viewmodelGlb, t);
+                        vma.viewmodelGlb,
+                        t);
             }
             SDL_Log("[viewmodel] type=%zu glb='%s' loaded=%d arms=%d",
                     t,
@@ -2588,8 +2588,12 @@ SDL_AppResult Game::iterate()
     // Chat owns the keyboard while open, so gameplay inputs are cleared
     // instead of sampled.
     const bool gamePaused = pauseMenu.isOpen();
-    const bool gameplayInputAllowed =
-        currentMatchPhase != MatchPhase::COUNTDOWN && currentMatchPhase != MatchPhase::FINISHED;
+    // Look-only phases (warmup/countdown) allow camera rotation but still
+    // suppress weapon/movement input. FINISHED and LOBBY suppress everything.
+    const bool lookInputAllowed = currentMatchPhase == MatchPhase::WARMUP ||
+                                  currentMatchPhase == MatchPhase::COUNTDOWN ||
+                                  currentMatchPhase == MatchPhase::IN_PROGRESS;
+    const bool gameplayInputAllowed = currentMatchPhase == MatchPhase::IN_PROGRESS;
 
     if (gamePaused || !gameplayInputAllowed) {
         clearGameplayInputForChat();
@@ -2621,17 +2625,21 @@ SDL_AppResult Game::iterate()
             localWasDead_ = vis.isDead;
         });
 
-    if (mouseCaptured && !chatOpen_ && !gamePaused && gameplayInputAllowed) {
+    if (mouseCaptured && !chatOpen_ && !gamePaused && lookInputAllowed) {
 
         // Emote wheel must run before the look samplers so it can divert pointer
         // motion into sector selection while open (and suppress camera turn).
-        systems::runEmoteWheelKey(userSettings->inputBindings);
-        systems::runGamepadEmoteWheel(activeGamepad_, userSettings->inputBindings, userSettings->gamepadSwapSticks);
+        if (gameplayInputAllowed) {
+            systems::runEmoteWheelKey(userSettings->inputBindings);
+            systems::runGamepadEmoteWheel(activeGamepad_, userSettings->inputBindings, userSettings->gamepadSwapSticks);
+        }
 
         systems::runMouseLook(registry, mouseSensitivity, localGravFlipped);
-        if (!inputSyncedWithPhysics)
-            systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
-        systems::runWeaponKeys(registry, userSettings->inputBindings);
+        if (gameplayInputAllowed) {
+            if (!inputSyncedWithPhysics)
+                systems::runMovementKeys(registry, userSettings->inputBindings, localGravFlipped);
+            systems::runWeaponKeys(registry, userSettings->inputBindings);
+        }
 
         // Gamepad samplers run AFTER kbm so they OR into the same flags —
         // a player can use kbm and pad simultaneously without either source
@@ -2671,14 +2679,16 @@ SDL_AppResult Game::iterate()
                                          frameTime,
                                          userSettings->gamepadSwapSticks);
         }
-        if (!inputSyncedWithPhysics)
-            systems::runGamepadMovement(registry,
-                                        activeGamepad_,
-                                        userSettings->inputBindings,
-                                        userSettings->gamepadMoveDeadzone,
-                                        localGravFlipped,
-                                        userSettings->gamepadSwapSticks);
-        systems::runGamepadWeapon(registry, activeGamepad_, userSettings->inputBindings);
+        if (gameplayInputAllowed) {
+            if (!inputSyncedWithPhysics)
+                systems::runGamepadMovement(registry,
+                                            activeGamepad_,
+                                            userSettings->inputBindings,
+                                            userSettings->gamepadMoveDeadzone,
+                                            localGravFlipped,
+                                            userSettings->gamepadSwapSticks);
+            systems::runGamepadWeapon(registry, activeGamepad_, userSettings->inputBindings);
+        }
     } else {
         // Gameplay input is suppressed (paused / chat / menu) — make sure the
         // emote wheel doesn't get stuck open with no way to release it.
@@ -3550,9 +3560,9 @@ SDL_AppResult Game::iterate()
             int weaponModelIdx = -1;
             glm::mat4 weaponWorld{1.0f};
             float weaponScale = 1.0f;
-            bool hasHoldPose = false;     ///< Apply `holdPose` to the animator this frame.
-            WeaponHoldPose holdPose{};    ///< Per-weapon spine-relative offset/rotation + FK arm pose.
-            float holdWeight = 1.0f;      ///< Weapon-swap fade weight for the arm FK (0→1).
+            bool hasHoldPose = false;  ///< Apply `holdPose` to the animator this frame.
+            WeaponHoldPose holdPose{}; ///< Per-weapon spine-relative offset/rotation + FK arm pose.
+            float holdWeight = 1.0f;   ///< Weapon-swap fade weight for the arm FK (0→1).
         };
         // Plain function-local (NOT thread_local — workers must see the
         // main thread's vector through the lambda capture).  Reserved up
@@ -4109,11 +4119,14 @@ SDL_AppResult Game::iterate()
                 constexpr float k_axisLen = 5.0f;
                 pushMarker(originWorld, k_centerScale, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
                 pushMarker(originWorld + frameR * glm::vec3(k_axisLen, 0.0f, 0.0f),
-                           k_axisScale, glm::vec4(1.0f, 0.3f, 0.3f, 1.0f));
+                           k_axisScale,
+                           glm::vec4(1.0f, 0.3f, 0.3f, 1.0f));
                 pushMarker(originWorld + frameR * glm::vec3(0.0f, k_axisLen, 0.0f),
-                           k_axisScale, glm::vec4(0.3f, 1.0f, 0.3f, 1.0f));
+                           k_axisScale,
+                           glm::vec4(0.3f, 1.0f, 0.3f, 1.0f));
                 pushMarker(originWorld + frameR * glm::vec3(0.0f, 0.0f, k_axisLen),
-                           k_axisScale, glm::vec4(0.3f, 0.5f, 1.0f, 1.0f));
+                           k_axisScale,
+                           glm::vec4(0.3f, 0.5f, 1.0f, 1.0f));
             });
         }
 
@@ -5305,7 +5318,7 @@ SDL_AppResult Game::iterate()
                     const glm::vec3 cz = glm::normalize(glm::cross(longAxis, refUp));
                     const glm::vec3 cy = glm::cross(cz, longAxis);
                     cs.orient = glm::mat3(longAxis, cy, cz); // local X -> -barrel (correct facing)
-                    cs.pos = chamberWorld + rgt * 1.5f;       // ejection port: just right of the chamber
+                    cs.pos = chamberWorld + rgt * 1.5f;      // ejection port: just right of the chamber
                     cs.vel = rgt * (150.0f + j * 40.0f) + upv * (120.0f + j * 30.0f) + fwd * (j * 40.0f);
                     cs.spin = 20.0f + j * 8.0f;
                     casings_.push_back(cs);
@@ -5756,8 +5769,7 @@ SDL_AppResult Game::iterate()
             ImGui::SameLine();
             ImGui::Checkbox("Show spine-anchor marker", &holdShowDebugMarker_);
             if (spine2JointIdx_ < 0)
-                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
-                                   "Spine2 not found in rig — weapon hold disabled.");
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Spine2 not found in rig — weapon hold disabled.");
 
             ImGui::SeparatorText("Arm FK (pitch, yaw, roll degrees per bone)");
             auto editArm = [&](const char* label, ArmHoldPose& arm) {
@@ -5765,12 +5777,9 @@ SDL_AppResult Game::iterate()
                     return;
                 ImGui::PushID(label);
                 for (std::size_t i = 0; i < kArmHoldBoneCount; ++i)
-                    ImGui::DragFloat3(
-                        kArmHoldBoneDisplayNames[i], &arm.boneAngles[i].x, 1.0f, -180.0f, 180.0f, "%.1f");
-                static const char* k_fingerNames[kGripPoseFingerCount] = {
-                    "Thumb", "Index", "Middle", "Ring", "Pinky"};
-                static const char* k_jointNames[kGripPoseBonesPerFinger] = {
-                    "j1 (root)", "j2", "j3", "j4 (tip)"};
+                    ImGui::DragFloat3(kArmHoldBoneDisplayNames[i], &arm.boneAngles[i].x, 1.0f, -180.0f, 180.0f, "%.1f");
+                static const char* k_fingerNames[kGripPoseFingerCount] = {"Thumb", "Index", "Middle", "Ring", "Pinky"};
+                static const char* k_jointNames[kGripPoseBonesPerFinger] = {"j1 (root)", "j2", "j3", "j4 (tip)"};
                 if (ImGui::TreeNode("Fingers")) {
                     for (std::size_t f = 0; f < kGripPoseFingerCount; ++f) {
                         if (ImGui::TreeNode(k_fingerNames[f])) {
