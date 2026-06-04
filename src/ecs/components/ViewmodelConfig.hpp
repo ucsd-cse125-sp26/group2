@@ -122,27 +122,30 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
-        // RailGun — marksman
-        {.scale = 20.0f,
-         .forward = 48.0f,
-         .right = 30.0f,
-         .down = 27.0f,
+        // RailGun (Apex Nemesis) — animated first-person viewmodel authored in
+        // camera space at ~1.0 native scale (same as the R-301), so it self-places:
+        // scale 1, no offsets. (The old scale=20 marksman tuning was for the static
+        // kraber mesh and made the Apex GLB 20× too big — full-screen overdraw.)
+        {.scale = 1.0f,
+         .forward = 0.0f,
+         .right = 0.0f,
+         .down = 0.0f,
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
-        // EnergyGun
-        {.scale = 20.0f,
-         .forward = 80.0f,
-         .right = 38.5f,
-         .down = 24.0f,
+        // EnergyGun (Apex Havoc) — camera-space viewmodel, self-places (scale 1).
+        {.scale = 1.0f,
+         .forward = 0.0f,
+         .right = 0.0f,
+         .down = 0.0f,
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
-        // Shotgun — reuses EnergyGun viewmodel tuning (same mesh).
-        {.scale = 20.0f,
-         .forward = 80.0f,
-         .right = 38.5f,
-         .down = 24.0f,
+        // Shotgun (Apex Mastiff) — camera-space viewmodel, self-places (scale 1).
+        {.scale = 1.0f,
+         .forward = 0.0f,
+         .right = 0.0f,
+         .down = 0.0f,
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
