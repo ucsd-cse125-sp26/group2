@@ -118,8 +118,7 @@ constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponN
 constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponDisplayNames{
     "Rifle (R-301)", "Rocket", "RailGun (Triple Take)", "EnergyGun (Wingman)", "Shotgun"};
 struct DroppedWeaponRenderableTag
-{
-};
+{};
 
 // (kThirdPersonWeaponPitchMax was used by the removed buildThirdPersonWeaponAttachment;
 // the bone-parented weapon path doesn't pitch-clamp the weapon — the spine bend
@@ -7125,7 +7124,7 @@ void Game::refreshRemoteProjectileRenderables()
     registry.view<Position, Projectile, Velocity, CollisionShape>().each([&](entt::entity e,
                                                                              const Position&,
                                                                              const Projectile& projectile,
-                                                                             const Velocity&,
+                                                                             const Velocity& vel,
                                                                              const CollisionShape& /*shape*/) {
         auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
         if (isGrenadeType(projectile.type)) {
@@ -7137,8 +7136,15 @@ void Game::refreshRemoteProjectileRenderables()
         }
         rend.visible = rend.modelIndex >= 0;
 
-        // rend.translation = glm::vec3(0.0f, -shape.halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
-        // rend.orientation = glm::angleAxis(input.yaw, glm::vec3{0, 1, 0});
+        if (float len2 = glm::dot(vel.value, vel.value); len2 > 0.001f) {
+            glm::vec3 direction = vel.value / std::sqrt(len2);
+            rend.orientation = glm::quatLookAt(direction, glm::vec3{0, 1, 0});
+        }
+
+        if (!isGrenadeType(projectile.type)) {
+            constexpr glm::vec3 modelCenter{0.0f, -1.668982f, 4.484283f};
+            rend.translation = rend.orientation * (modelCenter * kRocketProjectile.loadScale);
+        }
     });
 }
 
@@ -7300,8 +7306,8 @@ void Game::refreshDroppedWeaponRenderables()
 
             rend.visible = true;
             rend.orientation = spawnerModelRotation(params, t, true);
-            rend.translation = params.translation +
-                               glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
+            rend.translation =
+                params.translation + glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
         });
 }
 
