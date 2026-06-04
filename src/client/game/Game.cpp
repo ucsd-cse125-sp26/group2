@@ -4256,6 +4256,10 @@ SDL_AppResult Game::iterate()
                         dissolveSpawned_.erase(e); // alive (or respawned) — arm for next death
                         return;
                     }
+                    // Only enemies dissolve; the local player never renders their own
+                    // Thanos snap effect.
+                    if (registry.all_of<LocalPlayer>(e))
+                        return;
                     if (!ac.animator || dissolveSpawned_.count(e) > 0)
                         return;
 

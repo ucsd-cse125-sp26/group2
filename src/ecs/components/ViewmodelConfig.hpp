@@ -216,73 +216,60 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
     // Airborne: slightly forward (running/jumping leans into the weapon).
     // Slide: punched forward and down (gun aimed past sliding feet).
     // WallRun: pulled in tight (silhouette stays narrow against the wall).
-    const HoldAnchor k_idleAnchor{.offset = {6.0f, 6.0f, 14.0f}, .rotation = glm::quat(1, 0, 0, 0)};
     const HoldAnchor k_crouchAnchor{.offset = {4.0f, 8.0f, 12.0f}, .rotation = glm::quat(1, 0, 0, 0)};
     const HoldAnchor k_airborneAnchor{.offset = {6.0f, 4.0f, 16.0f}, .rotation = glm::quat(1, 0, 0, 0)};
     const HoldAnchor k_slideAnchor{.offset = {6.0f, 2.0f, 18.0f}, .rotation = glm::quat(1, 0, 0, 0)};
     const HoldAnchor k_wallRunAnchor{.offset = {3.0f, 6.0f, 10.0f}, .rotation = glm::quat(1, 0, 0, 0)};
-    const std::array<HoldAnchor, kHoldStanceCount> k_defaultHolds{
-        k_idleAnchor, k_crouchAnchor, k_airborneAnchor, k_slideAnchor, k_wallRunAnchor};
+
+    // Rifle's hand-tuned right-hand hold anchors. Every weapon reuses these as
+    // its default IK hold positions until per-weapon tuning lands — the
+    // Locomotion entry is hand-tuned via the 3P Weapon Tweaker; the other
+    // stances stay on the generic defaults until they're tuned.
+    const std::array<HoldAnchor, kHoldStanceCount> k_rifleHolds{{
+        // Locomotion: hand-tuned.
+        {.offset = {-12.69f, -8.23f, 22.32f}, .rotation = glm::quat(0.4410f, 0.5464f, 0.4894f, 0.5171f)},
+        k_crouchAnchor,
+        k_airborneAnchor,
+        k_slideAnchor,
+        k_wallRunAnchor,
+    }};
 
     static const std::array<ThirdPersonWeaponParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle — middleweight, full spine bend, moderate recoil.
-        // Locomotion anchor hand-tuned via the 3P Weapon Tweaker; other
-        // stances stay on the generic defaults until they're tuned.
         {.scale = 10.0f,
          .spineBendMultiplier = 1.0f,
          .hipLeanMultiplier = 0.1f,
          .recoilKickRad = 0.05f,
-         .rightHandHolds = {{
-             // Locomotion: hand-tuned.
-             {.offset = {-12.69f, -8.23f, 22.32f}, .rotation = glm::quat(0.4410f, 0.5464f, 0.4894f, 0.5171f)},
-             k_crouchAnchor,
-             k_airborneAnchor,
-             k_slideAnchor,
-             k_wallRunAnchor,
-         }}},
+         .rightHandHolds = k_rifleHolds},
         // Rocket launcher — heavy, slower upper-body response, big kick.
+        // IK hold positions reuse the rifle defaults until tuned.
         {.scale = 0.025f,
          .spineBendMultiplier = 0.65f,
          .hipLeanMultiplier = 0.06f,
          .recoilKickRad = 0.18f,
-         .rightHandHolds = {{
-             {.offset = {7.0f, 8.0f, 18.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {5.0f, 10.0f, 16.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {7.0f, 6.0f, 20.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {7.0f, 4.0f, 22.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {4.0f, 8.0f, 14.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-         }}},
+         .rightHandHolds = k_rifleHolds},
         // RailGun / charge rifle — heavy precision rifle, slower bend than the
         // assault rifle, similar kick to a rifle since the energy delivery is smooth.
+        // IK hold positions reuse the rifle defaults until tuned.
         {.scale = 7.0f,
          .spineBendMultiplier = 0.85f,
          .hipLeanMultiplier = 0.08f,
          .recoilKickRad = 0.07f,
-         .rightHandHolds = k_defaultHolds},
+         .rightHandHolds = k_rifleHolds},
         // EnergyGun — light pistol, fast spine bend, gentle kick.
+        // IK hold positions reuse the rifle defaults until tuned.
         {.scale = 1.0f,
          .spineBendMultiplier = 1.0f,
          .hipLeanMultiplier = 0.1f,
          .recoilKickRad = 0.03f,
-         .rightHandHolds = {{
-             {.offset = {5.0f, 4.0f, 12.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {3.0f, 6.0f, 10.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {5.0f, 2.0f, 14.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {5.0f, 0.0f, 16.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {3.0f, 4.0f, 8.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-         }}},
+         .rightHandHolds = k_rifleHolds},
         // Shotgun — copies EnergyGun (same mesh); heavier kick.
+        // IK hold positions reuse the rifle defaults until tuned.
         {.scale = 1.0f,
          .spineBendMultiplier = 1.0f,
          .hipLeanMultiplier = 0.1f,
          .recoilKickRad = 0.12f,
-         .rightHandHolds = {{
-             {.offset = {5.0f, 4.0f, 12.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {3.0f, 6.0f, 10.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {5.0f, 2.0f, 14.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {5.0f, 0.0f, 16.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-             {.offset = {3.0f, 4.0f, 8.0f}, .rotation = glm::quat(1, 0, 0, 0)},
-         }}},
+         .rightHandHolds = k_rifleHolds},
     }};
 
     return k_params[static_cast<std::size_t>(type)];
