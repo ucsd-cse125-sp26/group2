@@ -4239,6 +4239,77 @@ SDL_AppResult Game::iterate()
             });
         }
 
+        // Death dissolve ("Thanos snap"): when a player dies, sample their
+        // frozen last pose into world-space points and hand them to the particle
+        // system, which crumbles them into wind-swept ash. Dead players stop
+        // being animated (the alive pass skips them), so the animator's
+        // skinMatrices() still hold the final alive pose. Emitted once per death.
+        if (charRig_.isLoaded() && numJoints > 0) {
+            registry.view<AnimatedCharacter, Position, PlayerVisState>().each(
+                [&](entt::entity e, const AnimatedCharacter& ac, const Position& pos, const PlayerVisState& ps) {
+                    if (!ps.isDead) {
+                        dissolveSpawned_.erase(e); // alive (or respawned) — arm for next death
+                        return;
+                    }
+                    if (!ac.animator || dissolveSpawned_.count(e) > 0)
+                        return;
+
+                    const std::vector<glm::mat4>& palette = ac.animator->skinMatrices();
+                    if (palette.size() != static_cast<size_t>(numJoints))
+                        return;
+
+                    // Reproduce the entity world transform (same as the renderer).
+                    glm::vec3 translation(0.0f);
+                    glm::vec3 scale(kRigScale_);
+                    glm::quat orient{1.0f, 0.0f, 0.0f, 0.0f};
+                    if (const auto* rend = registry.try_get<Renderable>(e)) {
+                        translation = rend->translation;
+                        scale = rend->scale;
+                        orient = rend->orientation;
+                    } else if (const auto* shape = registry.try_get<CollisionShape>(e)) {
+                        translation = glm::vec3(0.0f, -shape->halfExtents.y - rigMeshMinY_ * kRigScale_, 0.0f);
+                    }
+                    glm::mat4 world = glm::translate(glm::mat4(1.0f), pos.value + translation);
+                    world *= glm::mat4_cast(orient);
+                    world = glm::scale(world, scale);
+
+                    // Sample a subset of the skinned mesh to ~5000 world points.
+                    size_t totalVerts = 0;
+                    for (const auto& mesh : charRig_.meshes())
+                        totalVerts += mesh.baseVertices.size();
+                    if (totalVerts == 0)
+                        return;
+                    constexpr size_t k_targetPoints = 5000;
+                    const size_t stride = std::max<size_t>(1, totalVerts / k_targetPoints);
+
+                    std::vector<glm::vec3> points;
+                    points.reserve(k_targetPoints + 64);
+                    size_t idx = 0;
+                    for (const auto& mesh : charRig_.meshes()) {
+                        for (size_t v = 0; v < mesh.baseVertices.size(); ++v, ++idx) {
+                            if (idx % stride != 0)
+                                continue;
+                            const glm::vec4 p(mesh.baseVertices[v].position, 1.0f);
+                            const SkinWeight& w = mesh.skinWeights[v];
+                            glm::vec3 modelPos(0.0f);
+                            for (int k = 0; k < 4; ++k) {
+                                if (w.weights[k] <= 0.0f)
+                                    continue;
+                                const int b = w.boneIndices[k];
+                                if (b < 0 || b >= static_cast<int>(palette.size()))
+                                    continue;
+                                modelPos += w.weights[k] * glm::vec3(palette[static_cast<size_t>(b)] * p);
+                            }
+                            points.push_back(glm::vec3(world * glm::vec4(modelPos, 1.0f)));
+                        }
+                    }
+                    if (points.empty())
+                        return;
+                    particleSystem.spawnDeathDissolve(points, pos.value, glm::vec4(0.82f, 0.82f, 0.88f, 1.0f));
+                    dissolveSpawned_.insert(e);
+                });
+        }
+
         if (kRagdollsEnabled && charRig_.isLoaded() && numJoints > 0) {
             registry.view<AnimatedCharacter, Position, PlayerVisState, ClientId>().each([&](entt::entity e,
                                                                                             AnimatedCharacter& ac,

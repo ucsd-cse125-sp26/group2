@@ -37,6 +37,9 @@ public:
     /// @param count Number of particles to upload.
     void uploadBillboards(SDL_GPUCommandBuffer* cmd, const BillboardParticle* data, uint32_t count);
 
+    /// @brief Upload death-dissolve billboards (alpha-blended, separate pool).
+    void uploadDissolve(SDL_GPUCommandBuffer* cmd, const BillboardParticle* data, uint32_t count);
+
     /// @brief Upload tracer particle data to the GPU.
     /// @param cmd   Active command buffer.
     /// @param data  Pointer to tracer particle array.
@@ -113,6 +116,7 @@ private:
 
     // Pipelines
     SDL_GPUGraphicsPipeline* billboardPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* dissolvePipeline_ = nullptr; ///< Like billboard but alpha-blended (death dissolve).
     SDL_GPUGraphicsPipeline* tracerPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* ribbonPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hitscanPipeline_ = nullptr;
@@ -128,6 +132,7 @@ private:
 
     // GPU buffers
     GpuParticleBuffer billboardBuf_; // storage
+    GpuParticleBuffer dissolveBuf_;  // storage (death dissolve)
     GpuParticleBuffer tracerBuf_;    // storage
     GpuParticleBuffer ribbonBuf_;    // vertex
     GpuParticleBuffer hitscanBuf_;   // storage

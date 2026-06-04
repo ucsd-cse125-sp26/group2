@@ -493,6 +493,7 @@ bool ParticleRenderer::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, S
 
     // GPU buffers
     billboardBuf_.init(dev, sizeof(BillboardParticle) * 4096);
+    dissolveBuf_.init(dev, sizeof(BillboardParticle) * 32768); // death dissolve: thousands of motes per corpse
     tracerBuf_.init(dev, sizeof(TracerParticle) * 512); // 80 B × 512 = 40 KB
     ribbonBuf_.init(dev, sizeof(RibbonVertex) * 24576, GpuParticleBuffer::Mode::Vertex);
     hitscanBuf_.init(dev, sizeof(HitscanBeam) * 64);
@@ -514,6 +515,11 @@ bool ParticleRenderer::buildPipelines()
     // Billboard (sparks, flash) -- additive, depth test, no write
     billboardPipeline_ = makeStoragePipeline(
         "particle_billboard.vert", "particle_billboard.frag", 1, 0, additiveBlend(), true, false, false);
+
+    // Death dissolve -- same billboard shaders but ALPHA blended so the ash
+    // reads as opaque-ish dust (not glowing additive). Depth test, no write.
+    dissolvePipeline_ = makeStoragePipeline(
+        "particle_billboard.vert", "particle_billboard.frag", 1, 0, alphaBlend(), true, false, false);
 
     // Tracer capsule -- additive, depth test, no write
     tracerPipeline_ = makeStoragePipeline("tracer.vert", "tracer.frag", 1, 0, additiveBlend(), true, false, false);
@@ -621,6 +627,7 @@ void ParticleRenderer::quit()
         }
     };
     relPL(billboardPipeline_);
+    relPL(dissolvePipeline_);
     relPL(tracerPipeline_);
     relPL(ribbonPipeline_);
     relPL(hitscanPipeline_);
@@ -669,6 +676,11 @@ void ParticleRenderer::quit()
 void ParticleRenderer::uploadBillboards(SDL_GPUCommandBuffer* cmd, const BillboardParticle* d, uint32_t n)
 {
     billboardBuf_.upload(cmd, d, n, sizeof(BillboardParticle));
+}
+
+void ParticleRenderer::uploadDissolve(SDL_GPUCommandBuffer* cmd, const BillboardParticle* d, uint32_t n)
+{
+    dissolveBuf_.upload(cmd, d, n, sizeof(BillboardParticle));
 }
 
 void ParticleRenderer::uploadTracers(SDL_GPUCommandBuffer* cmd, const TracerParticle* d, uint32_t n)
@@ -790,6 +802,14 @@ void ParticleRenderer::drawAll(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cm
         bindIndex();
         billboardBuf_.bindAsVertexStorage(pass, 0);
         drawQuads(billboardBuf_.liveCount());
+    }
+
+    // 6b. Death dissolve (alpha-blended ash motes; same billboard shaders)
+    if (dissolvePipeline_ && dissolveBuf_.liveCount() > 0) {
+        SDL_BindGPUGraphicsPipeline(pass, dissolvePipeline_);
+        bindIndex();
+        dissolveBuf_.bindAsVertexStorage(pass, 0);
+        drawQuads(dissolveBuf_.liveCount());
     }
 
     // 7. Smoke (premul alpha, noise sampler)

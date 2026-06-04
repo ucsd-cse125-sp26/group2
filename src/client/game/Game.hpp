@@ -52,6 +52,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 /// @brief Top-level client game object.
@@ -686,6 +687,11 @@ private:
     float kRigVerticalOffset_ =
         -90.0f;                ///< Per-renderable Y translation for animated characters (auto-calculated, tunable).
     float rigMeshMinY_ = 0.0f; ///< Minimum Y of the bind-pose mesh vertices (model space).
+
+    /// Entities for which a death-dissolve particle burst has already been
+    /// spawned (so we emit it exactly once per death). Cleared per-entity on
+    /// respawn. See the death-capture pass in the render submit.
+    std::unordered_set<entt::entity> dissolveSpawned_;
 
     // FPS ring buffer -- inter-render deltas, newest at (head-1) % size
     float fpsHistory[k_fpsHistorySize] = {}; ///< Circular buffer of per-frame FPS samples.
