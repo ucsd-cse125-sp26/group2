@@ -294,3 +294,11 @@ inline const ProjectileConfig& getProjectileConfig(WeaponType type)
 
     return k_kProjectileConfigs[static_cast<std::size_t>(type)];
 }
+
+inline int calcPickupReserve(int currentReserve, int currentMag, int pickupReserve, int pickupMag, WeaponType type)
+{
+    const auto& config = getWeaponConfig(type);
+    const int maxAmmo = config.magazineSize + config.defaultAmmoCapacity;
+    const int pickupAmmo = pickupMag + pickupReserve;
+    return std::min(currentReserve + pickupAmmo, maxAmmo - currentMag);
+}

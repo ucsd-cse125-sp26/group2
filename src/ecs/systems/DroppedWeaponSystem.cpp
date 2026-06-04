@@ -12,9 +12,9 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/RigidBody.hpp"
 #include "ecs/components/Velocity.hpp"
+#include "ecs/components/WeaponConfig.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
-#include "entt/entity/entity.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -79,12 +79,14 @@ inline bool tryPickup(Registry& registry,
         // interaction needed, and never creates a duplicate.
         if (overlapsAABB(dropPos.value, dropShape.halfExtents, pos.value, shape.halfExtents)) {
             if (primary.type == dw.type) {
-                primary.totalAmmo = dw.totalAmmo;
+                primary.totalAmmo = calcPickupReserve(
+                    primary.totalAmmo, primary.currentMagAmmo, dw.totalAmmo, dw.currentMagAmmo, dw.type);
                 consumed = true;
                 return;
             }
             if (secondary.type == dw.type) {
-                secondary.totalAmmo = dw.totalAmmo;
+                secondary.totalAmmo = calcPickupReserve(
+                    secondary.totalAmmo, secondary.currentMagAmmo, dw.totalAmmo, dw.currentMagAmmo, dw.type);
                 consumed = true;
                 return;
             }
@@ -101,12 +103,14 @@ inline bool tryPickup(Registry& registry,
             // Never hold two of the same gun: if either slot already has this
             // type, top it up instead of placing a duplicate.
             if (primary.type == dw.type) {
-                primary.totalAmmo = dw.totalAmmo;
+                primary.totalAmmo = calcPickupReserve(
+                    primary.totalAmmo, primary.currentMagAmmo, dw.totalAmmo, dw.currentMagAmmo, dw.type);
                 consumed = true;
                 return;
             }
             if (secondary.type == dw.type) {
-                secondary.totalAmmo = dw.totalAmmo;
+                secondary.totalAmmo = calcPickupReserve(
+                    secondary.totalAmmo, secondary.currentMagAmmo, dw.totalAmmo, dw.currentMagAmmo, dw.type);
                 consumed = true;
                 return;
             }

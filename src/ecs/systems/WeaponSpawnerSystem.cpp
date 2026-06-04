@@ -58,11 +58,19 @@ inline void checkForPlayers(Registry& registry,
             GunInstance& primary = getSlot(weapon, WeaponSlot::PRIMARY);
             GunInstance& secondary = getSlot(weapon, WeaponSlot::SECONDARY);
             if (primary.type == spawner.type) {
-                primary.totalAmmo = config.defaultAmmoCapacity;
+                primary.totalAmmo = calcPickupReserve(primary.totalAmmo,
+                                                      primary.currentMagAmmo,
+                                                      config.defaultAmmoCapacity,
+                                                      config.magazineSize,
+                                                      spawner.type);
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
             } else if (secondary.type == spawner.type) {
-                secondary.totalAmmo = config.defaultAmmoCapacity;
+                secondary.totalAmmo = calcPickupReserve(secondary.totalAmmo,
+                                                        secondary.currentMagAmmo,
+                                                        config.defaultAmmoCapacity,
+                                                        config.magazineSize,
+                                                        spawner.type);
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
             }
@@ -80,13 +88,21 @@ inline void checkForPlayers(Registry& registry,
             // Never hold two of the same gun: if either slot already has this
             // type, top up that slot instead of placing a duplicate.
             if (primary.type == spawner.type) {
-                primary.totalAmmo = config.defaultAmmoCapacity;
+                primary.totalAmmo = calcPickupReserve(primary.totalAmmo,
+                                                      primary.currentMagAmmo,
+                                                      config.defaultAmmoCapacity,
+                                                      config.magazineSize,
+                                                      spawner.type);
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
                 return;
             }
             if (secondary.type == spawner.type) {
-                secondary.totalAmmo = config.defaultAmmoCapacity;
+                secondary.totalAmmo = calcPickupReserve(secondary.totalAmmo,
+                                                        secondary.currentMagAmmo,
+                                                        config.defaultAmmoCapacity,
+                                                        config.magazineSize,
+                                                        spawner.type);
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
                 return;
