@@ -353,6 +353,11 @@ SDL_AppResult App::iterate()
 
         if (lobby->shouldStartMatch()) {
             lobby->consumeStartMatchState();
+            if (const auto latestServerName = client.getLatestServerName();
+                latestServerName && !latestServerName->empty())
+            {
+                currentServerName = *latestServerName;
+            }
             transitionTo(Screen::Loading);
         }
         break;
