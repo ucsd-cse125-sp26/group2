@@ -154,20 +154,30 @@ Rect tunedRect(float baseX,
     };
 }
 
-void drawCooldownBar(HudContext& ctx, const Rect& bar, AbilitySide side, float charge, bool flipX, bool flipY)
+void drawCooldownBar(HudContext& ctx,
+                     const Rect& bar,
+                     AbilitySide side,
+                     float charge,
+                     bool hasAbility,
+                     bool flipX,
+                     bool flipY)
 {
-    constexpr HudColor kCooldownRed{1.f, 0.f, 0.f, 1.f};
     const bool flipBarX = (side == AbilitySide::Right) != flipX;
-    const float remaining = std::clamp(1.f - charge, 0.f, 1.f);
+    const float fill = hasAbility ? std::clamp(charge, 0.f, 1.f) : 0.f;
 
     ctx.svgFlipped(HudIcon::AbilityBarBack, bar.x, bar.y, bar.w, bar.h, flipBarX, flipY);
 
-    if (remaining > 0.f) {
-        const float fillW = bar.w * remaining;
-        const float clipX = side == AbilitySide::Left ? bar.x : bar.x + bar.w - fillW;
-        ctx.pushClipRect(clipX, bar.y, fillW, bar.h);
-        ctx.svgMaskFlipped(HudIcon::AbilityBarBack, bar.x, bar.y, bar.w, bar.h, flipBarX, flipY, kCooldownRed);
-        ctx.popClipRect();
+    if (fill > 0.f) {
+        ctx.svgMaskPartialXFlipped(HudIcon::AbilityBarBack,
+                                   bar.x,
+                                   bar.y,
+                                   bar.w,
+                                   bar.h,
+                                   fill,
+                                   side == AbilitySide::Right,
+                                   flipBarX,
+                                   flipY,
+                                   voidfall::k_primary);
     }
 
     ctx.svgFlipped(HudIcon::AbilityBarFront, bar.x, bar.y, bar.w, bar.h, flipBarX, flipY);
@@ -188,6 +198,7 @@ void drawAbilityElement(HudContext& ctx,
                         float uiScale,
                         AbilitySide side,
                         HudIcon abilityIcon,
+                        bool hasAbility,
                         const std::string& bindingLabel,
                         float charge)
 {
@@ -199,7 +210,7 @@ void drawAbilityElement(HudContext& ctx,
 
     ctx.svg(HudIcon::AbilityIconFrame, frame.x, frame.y, frame.w, frame.h);
     ctx.svgFlipped(abilityIcon, icon.x, icon.y, icon.w, icon.h, tuning.flipIconX, tuning.flipIconY);
-    drawCooldownBar(ctx, bar, side, charge, tuning.flipBarX, tuning.flipBarY);
+    drawCooldownBar(ctx, bar, side, charge, hasAbility, tuning.flipBarX, tuning.flipBarY);
 
     const float baseFs = bindingFontSize * uiScale;
     const float labelW = ctx.measureText(bindingLabel.c_str(), baseFs);
@@ -300,6 +311,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
                        s,
                        AbilitySide::Left,
                        iconForAbility(state_.primaryAbilityName, state_.primaryAbilityAvailable),
+                       state_.primaryAbilityAvailable,
                        bindingLabels_[0],
                        state_.primaryAbilityCharge);
 
@@ -318,6 +330,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
                        s,
                        AbilitySide::Right,
                        iconForAbility(state_.secondaryAbilityName, state_.secondaryAbilityAvailable),
+                       state_.secondaryAbilityAvailable,
                        bindingLabels_[1],
                        state_.secondaryAbilityCharge);
 }
