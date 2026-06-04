@@ -23,7 +23,7 @@ struct ThemeSettings
     ImVec4 accentText{0.02f, 0.02f, 0.02f, 1.00f};
     ImVec4 text{0.96f, 0.96f, 0.92f, 1.00f};
     ImVec4 textDim{0.58f, 0.60f, 0.58f, 1.00f};
-    ImVec4 windowBg{0.01f, 0.01f, 0.01f, 0.92f};
+    ImVec4 windowBg{0.01f, 0.01f, 0.01f, 1.0f};
     ImVec4 childBg{0.02f, 0.02f, 0.02f, 0.72f};
     ImVec4 popupBg{0.01f, 0.01f, 0.01f, 0.98f};
     ImVec4 frameBg{0.02f, 0.02f, 0.02f, 0.96f};

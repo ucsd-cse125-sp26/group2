@@ -9,6 +9,7 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -520,6 +521,62 @@ void drawBackground(SDL_GPUDevice* device)
             ImGui::GetColorU32(t.backgroundGlow),
             ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)),
             ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)));
+    }
+
+    // ── Background perspective grid (tweak these) ───────────────────────────
+    // HUD-cyan radial rays + nested rectangles. Drawn behind menu panels.
+    // Opaque dark cyan — mix more black in to dim if too bright, less to brighten.
+    constexpr ImVec4 k_gridColor{0.06f, 0.16f, 0.20f, 1.0f}; // RGBA
+    constexpr float k_gridLineThickness = 5.0f;              // px
+    constexpr int k_gridRadialLines = 24;                    // number of rays from center
+    constexpr int k_gridRings = 6;                           // number of nested rectangles
+    constexpr float k_gridOutermostRingScale = 0.95f;        // fraction of screen the outer ring covers
+    constexpr bool k_gridEnabled = true;
+
+    if (k_gridEnabled) {
+        const ImVec2 vp(disp.x * 0.5f, disp.y * 0.5f);
+        const ImU32 gridColor = ImGui::GetColorU32(k_gridColor);
+        const float maxR = std::sqrt(disp.x * disp.x + disp.y * disp.y);
+
+        // Rays are anchored to the outer ring's perimeter (evenly spaced per
+        // edge) so the rectangles' corners and edge-midpoints all land on a
+        // ray. k_gridRadialLines is rounded down to a multiple of 4.
+        const int perEdge = std::max(1, k_gridRadialLines / 4);
+        const float halfW = disp.x * k_gridOutermostRingScale * 0.5f;
+        const float halfH = disp.y * k_gridOutermostRingScale * 0.5f;
+        const ImVec2 corners[4] = {
+            {vp.x + halfW, vp.y - halfH}, // top-right
+            {vp.x + halfW, vp.y + halfH}, // bottom-right
+            {vp.x - halfW, vp.y + halfH}, // bottom-left
+            {vp.x - halfW, vp.y - halfH}, // top-left
+        };
+        for (int e = 0; e < 4; ++e) {
+            const ImVec2 a = corners[e];
+            const ImVec2 b = corners[(e + 1) % 4];
+            for (int j = 0; j < perEdge; ++j) {
+                const float tt = static_cast<float>(j) / static_cast<float>(perEdge);
+                const ImVec2 p{a.x + (b.x - a.x) * tt, a.y + (b.y - a.y) * tt};
+                const float dx = p.x - vp.x;
+                const float dy = p.y - vp.y;
+                const float len = std::sqrt(dx * dx + dy * dy);
+                if (len <= 0.0f)
+                    continue;
+                const ImVec2 end{vp.x + dx / len * maxR, vp.y + dy / len * maxR};
+                dl->AddLine(vp, end, gridColor, k_gridLineThickness);
+            }
+        }
+
+        for (int i = 1; i <= k_gridRings; ++i) {
+            const float t01 = static_cast<float>(i) / static_cast<float>(k_gridRings);
+            const float w = disp.x * t01 * k_gridOutermostRingScale;
+            const float h = disp.y * t01 * k_gridOutermostRingScale;
+            dl->AddRect(ImVec2(vp.x - w * 0.5f, vp.y - h * 0.5f),
+                        ImVec2(vp.x + w * 0.5f, vp.y + h * 0.5f),
+                        gridColor,
+                        0.0f,
+                        0,
+                        k_gridLineThickness);
+        }
     }
 
     const ImU32 scanline = ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.025f));
