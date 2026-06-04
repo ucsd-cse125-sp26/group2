@@ -169,7 +169,8 @@ static bool hasMetadataKey(const aiNode& node, const std::string& keyToFind)
 
 static bool isWeaponMountPointName(const std::string& nodeName)
 {
-    return nodeName.rfind("ik_", 0) == 0 || nodeName.rfind("socket_", 0) == 0 || nodeName == "is_muzzle";
+    return nodeName.rfind("ik_", 0) == 0 || nodeName.rfind("socket_", 0) == 0 || nodeName == "is_muzzle" ||
+           nodeName == "muzzle_flash";
 }
 
 static bool isCollisionOnlyName(const std::string& name)
@@ -302,7 +303,10 @@ bool AssetLoader::loadModel(const ModelIdInt id,
                     static_cast<double>(nodeModelPos.z));
         }
 
-        if (hasMetadataKey(currentNode, "is_muzzle") || nodeName == "socket_muzzle" || nodeName == "is_muzzle") {
+        // Accept the engine's own muzzle markers AND the Apex rig convention
+        // ("muzzle_flash"), so Apex-derived models expose a muzzle without re-authoring.
+        if (hasMetadataKey(currentNode, "is_muzzle") || nodeName == "socket_muzzle" || nodeName == "is_muzzle" ||
+            nodeName == "muzzle_flash") {
             newModel.hasMuzzle = true;
             newModel.muzzleLocalPos = nodeModelPos;
             SDL_Log("AssetLoader: found muzzle on node '%s' at local pos %.2f %.2f %.2f",
