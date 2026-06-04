@@ -220,6 +220,8 @@ void writeEquipmentElementParams(std::ostream& out,
     writeEquipmentSvgTuningParam(out, first, name + "IconFrame", element.iconFrame);
     writeEquipmentSvgTuningParam(out, first, name + "Icon", element.icon);
     writeEquipmentSvgTuningParam(out, first, name + "Bar", element.bar);
+    writeFloatParam(out, first, name + "BindingOffsetX", element.bindingOffsetX);
+    writeFloatParam(out, first, name + "BindingOffsetY", element.bindingOffsetY);
     writeBoolParam(out, first, name + "IconFlipX", element.flipIconX);
     writeBoolParam(out, first, name + "IconFlipY", element.flipIconY);
     writeBoolParam(out, first, name + "BarFlipX", element.flipBarX);
@@ -297,6 +299,8 @@ void editEquipmentElement(const char* label, EquipmentSlots::AbilityElementTunin
     editEquipmentSvgTuning("Cooldown Bar SVG", element.bar);
     ImGui::Checkbox("Flip Bar X", &element.flipBarX);
     ImGui::Checkbox("Flip Bar Y", &element.flipBarY);
+    editFloat("Binding Text Offset X", element.bindingOffsetX, 0.5f, -200.0f, 200.0f);
+    editFloat("Binding Text Offset Y", element.bindingOffsetY, 0.5f, -200.0f, 200.0f);
     ImGui::TreePop();
 }
 

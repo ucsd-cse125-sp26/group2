@@ -206,12 +206,13 @@ void drawAbilityElement(HudContext& ctx,
     const float maxLabelW = bar.w * 0.58f;
     const float fs = labelW > maxLabelW && labelW > 0.f ? std::max(8.f * uiScale, baseFs * (maxLabelW / labelW))
                                                          : baseFs;
+    const HudAlign bindingAlign = side == AbilitySide::Left ? HudAlign::Left : HudAlign::Right;
     ctx.text(bindingLabel.c_str(),
-             bar.x + bar.w * 0.5f,
-             bar.y + (bar.h - fs) * 0.5f - fs * 0.18f,
+             bar.x + bar.w * 0.5f + tuning.bindingOffsetX * uiScale,
+             bar.y + (bar.h - fs) * 0.5f - fs * 0.18f + tuning.bindingOffsetY * uiScale,
              fs,
              voidfall::k_textBright,
-             HudAlign::Center);
+             bindingAlign);
 }
 
 } // namespace
@@ -220,7 +221,7 @@ EquipmentSlots::EquipmentSlots()
 {
     anchor = HudAnchor::BottomCenter;
     offsetX = 0.f;
-    offsetY = -62.f;
+    offsetY = -43.f;
     width = iconFrameWidth * 2.f + barWidth * 2.f + iconBarGap * 2.f + centerGap;
     height = std::max(iconFrameHeight, barHeight);
 
@@ -229,12 +230,16 @@ EquipmentSlots::EquipmentSlots()
     abilityElements[0].bar.offsetY = -28.f;
     abilityElements[0].bar.stretchX = 1.f;
     abilityElements[0].bar.stretchY = 0.65f;
+    abilityElements[0].bindingOffsetX = -50.f;
+    abilityElements[0].bindingOffsetY = 2.f;
 
     abilityElements[1].bar.scale = 0.8f;
     abilityElements[1].bar.offsetX = 22.f;
     abilityElements[1].bar.offsetY = -22.5f;
     abilityElements[1].bar.stretchX = 1.f;
     abilityElements[1].bar.stretchY = 0.65f;
+    abilityElements[1].bindingOffsetX = 50.f;
+    abilityElements[1].bindingOffsetY = -3.5f;
     abilityElements[1].flipBarY = true;
 }
 

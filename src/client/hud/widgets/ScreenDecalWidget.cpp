@@ -32,7 +32,7 @@ TopDecalWidget::TopDecalWidget() : ScreenDecalWidget(true)
 
 BottomDecalWidget::BottomDecalWidget() : ScreenDecalWidget(false)
 {
-    offsetY = 25.f;
+    offsetY = 37.f;
     decalWidth = 1800.f;
     decalHeight = 165.65f;
     decalScale = 0.9f;
