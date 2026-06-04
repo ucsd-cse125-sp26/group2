@@ -129,9 +129,13 @@ void drawSidebar(const LobbyUIConfig& config, BuildResult& result, bool localRea
     ImGui::EndDisabled();
 
     if (config.isHost) {
+        // Disable while a match start is in flight; returning to host config
+        // mid-countdown lets "GO TO LOBBY" re-trigger the start.
+        ImGui::BeginDisabled(config.startCountdownActive);
         if (menu_theme::terminalActionRow("BACK TO HOST CONFIG", nullptr, ImVec2(0.0f, 32.0f))) {
             result.returnToHostConfigClicked = true;
         }
+        ImGui::EndDisabled();
     }
     if (menu_theme::terminalActionRow("RETURN TO MAIN MENU", nullptr, ImVec2(0.0f, 32.0f), true)) {
         result.returnToMenuClicked = true;
