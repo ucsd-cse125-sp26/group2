@@ -49,6 +49,12 @@ void drawLocalServers(JoinMenuState& state,
                       bool directConnectDisabled)
 {
     menu_theme::terminalSection("LOCAL SERVERS");
+    ImGui::BeginDisabled(state.joining);
+    if (menu_theme::terminalActionRow("REFRESH", "scan LAN", ImVec2(0.0f, 30.0f))) {
+        result.localRefreshClicked = true;
+    }
+    ImGui::EndDisabled();
+
     if (ImGui::BeginTable("LocalServerTable", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
         ImGui::TableSetupColumn("Name");
         ImGui::TableSetupColumn("Address");

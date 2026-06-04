@@ -283,6 +283,10 @@ SDL_AppResult MainMenu::iterate()
     if (result.refreshClicked) {
         startGlobalRefresh(true);
     }
+    if (result.localRefreshClicked) {
+        localDiscoveryClient->refresh(true);
+        localServers = localDiscoveryClient->getServers();
+    }
     if (result.returnToTitleScreenClicked) {
         joinError.clear();
         pendingReturnToTitleScreenRequest = true;
