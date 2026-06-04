@@ -1,0 +1,67 @@
+{
+  "name": "r301_upperbody",
+  "target_rig": "assets/animations/character_rigged_new.glb",
+  "output_blend": "assets/blender_sources/r301_upperbody_retarget_preview.blend",
+  "frame_step": 1,
+  "clips": [
+    {
+      "id": "r301_idle_upper",
+      "source": "assets/animations/anims_apex/apex_idle_stand.glb",
+      "output_fbx": "assets/animations/apex_retargeted/r301_idle_upper.fbx"
+    },
+    {
+      "id": "r301_reload_upper",
+      "source": "assets/animations/anims_apex/apex_reload_rifle.glb",
+      "output_fbx": "assets/animations/apex_retargeted/r301_reload_upper.fbx"
+    }
+  ],
+  "bone_map": [
+    {"source": "def_c_hip", "target": "mixamorig:Hips"},
+    {"source": "def_c_spineA", "target": "mixamorig:Spine"},
+    {"source": "def_c_spineB", "target": "mixamorig:Spine1"},
+    {"source": "def_c_spineC", "target": "mixamorig:Spine2"},
+    {"source": "def_c_neckA", "target": "mixamorig:Neck"},
+
+    {"source": "def_l_clav", "target": "mixamorig:LeftShoulder"},
+    {"source": "def_l_shoulder", "target": "mixamorig:LeftArm"},
+    {"source": "def_l_elbow", "target": "mixamorig:LeftForeArm"},
+    {"source": "def_l_wrist", "target": "mixamorig:LeftHand"},
+    {"source": "def_l_finThumbA", "target": "mixamorig:LeftHandThumb1"},
+    {"source": "def_l_finThumbB", "target": "mixamorig:LeftHandThumb2"},
+    {"source": "def_l_finThumbC", "target": "mixamorig:LeftHandThumb3"},
+    {"source": "def_l_finIndexA", "target": "mixamorig:LeftHandIndex1"},
+    {"source": "def_l_finIndexB", "target": "mixamorig:LeftHandIndex2"},
+    {"source": "def_l_finIndexC", "target": "mixamorig:LeftHandIndex3"},
+    {"source": "def_l_finMidA", "target": "mixamorig:LeftHandMiddle1"},
+    {"source": "def_l_finMidB", "target": "mixamorig:LeftHandMiddle2"},
+    {"source": "def_l_finMidC", "target": "mixamorig:LeftHandMiddle3"},
+    {"source": "def_l_finRingCarpal", "target": "mixamorig:LeftHandRing1"},
+    {"source": "def_l_finRingA", "target": "mixamorig:LeftHandRing2"},
+    {"source": "def_l_finRingB", "target": "mixamorig:LeftHandRing3"},
+    {"source": "def_l_finRingC", "target": "mixamorig:LeftHandRing4"},
+    {"source": "def_l_finPinkyA", "target": "mixamorig:LeftHandPinky1"},
+    {"source": "def_l_finPinkyB", "target": "mixamorig:LeftHandPinky2"},
+    {"source": "def_l_finPinkyC", "target": "mixamorig:LeftHandPinky3"},
+
+    {"source": "def_r_clav", "target": "mixamorig:RightShoulder"},
+    {"source": "def_r_shoulder", "target": "mixamorig:RightArm"},
+    {"source": "def_r_elbow", "target": "mixamorig:RightForeArm"},
+    {"source": "def_r_wrist", "target": "mixamorig:RightHand"},
+    {"source": "def_r_finThumbA", "target": "mixamorig:RightHandThumb1"},
+    {"source": "def_r_finThumbB", "target": "mixamorig:RightHandThumb2"},
+    {"source": "def_r_finThumbC", "target": "mixamorig:RightHandThumb3"},
+    {"source": "def_r_finIndexA", "target": "mixamorig:RightHandIndex1"},
+    {"source": "def_r_finIndexB", "target": "mixamorig:RightHandIndex2"},
+    {"source": "def_r_finIndexC", "target": "mixamorig:RightHandIndex3"},
+    {"source": "def_r_finMidA", "target": "mixamorig:RightHandMiddle1"},
+    {"source": "def_r_finMidB", "target": "mixamorig:RightHandMiddle2"},
+    {"source": "def_r_finMidC", "target": "mixamorig:RightHandMiddle3"},
+    {"source": "def_r_finRingCarpal", "target": "mixamorig:RightHandRing1"},
+    {"source": "def_r_finRingA", "target": "mixamorig:RightHandRing2"},
+    {"source": "def_r_finRingB", "target": "mixamorig:RightHandRing3"},
+    {"source": "def_r_finRingC", "target": "mixamorig:RightHandRing4"},
+    {"source": "def_r_finPinkyA", "target": "mixamorig:RightHandPinky1"},
+    {"source": "def_r_finPinkyB", "target": "mixamorig:RightHandPinky2"},
+    {"source": "def_r_finPinkyC", "target": "mixamorig:RightHandPinky3"}
+  ]
+}

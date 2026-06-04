@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -94,6 +95,14 @@ public:
     /// maximum Y coordinates.  Used to auto-calculate the rig scale so the
     /// animated model matches the player's collision AABB height.
     void verticalBounds(float& outMinY, float& outMaxY) const;
+
+    /// @brief Compute vertical bounds using only vertices influenced by joints
+    /// whose names start with `jointPrefix`.
+    ///
+    /// This is used by stitched prototype rigs where non-body helper/arm
+    /// geometry may be far from the body in bind pose. If no matching weighted
+    /// vertices are found, falls back to verticalBounds().
+    void verticalBoundsForJointPrefix(std::string_view jointPrefix, float& outMinY, float& outMaxY) const;
 
 private:
     struct Impl;

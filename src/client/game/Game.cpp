@@ -6,16 +6,6 @@
 #include "SDL3/SDL_init.h"
 #include "animation/CharacterAnimator.hpp"
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wconversion"
-#pragma GCC diagnostic ignored "-Wold-style-cast"
-#pragma GCC diagnostic ignored "-Wsign-conversion"
-#endif
-#include <ozz/animation/runtime/skeleton.h>
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
 #include "config/InputBindings.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/MapConfig.hpp"
@@ -1409,18 +1399,18 @@ bool Game::init(AppContext& ctx)
     chatOpen_ = false;
 
     // Load the shared skinned-character rig (skeleton + bind pose + weights).
-    // character_rigged_new.glb supplies the visible character mesh; animation
-    // clips are layered on top via AnimationLibrary (same Mixamo skeleton).
+    // character_rigged_apex_hands.glb supplies the visible character mesh with
+    // the prototype Apex-compatible arms grafted under the Mixamo torso.
+    // Existing Mixamo locomotion clips are still layered on top via
+    // AnimationLibrary; Apex arm bones stay body-relative for this first load
+    // test.
     //
-    // The .glb is a Blender glTF re-export (the .fbx had per-mesh bind-matrix
-    // divergence that exploded the skin). That export baked the armature's
-    // unapplied +90° X rotation into the rig, leaving it face-down in-engine,
-    // and inverted normal handedness vs the old FBX. Correct both at load:
-    // rotate the skeleton root -90° about X and flip normals.
+    // This runtime GLB keeps the same Blender/glTF axis convention as
+    // character_rigged_new.glb, so it uses the same -90° X import correction.
     {
         const char* base = SDL_GetBasePath();
         const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
-        const std::string rigPath = assetsDir + "character_rigged_new.glb";
+        const std::string rigPath = assetsDir + "character_rigged_apex_hands.glb";
         const glm::quat rigOrientationFix = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
         if (!charRig_.loadFromFBX(rigPath, rigOrientationFix, /*flipNormals=*/true)) {
             SDL_Log("[client] WARNING: rig load failed — animated characters disabled");
@@ -1440,7 +1430,7 @@ bool Game::init(AppContext& ctx)
             {
                 float meshMinY = 0.0f;
                 float meshMaxY = 1.0f;
-                charRig_.verticalBounds(meshMinY, meshMaxY);
+                charRig_.verticalBoundsForJointPrefix("mixamorig:", meshMinY, meshMaxY);
                 rigMeshMinY_ = meshMinY;
 
                 const float meshHeight = meshMaxY - meshMinY;
@@ -1512,7 +1502,6 @@ bool Game::init(AppContext& ctx)
             } else {
                 SDL_Log("[client] WARNING: Spine2 bone not found — chest-anchored right-hand IK disabled");
             }
-
             // Load per-weapon hand grip poses (Phase C of the AAA IK overhaul).
             // Each weapon's grip lives at assets/weapons/<name>.grip.toml. Missing
             // files are non-fatal — the animator falls back to the idle finger pose

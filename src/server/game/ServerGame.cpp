@@ -1121,11 +1121,10 @@ void ServerGame::initAnimation()
 {
     const char* base = SDL_GetBasePath();
     const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
-    const std::string rigPath = assetsDir + "character_rigged_new.glb";
+    const std::string rigPath = assetsDir + "character_rigged_apex_hands.glb";
 
-    // Match the client's rig orientation fix (see Game.cpp) so server-side
-    // hitbox capsules line up with the rendered, re-oriented body. Normals are
-    // irrelevant server-side, so no flip needed here.
+    // Match the client's runtime GLB import path: same axis convention as
+    // character_rigged_new.glb, with the shared -90° X correction.
     const glm::quat rigOrientationFix = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
     if (!serverRig_.loadFromFBX(rigPath, rigOrientationFix)) {
         SDL_Log("[server] WARNING: rig load failed — skeleton hitboxes disabled, falling back to AABB");
@@ -1138,7 +1137,7 @@ void ServerGame::initAnimation()
     {
         float meshMinY = 0.0f;
         float meshMaxY = 1.0f;
-        serverRig_.verticalBounds(meshMinY, meshMaxY);
+        serverRig_.verticalBoundsForJointPrefix("mixamorig:", meshMinY, meshMaxY);
         rigMeshMinY_ = meshMinY;
 
         const float meshHeight = meshMaxY - meshMinY;

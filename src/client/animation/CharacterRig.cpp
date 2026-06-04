@@ -33,7 +33,9 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <algorithm>
 #include <limits>
+#include <string_view>
 #include <unordered_set>
 
 struct CharacterRig::Impl
@@ -109,6 +111,58 @@ void CharacterRig::verticalBounds(float& outMinY, float& outMaxY) const
         outMinY = 0.0f;
         outMaxY = 1.0f;
     }
+}
+
+void CharacterRig::verticalBoundsForJointPrefix(std::string_view jointPrefix, float& outMinY, float& outMaxY) const
+{
+    if (!impl_->skeleton || jointPrefix.empty()) {
+        verticalBounds(outMinY, outMaxY);
+        return;
+    }
+
+    const int numJoints = impl_->skeleton->num_joints();
+    std::vector<bool> matchingJoints(static_cast<size_t>(numJoints), false);
+    bool hasMatchingJoint = false;
+    const auto jointNames = impl_->skeleton->joint_names();
+    for (int i = 0; i < numJoints; ++i) {
+        if (std::string_view(jointNames[static_cast<size_t>(i)]).starts_with(jointPrefix)) {
+            matchingJoints[static_cast<size_t>(i)] = true;
+            hasMatchingJoint = true;
+        }
+    }
+    if (!hasMatchingJoint) {
+        verticalBounds(outMinY, outMaxY);
+        return;
+    }
+
+    outMinY = std::numeric_limits<float>::max();
+    outMaxY = std::numeric_limits<float>::lowest();
+    for (const auto& mesh : impl_->meshes) {
+        const size_t vertexCount = std::min(mesh.baseVertices.size(), mesh.skinWeights.size());
+        for (size_t i = 0; i < vertexCount; ++i) {
+            const SkinWeight& skin = mesh.skinWeights[i];
+            bool usesMatchingJoint = false;
+            for (int slot = 0; slot < 4; ++slot) {
+                const int jointIdx = skin.boneIndices[slot];
+                if (skin.weights[slot] > 0.0001f && jointIdx >= 0 && jointIdx < numJoints &&
+                    matchingJoints[static_cast<size_t>(jointIdx)])
+                {
+                    usesMatchingJoint = true;
+                    break;
+                }
+            }
+            if (!usesMatchingJoint)
+                continue;
+
+            const float y = (impl_->orientationFix * mesh.baseVertices[i].position).y;
+            if (y < outMinY)
+                outMinY = y;
+            if (y > outMaxY)
+                outMaxY = y;
+        }
+    }
+    if (outMinY > outMaxY)
+        verticalBounds(outMinY, outMaxY);
 }
 
 bool CharacterRig::loadFromFBX(const std::string& path, const glm::quat& orientationFix, bool flipNormals)

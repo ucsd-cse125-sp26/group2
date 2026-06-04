@@ -1962,6 +1962,32 @@ set_compiler_warnings(animation_locomotion_tests)
 enable_sanitizers(animation_locomotion_tests)
 add_test(NAME animation_locomotion_tests COMMAND animation_locomotion_tests)
 
+add_executable(character_rig_asset_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/character_rig_asset_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterRig.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/FbxImportUtils.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/SkinVertex.hpp"
+)
+target_include_directories(character_rig_asset_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(character_rig_asset_tests PRIVATE
+    SDL3::SDL3-static
+    glm::glm
+    assimp
+    ozz_animation_offline
+    ozz_animation
+    ozz_base
+)
+if(PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(character_rig_asset_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(character_rig_asset_tests)
+enable_sanitizers(character_rig_asset_tests)
+add_test(NAME character_rig_asset_tests COMMAND character_rig_asset_tests)
+
 add_executable(lag_comp_math_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/lag_comp_math_tests.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/server/game/LagCompMath.hpp"
