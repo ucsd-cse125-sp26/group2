@@ -67,6 +67,12 @@ public:
     /// body + magazine meshes). Entry may be null (that mesh falls back to white).
     void setPerMeshDiffuse(std::vector<SDL_GPUTexture*> textures, SDL_GPUSampler* sampler);
 
+    /// @brief Enable/disable per-instance frustum culling in setFrame. Defaults
+    /// to true (player characters). Disable for the first-person viewmodel: it is
+    /// camera-parented and its animated pose sits far from the bind-pose sphere,
+    /// so the cull would wrongly drop it most frames (flicker).
+    void setFrustumCullEnabled(bool enabled) { frustumCullEnabled_ = enabled; }
+
     /// @brief Install the shared character rig.  Call ONCE after `init`.
     /// @param meshes     One source-mesh entry per skinned mesh in the rig (typically 1-3 for humanoid rigs).
     /// @param numJoints  Number of skeleton joints.  Determines per-instance palette stride in the shader.
@@ -259,6 +265,7 @@ private:
     SDL_GPUSampler* diffuseSampler_ = nullptr;
     std::vector<SDL_GPUTexture*> perMeshDiffuse_; ///< Per-mesh diffuse (multi-material rig); parallel to skinnedMeshes_.
     SDL_GPUSampler* perMeshSampler_ = nullptr;    ///< Sampler for perMeshDiffuse_ binds.
+    bool frustumCullEnabled_ = true;              ///< Per-instance frustum cull in setFrame (off for the viewmodel).
 
     // Bind-pose bounding sphere (rig-local space), computed in `setRig` and used
     // by `setFrame` to frustum-cull instances.  The radius carries an animation

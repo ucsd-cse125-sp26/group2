@@ -177,19 +177,32 @@ inline const ThirdPersonWeaponParams& getThirdPersonWeaponParams(WeaponType type
 /// from `assets/weapons/<name>.hold.toml` if present and live-tuned via the
 /// Weapon Hold tweaker (which saves back to that TOML).
 ///
-/// The arm-chain angles default to zero (bind/T-pose) — they MUST be tuned per
-/// weapon in the tweaker — but the finger curl is seeded from the previously
-/// hand-tuned rifle grip so the hands look closed around a weapon out of the box.
+/// Values are the rifle hold pose hand-tuned in-game via the Weapon Hold
+/// tweaker (spine-relative gun placement + 3-DOF FK arm/finger angles). Every
+/// weapon reuses it as its default; per-weapon overrides come from
+/// `assets/weapons/<name>.hold.toml` at runtime.
 inline const WeaponHoldPose& getWeaponHoldPose(WeaponType type)
 {
-    // Finger curl carried over from the old rifle.grip.toml (pitch = curl,
-    // yaw = splay; per finger × 4 joints). Layout matches GripPose::index.
     static const auto k_rifle = []() {
         WeaponHoldPose p;
-        // Weapon roughly in front of the chest in Spine2-local space — a
-        // starting estimate near where the old right-hand hold sat. Tune live.
-        p.spineOffset = glm::vec3{-13.0f, -8.0f, 22.0f};
+        // Spine2-local weapon placement (rifle, hand-tuned).
+        p.spineOffset = glm::vec3{-21.0f, 23.5f, 66.25f};
         p.spineRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+
+        // Arm-chain bones root → tip (Shoulder, UpperArm, ForeArm, Hand);
+        // (pitch, yaw, roll) degrees, hand-tuned.
+        p.rightArm.boneAngles = {{
+            {0.0f, 0.0f, 0.0f},
+            {0.0f, 0.0f, 44.0f},
+            {-107.0f, -7.0f, 13.0f},
+            {-1.0f, 24.0f, -41.0f},
+        }};
+        p.leftArm.boneAngles = {{
+            {24.0f, 0.0f, 0.0f},
+            {36.0f, 0.0f, 48.0f},
+            {71.0f, -3.0f, 6.0f},
+            {-11.0f, -46.0f, -23.0f},
+        }};
 
         // Right hand (trigger hand): index softer (trigger finger), thumb over top.
         // (pitch, yaw, roll) degrees — roll seeded at 0.

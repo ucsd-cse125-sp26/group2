@@ -279,7 +279,10 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
 
     // Without an installed rig / a valid bounding sphere we have nothing to
     // size the cull with — submit everything untouched and treat it as visible.
-    if (!rigInstalled_ || numJoints_ <= 0 || rigBoundingRadius_ <= 0.0f) {
+    // The first-person viewmodel also disables culling: it is parented to the
+    // camera and its animated "ready" pose sits far from the bind pose, so a
+    // bind-pose sphere test would (wrongly) cull it most frames — it flickered.
+    if (!frustumCullEnabled_ || !rigInstalled_ || numJoints_ <= 0 || rigBoundingRadius_ <= 0.0f) {
         framePalette_ = palette;
         frameInstances_ = instances;
         visibleInstanceCount_ = static_cast<Uint32>(instances.size());
@@ -454,15 +457,30 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
     SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
 
-    // Textured mode (first-person weapon viewmodel): bind a shared diffuse once.
-    // Multi-material rigs (gun body + magazine) set perMeshDiffuse_ and rebind
-    // per-mesh in the loop below. skinned_geometry_textured.frag samples a single
-    // sampler at fragment slot 0.
-    if (textured_ && perMeshDiffuse_.empty() && diffuseTex_ && diffuseSampler_) {
-        SDL_GPUTextureSamplerBinding b{};
-        b.texture = diffuseTex_;
-        b.sampler = diffuseSampler_;
-        SDL_BindGPUFragmentSamplers(renderPass, 0, &b, 1);
+    // Textured mode (first-person weapon viewmodel): shares geometry_shadowed.frag.
+    // Push the per-material uniforms once (diffuse-only, no normal/MR maps); they
+    // persist for every mesh. The diffuse is bound to slots 0,1,2 (the frag's
+    // diffuse/normal/mr samplers — normal+mr are disabled via MaterialFlags so the
+    // duplicate binds are harmless). The shadow cube arrays (slots 3-5) and the
+    // lightBlock UBO (slot 2) stay bound from NewRenderer::bindLightShadowInfo.
+    if (textured_) {
+        const glm::vec4 materialDiffuse(1.0f, 1.0f, 1.0f, 1.0f);
+        SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
+        struct MaterialFlags
+        {
+            Uint32 useTexture, useNormalTexture, useMetallicRoughnessTexture, pad;
+        } flags{1u, 0u, 0u, 0u};
+        SDL_PushGPUFragmentUniformData(cmd, 1, &flags, sizeof(flags));
+
+        // Single shared diffuse (e.g. the arms) bound once here. Multi-material
+        // rigs (gun body + magazine) set perMeshDiffuse_ and bind per-mesh below.
+        if (perMeshDiffuse_.empty() && diffuseTex_ && diffuseSampler_) {
+            SDL_GPUTextureSamplerBinding b{};
+            b.texture = diffuseTex_;
+            b.sampler = diffuseSampler_;
+            SDL_GPUTextureSamplerBinding binds[3] = {b, b, b};
+            SDL_BindGPUFragmentSamplers(renderPass, 0, binds, 3);
+        }
     }
     for (size_t mi = 0; mi < skinnedMeshes_.size(); ++mi) {
         const SkinnedMesh& sm = skinnedMeshes_[mi];
@@ -477,7 +495,8 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
                 SDL_GPUTextureSamplerBinding b{};
                 b.texture = t;
                 b.sampler = perMeshSampler_;
-                SDL_BindGPUFragmentSamplers(renderPass, 0, &b, 1);
+                SDL_GPUTextureSamplerBinding binds[3] = {b, b, b};
+                SDL_BindGPUFragmentSamplers(renderPass, 0, binds, 3);
             }
         }
         std::vector<SDL_GPUBufferBinding> vertexBufferBindings;
@@ -612,13 +631,18 @@ bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, 
     vertexShader.storageBufferCount = 2;
 
     Boilerplate::ShaderInfo fragmentShader{};
-    // Textured mode (first-person weapon viewmodel) samples a single diffuse
-    // texture with its own directional light; the untextured player rig keeps
-    // the normal-debug shader.
-    fragmentShader.path = textured_ ? "shaders-new/skinned_geometry_textured.frag" : "shaders-new/debug.frag";
+    // Textured mode (first-person weapon viewmodel) shares the world's lit shader
+    // so it gets the same point lights + shadows. The shadow cube arrays (sampler
+    // slots 3-5) and the lightBlock UBO (slot 2) are bound once per geometry pass
+    // by NewRenderer::bindLightShadowInfo and persist into the skinned draw, so
+    // here we only bind the diffuse (slots 0-2) and push Material/MaterialFlags
+    // (UBO 0,1). The untextured player rig keeps the normal-debug shader.
+    fragmentShader.path = textured_ ? "shaders-new/geometry_shadowed.frag" : "shaders-new/debug.frag";
     fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    if (textured_)
-        fragmentShader.samplerCount = 1; // diffuse
+    if (textured_) {
+        fragmentShader.samplerCount = 6;       // diffuse, normal, mr + 3 point-light shadow cube arrays
+        fragmentShader.uniformBufferCount = 3; // Material, MaterialFlags, lightBlock
+    }
 
     SDL_GPUVertexBufferDescription vertexBufferDescription{};
     vertexBufferDescription.slot = 0;

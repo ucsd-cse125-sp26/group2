@@ -175,8 +175,12 @@ bool NewRenderer::init(SDL_Window* window)
     // Player character rig stays untextured (debug shader + chams/killcam path).
     skinnedRenderer_.init(device_, hdrFormat, shaderFormat_);
     // Animated first-person weapon viewmodel + arms render textured (own diffuse).
+    // They are camera-parented, so disable frustum culling (the bind-pose sphere
+    // test would wrongly drop the animated pose most frames — caused flicker).
     viewmodelSkinned_.init(device_, hdrFormat, shaderFormat_, /*textured=*/true);
+    viewmodelSkinned_.setFrustumCullEnabled(false);
     viewmodelArmsSkinned_.init(device_, hdrFormat, shaderFormat_, /*textured=*/true);
+    viewmodelArmsSkinned_.setFrustumCullEnabled(false);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
     if (!dynamicShadowMaps_) {

@@ -112,8 +112,10 @@ struct WeaponViewmodelAssets
 };
 
 inline const std::array<WeaponViewmodelAssets, kRenderableWeaponTypeCount> kWeaponViewmodelAssets{{
-    // Rifle (R-301) — animated first-person viewmodel.
-    {.viewmodelGlb = "apex_r301.glb", .armsGlb = "apex_r301_arms.glb", .flipUVs = false},
+    // Rifle (R-301) — animated first-person viewmodel. flipUVs=true: the lit
+    // geometry_shadowed.frag samples V un-flipped (like static models), so the
+    // glTF→DCC V convention is corrected at import (matches the world model path).
+    {.viewmodelGlb = "apex_r301.glb", .armsGlb = "apex_r301_arms.glb", .flipUVs = true},
     // Rocket — static fallback.
     {},
     // RailGun — static fallback (kept on the legacy viewmodel for now).
