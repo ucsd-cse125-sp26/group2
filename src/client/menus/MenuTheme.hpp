@@ -146,6 +146,18 @@ void endPanel();
 /// @brief Accent section header with an underline rule (styled replacement for ImGui::SeparatorText).
 void heading(const char* text);
 
+/// @brief Terminal-style section prompt/header.
+void terminalSection(const char* text);
+
+/// @brief Selectable command row for keyboard/gamepad/mouse-driven terminal menus.
+bool terminalActionRow(const char* command,
+                       const char* description = nullptr,
+                       const ImVec2& size = ImVec2(0, 0),
+                       bool danger = false);
+
+/// @brief Draw a dim one-line terminal status strip.
+void terminalStatusLine(const char* left, const char* right = nullptr);
+
 /// @brief Bright accent call-to-action button.
 bool accentButton(const char* label, const ImVec2& size = ImVec2(0, 0));
 

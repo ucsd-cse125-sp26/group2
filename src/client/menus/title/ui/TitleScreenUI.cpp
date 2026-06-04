@@ -13,23 +13,27 @@ TitleScreenResult buildTitleScreen()
 {
     TitleScreenResult result{};
 
-    if (menu_theme::beginPanel("Metal: Orbital Arena", 460.0f, 440.0f, true)) {
-        ImGui::Spacing();
-        const float buttonWidth = ImGui::GetContentRegionAvail().x;
-        const ImVec2 buttonSize(buttonWidth, 44.0f);
+    if (menu_theme::beginPanel("Metal: Orbital Arena", 560.0f, 430.0f, true)) {
+        menu_theme::terminalStatusLine("SYSTEM BOOT: ARENA FRONTEND", "NAV: ARROWS / ENTER");
+        menu_theme::terminalSection("COMMANDS");
+        const ImVec2 rowSize(0.0f, 38.0f);
 
-        if (menu_theme::accentButton("Play", buttonSize)) {
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        if (menu_theme::terminalActionRow("PLAY", "open server browser", rowSize)) {
             result.playClicked = true;
         }
-        if (ImGui::Button("Host", buttonSize)) {
+        if (menu_theme::terminalActionRow("HOST", "configure local server", rowSize)) {
             result.hostClicked = true;
         }
-        if (ImGui::Button("Settings", buttonSize)) {
+        if (menu_theme::terminalActionRow("SETTINGS", "controls and video feel", rowSize)) {
             result.settingsClicked = true;
         }
-        if (menu_theme::dangerButton("Exit", buttonSize)) {
+        if (menu_theme::terminalActionRow("EXIT", "close application", rowSize, true)) {
             result.exitClicked = true;
         }
+
+        menu_theme::terminalStatusLine("PROMPT READY", "BUILD group2");
     }
     menu_theme::endPanel();
 

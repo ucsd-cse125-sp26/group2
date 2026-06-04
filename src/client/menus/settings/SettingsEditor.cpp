@@ -174,7 +174,8 @@ SettingsEditorResult SettingsEditor::render(UserSettings& settings, std::string_
     if (!open_)
         return result;
 
-    menu_theme::heading("Settings");
+    menu_theme::terminalStatusLine(dirty_ ? "SETTINGS DIRTY" : "SETTINGS CLEAN", "TAB TO CHANGE SECTION");
+    menu_theme::terminalSection("SETTINGS");
 
     if (ImGui::BeginTabBar("SettingsTabs")) {
         if (ImGui::BeginTabItem("General")) {
@@ -202,20 +203,17 @@ SettingsEditorResult SettingsEditor::render(UserSettings& settings, std::string_
 
     ImGui::Spacing();
     const float buttonWidth = ImGui::GetContentRegionAvail().x;
-    if (ImGui::Button("Reset to Defaults", {buttonWidth, 30.0f * uiScale})) {
+    if (menu_theme::terminalActionRow("RESET TO DEFAULTS", nullptr, {buttonWidth, 30.0f * uiScale})) {
         resetToDefaults();
     }
 
-    const float thirdWidth = (buttonWidth - ImGui::GetStyle().ItemSpacing.x * 2.0f) / 3.0f;
-    if (menu_theme::accentButton("Apply", {thirdWidth, 34.0f * uiScale})) {
+    if (menu_theme::terminalActionRow("APPLY", "save current settings", {buttonWidth, 34.0f * uiScale})) {
         apply(settings, settingsPath, result);
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Back", {thirdWidth, 34.0f * uiScale})) {
+    if (menu_theme::terminalActionRow("BACK", "leave settings", {buttonWidth, 34.0f * uiScale})) {
         result.closeRequested = requestClose(settings);
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel", {thirdWidth, 34.0f * uiScale})) {
+    if (menu_theme::terminalActionRow("CANCEL", "discard prompt if needed", {buttonWidth, 34.0f * uiScale}, true)) {
         result.closeRequested = requestClose(settings);
     }
 

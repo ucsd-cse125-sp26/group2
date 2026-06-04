@@ -4,6 +4,7 @@
 
 #include "menus/MenuTheme.hpp"
 
+#include <cstdio>
 #include <imgui.h>
 
 namespace lobby_ui
@@ -21,14 +22,15 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         }
     }
 
-    if (menu_theme::beginPanel("Lobby", 480.0f, 480.0f, true)) {
+    if (menu_theme::beginPanel("Lobby", 560.0f, 540.0f, true)) {
+        menu_theme::terminalStatusLine(config.startCountdownActive ? "MATCH COUNTDOWN ACTIVE" : "WAITING FOR READY",
+                                       config.isHost ? "HOST" : "CLIENT");
         if (!config.serverName.empty()) {
             ImGui::Text("Server: %.*s", static_cast<int>(config.serverName.size()), config.serverName.data());
-            ImGui::Separator();
         }
 
         if (config.isHosting) {
-            ImGui::SeparatorText("Hosting");
+            menu_theme::terminalSection("HOSTING");
             ImGui::Text("Listen address: %.*s:%u",
                         static_cast<int>(config.hostLanIp.size()),
                         config.hostLanIp.data(),
@@ -37,8 +39,9 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
             ImGui::Spacing();
         }
 
-        ImGui::Text("Players (%zu)", config.players.size());
-        ImGui::Separator();
+        char playerHeader[64];
+        std::snprintf(playerHeader, sizeof(playerHeader), "PLAYERS (%zu)", config.players.size());
+        menu_theme::terminalSection(playerHeader);
         for (const auto& p : config.players) {
             const bool isLocal = p.id == config.localId;
             if (p.isHost && isLocal)
@@ -57,7 +60,7 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
                 ImGui::TextColored(ImVec4(0.65f, 0.68f, 0.74f, 1.0f), "Not ready");
         }
 
-        menu_theme::heading("Match Settings");
+        menu_theme::terminalSection("MATCH SETTINGS");
         if (config.matchConfig) {
             ImGui::Text("Kills to win: %d", config.matchConfig->killsToWin);
             ImGui::Text("Max players: %d", config.matchConfig->maxPlayers);
@@ -65,37 +68,34 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
             ImGui::TextDisabled("Waiting for match settings");
         }
 
-        ImGui::Separator();
+        menu_theme::terminalStatusLine("LOBBY COMMANDS", "ARROWS / ENTER");
         if (config.startCountdownActive) {
             ImGui::Text("Entering match countdown in %.1fs", static_cast<double>(config.startCountdownRemaining));
         }
 
         ImGui::BeginDisabled(config.startCountdownActive);
-        const float actionSpacing = ImGui::GetStyle().ItemSpacing.x;
-        const float actionFullWidth = ImGui::GetContentRegionAvail().x;
-        const float actionWidth = config.isHost ? (actionFullWidth - actionSpacing) * 0.5f : actionFullWidth;
-        if (menu_theme::accentButton(localReady ? "Unready" : "Ready", ImVec2(actionWidth, 0.0f))) {
+        if (menu_theme::terminalActionRow(localReady ? "UNREADY" : "READY",
+                                          localReady ? "mark yourself not ready" : "mark yourself ready",
+                                          ImVec2(0.0f, 32.0f)))
+        {
             result.readyChange = !localReady;
         }
 
         if (config.isHost) {
-            ImGui::SameLine();
             ImGui::BeginDisabled(!config.canStartMatch);
-            if (menu_theme::accentButton("Start Match", ImVec2(actionWidth, 0.0f))) {
+            if (menu_theme::terminalActionRow("START MATCH", "launch match for all players", ImVec2(0.0f, 32.0f))) {
                 result.startMatchClicked = true;
             }
             ImGui::EndDisabled();
         }
         ImGui::EndDisabled();
 
-        ImGui::Separator();
         if (config.isHost) {
-            if (ImGui::Button("Back to Host Config")) {
+            if (menu_theme::terminalActionRow("BACK TO HOST CONFIG", "edit hosted server", ImVec2(0.0f, 32.0f))) {
                 result.returnToHostConfigClicked = true;
             }
-            ImGui::SameLine();
         }
-        if (ImGui::Button("Return to Main Menu")) {
+        if (menu_theme::terminalActionRow("RETURN TO MAIN MENU", "disconnect from lobby", ImVec2(0.0f, 32.0f), true)) {
             result.returnToMenuClicked = true;
         }
     }

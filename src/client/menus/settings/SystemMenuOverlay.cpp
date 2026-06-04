@@ -105,17 +105,19 @@ SystemMenuOverlayResult SystemMenuOverlay::render(UserSettings& settings, std::s
             const SettingsEditorResult settingsResult = settingsEditor_.render(settings, settingsPath, uiScale);
             result.settingsApplied = settingsResult.applied;
         } else {
-            menu_theme::heading("Menu");
+            menu_theme::terminalStatusLine("SYSTEM MENU", "ESC CLOSES");
+            menu_theme::terminalSection("COMMANDS");
             const float buttonWidth = ImGui::GetContentRegionAvail().x;
-            if (menu_theme::accentButton("Back", {buttonWidth, 36.0f * uiScale})) {
+            if (menu_theme::terminalActionRow("BACK", "return to previous screen", {buttonWidth, 36.0f * uiScale})) {
                 close();
             }
-            ImGui::Spacing();
-            if (ImGui::Button("Settings", {buttonWidth, 36.0f * uiScale})) {
+            if (menu_theme::terminalActionRow("SETTINGS", "open controls and options", {buttonWidth, 36.0f * uiScale}))
+            {
                 settingsEditor_.open(settings);
             }
-            ImGui::Spacing();
-            if (menu_theme::dangerButton("Exit to Desktop", {buttonWidth, 36.0f * uiScale})) {
+            if (menu_theme::terminalActionRow(
+                    "EXIT TO DESKTOP", "close application", {buttonWidth, 36.0f * uiScale}, true))
+            {
                 confirm_.open({.title = "Exit to Desktop?",
                                .message = "Exit the game and close the application?",
                                .confirmText = "Exit",

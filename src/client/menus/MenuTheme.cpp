@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <string>
 
@@ -357,6 +358,75 @@ void heading(const char* text)
     ImGui::Dummy(ImVec2(0.0f, t.headingBottomSpacing));
 }
 
+void terminalSection(const char* text)
+{
+    const ThemeSettings& t = g_settings;
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Text, t.textDim);
+    ImGui::Text(":: %s", text);
+    ImGui::PopStyleColor();
+
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float fullW = ImGui::GetContentRegionAvail().x;
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        ImVec2(p.x, p.y + 1.0f), ImVec2(p.x + fullW, p.y + 2.0f), ImGui::GetColorU32(t.border));
+    ImGui::Dummy(ImVec2(0.0f, 7.0f));
+}
+
+bool terminalActionRow(const char* command, const char* description, const ImVec2& size, bool danger)
+{
+    const ThemeSettings& t = g_settings;
+    char label[512];
+    if (description && description[0] != '\0') {
+        std::snprintf(label, sizeof(label), "> %-18s  %s", command, description);
+    } else {
+        std::snprintf(label, sizeof(label), "> %s", command);
+    }
+
+    ImGui::PushStyleColor(ImGuiCol_Button, danger ? t.danger : t.header);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, danger ? t.dangerHover : t.buttonHover);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, danger ? t.dangerActive : t.buttonActive);
+    ImGui::PushStyleColor(ImGuiCol_Text, danger ? ImVec4{1.0f, 0.82f, 0.78f, 1.0f} : t.text);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f));
+    ImVec2 rowSize = size;
+    if (rowSize.x <= 0.0f)
+        rowSize.x = ImGui::GetContentRegionAvail().x;
+    const bool pressed = ImGui::Button(label, rowSize);
+    ImGui::PopStyleVar();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(4);
+
+    if (ImGui::IsItemFocused()) {
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImVec2 max = ImGui::GetItemRectMax();
+        ImGui::GetWindowDrawList()->AddRect(min, max, ImGui::GetColorU32(t.accent), 0.0f, 0, 1.0f);
+    }
+
+    return pressed;
+}
+
+void terminalStatusLine(const char* left, const char* right)
+{
+    const ThemeSettings& t = g_settings;
+    ImGui::Spacing();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float fullW = ImGui::GetContentRegionAvail().x;
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        ImVec2(p.x, p.y), ImVec2(p.x + fullW, p.y + 1.0f), ImGui::GetColorU32(t.border));
+    ImGui::Dummy(ImVec2(0.0f, 5.0f));
+
+    ImGui::PushStyleColor(ImGuiCol_Text, t.textDim);
+    ImGui::TextUnformatted(left ? left : "");
+    if (right && right[0] != '\0') {
+        const ImVec2 rightSize = ImGui::CalcTextSize(right);
+        const float x = ImGui::GetCursorPosX() + std::max(0.0f, fullW - rightSize.x);
+        ImGui::SameLine(x);
+        ImGui::TextUnformatted(right);
+    }
+    ImGui::PopStyleColor();
+}
+
 bool accentButton(const char* label, const ImVec2& size)
 {
     const ThemeSettings& t = g_settings;
@@ -419,6 +489,11 @@ void drawBackground(SDL_GPUDevice* device)
             ImGui::GetColorU32(t.backgroundGlow),
             ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)),
             ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)));
+    }
+
+    const ImU32 scanline = ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.025f));
+    for (float y = 0.0f; y < disp.y; y += 8.0f) {
+        dl->AddLine(ImVec2(0.0f, y), ImVec2(disp.x, y), scanline);
     }
 }
 

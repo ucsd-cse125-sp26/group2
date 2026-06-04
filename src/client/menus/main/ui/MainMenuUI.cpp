@@ -20,17 +20,19 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
     JoinMenuResult result;
     result.connectClicked = false;
 
-    if (menu_theme::beginPanel("Join Game", 680.0f, 500.0f, true)) {
+    if (menu_theme::beginPanel("Join Game", 760.0f, 560.0f, true)) {
+        menu_theme::terminalStatusLine("NETSCAN READY", "TYPE ADDRESS OR SELECT HOST");
+        menu_theme::terminalSection("DIRECT CONNECT");
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
         ImGui::InputText("Server IP", &state.serverIp);
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
         ImGui::InputInt("Port", &state.serverPort);
-        ImGui::Spacing();
-        if (menu_theme::accentButton("Join", ImVec2(140.0f, 0.0f))) {
+
+        const ImVec2 actionSize(0.0f, 32.0f);
+        if (menu_theme::terminalActionRow("JOIN", "connect to entered address", actionSize)) {
             result.connectClicked = true;
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Host", ImVec2(140.0f, 0.0f))) {
+        if (menu_theme::terminalActionRow("HOST", "open local server config", actionSize)) {
             result.hostClicked = true;
         }
         if (!errorMessage.empty()) {
@@ -41,7 +43,7 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                                errorMessage.data());
         }
 
-        menu_theme::heading("Local Servers");
+        menu_theme::terminalSection("LOCAL SERVERS");
         if (ImGui::BeginTable("LocalServerTable", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
             ImGui::TableSetupColumn("Name");
             ImGui::TableSetupColumn("Address");
@@ -62,7 +64,7 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImGui::PushID(i);
                 const bool lobbyFull = server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers;
                 ImGui::BeginDisabled(lobbyFull);
-                if (ImGui::SmallButton("Join")) {
+                if (menu_theme::terminalActionRow("CONNECT", nullptr, ImVec2(0.0f, 0.0f))) {
                     result.localServerIndex = i;
                 }
                 ImGui::EndDisabled();
@@ -72,12 +74,13 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
             ImGui::EndTable();
         }
 
-        menu_theme::heading("Global Servers");
-        if (ImGui::Button(browserRefreshing ? "Refreshing..." : "Refresh")) {
+        menu_theme::terminalSection("GLOBAL SERVERS");
+        if (menu_theme::terminalActionRow(
+                browserRefreshing ? "REFRESHING..." : "REFRESH", "query directory", ImVec2(0.0f, 30.0f)))
+        {
             result.refreshClicked = true;
         }
         if (!browserError.empty()) {
-            ImGui::SameLine();
             ImGui::TextColored(
                 menu_theme::settings().textDim, "%.*s", static_cast<int>(browserError.size()), browserError.data());
         }
@@ -110,7 +113,7 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImGui::PushID(i);
                 const bool lobbyFull = server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers;
                 ImGui::BeginDisabled(lobbyFull);
-                if (ImGui::SmallButton("Join")) {
+                if (menu_theme::terminalActionRow("CONNECT", nullptr, ImVec2(0.0f, 0.0f))) {
                     result.globalServerIndex = i;
                 }
                 ImGui::EndDisabled();
@@ -120,8 +123,8 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
             ImGui::EndTable();
         }
 
-        ImGui::Separator();
-        if (ImGui::Button("Return to Title Screen")) {
+        menu_theme::terminalStatusLine("BROWSER ONLINE", "ESC: SYSTEM MENU");
+        if (menu_theme::terminalActionRow("BACK", "return to title screen", ImVec2(0.0f, 32.0f))) {
             result.returnToTitleScreenClicked = true;
         }
     }

@@ -16,8 +16,10 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
     HostConfigResult result{};
     HostConfigState& draft = inputs.draft;
 
-    if (menu_theme::beginPanel("Host Game", 600.0f, 560.0f, true)) {
-        menu_theme::heading("Settings");
+    if (menu_theme::beginPanel("Host Game", 680.0f, 610.0f, true)) {
+        menu_theme::terminalStatusLine(inputs.serverRunning ? "SERVER SESSION ACTIVE" : "SERVER OFFLINE",
+                                       inputs.hasUnsavedServerChanges ? "UNSAVED CHANGES" : "CONFIG CLEAN");
+        menu_theme::terminalSection("SETTINGS");
         if (ImGui::BeginTable("HostSettings", 2, ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, 150.0f);
             ImGui::TableSetupColumn("Value");
@@ -59,7 +61,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
             ImGui::EndTable();
         }
 
-        menu_theme::heading("Advanced");
+        menu_theme::terminalSection("ADVANCED");
         if (ImGui::BeginTable("HostAdvancedSettings", 2, ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, 150.0f);
             ImGui::TableSetupColumn("Value");
@@ -119,7 +121,7 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
             ImGui::EndTable();
         }
 
-        menu_theme::heading("Server");
+        menu_theme::terminalSection("SERVER");
         if (inputs.serverRunning) {
             if (inputs.boundPort != 0) {
                 ImGui::Text("Connected on port %u", static_cast<unsigned>(inputs.boundPort));
@@ -148,33 +150,30 @@ HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs)
 
         ImGui::Spacing();
         ImGui::BeginDisabled(inputs.serverRunning);
-        if (menu_theme::accentButton("Launch Server")) {
+        if (menu_theme::terminalActionRow("LAUNCH SERVER", "start local host process", ImVec2(0.0f, 32.0f))) {
             result.launchClicked = true;
         }
         ImGui::EndDisabled();
 
         if (inputs.serverRunning) {
-            ImGui::SameLine();
             ImGui::BeginDisabled(!inputs.canManageServer || !inputs.hasUnsavedServerChanges);
-            if (ImGui::Button("Update Settings")) {
+            if (menu_theme::terminalActionRow("UPDATE SETTINGS", "push draft to server", ImVec2(0.0f, 32.0f))) {
                 result.updateClicked = true;
             }
             ImGui::EndDisabled();
-            ImGui::SameLine();
-            if (ImGui::Button("Go to Lobby")) {
+            if (menu_theme::terminalActionRow("GO TO LOBBY", "enter pre-match room", ImVec2(0.0f, 32.0f))) {
                 result.goToLobbyClicked = true;
             }
-            ImGui::SameLine();
             ImGui::BeginDisabled(!inputs.canManageServer);
-            if (menu_theme::dangerButton("Shutdown")) {
+            if (menu_theme::terminalActionRow("SHUTDOWN", "stop hosted server", ImVec2(0.0f, 32.0f), true)) {
                 result.shutdownClicked = true;
             }
             ImGui::EndDisabled();
         }
 
-        ImGui::Separator();
+        menu_theme::terminalStatusLine("HOST CONFIG READY", "ARROWS / ENTER");
         ImGui::BeginDisabled(inputs.serverRunning);
-        if (ImGui::Button("Back to Main Menu")) {
+        if (menu_theme::terminalActionRow("BACK", "return to main menu", ImVec2(0.0f, 32.0f))) {
             result.backToMainMenuClicked = true;
         }
         ImGui::EndDisabled();
