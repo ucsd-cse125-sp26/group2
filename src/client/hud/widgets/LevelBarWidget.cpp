@@ -12,7 +12,7 @@ LevelBarWidget::LevelBarWidget()
 {
     anchor = HudAnchor::BottomCenter;
     offsetX = 0.f;
-    offsetY = -28.f;
+    offsetY = -64.f;
     width = barWidth;
     height = barHeight;
 }

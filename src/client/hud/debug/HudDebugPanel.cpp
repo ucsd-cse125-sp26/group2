@@ -347,6 +347,7 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "iconFrameWidth", equipment->iconFrameWidth);
         writeFloatParam(out, first, "iconFrameHeight", equipment->iconFrameHeight);
         writeFloatParam(out, first, "abilityIconSize", equipment->abilityIconSize);
+        writeFloatParam(out, first, "bindingFontSize", equipment->bindingFontSize);
         writeFloatParam(out, first, "barWidth", equipment->barWidth);
         writeFloatParam(out, first, "barHeight", equipment->barHeight);
         writeFloatParam(out, first, "iconBarGap", equipment->iconBarGap);
@@ -583,6 +584,7 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Icon Frame Width", equipment->iconFrameWidth, 1.0f, 8.0f, 400.0f);
         editFloat("Icon Frame Height", equipment->iconFrameHeight, 1.0f, 8.0f, 400.0f);
         editFloat("Ability Icon Size", equipment->abilityIconSize, 0.5f, 4.0f, 300.0f);
+        editFloat("Binding Font Size", equipment->bindingFontSize, 0.5f, 4.0f, 80.0f);
         editFloat("Bar Width", equipment->barWidth, 1.0f, 8.0f, 800.0f);
         editFloat("Bar Height", equipment->barHeight, 1.0f, 8.0f, 400.0f);
         editFloat("Icon-Bar Gap", equipment->iconBarGap, 0.5f, 0.0f, 200.0f);
