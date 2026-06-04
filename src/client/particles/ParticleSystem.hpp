@@ -8,6 +8,7 @@
 #include "ecs/components/Projectile.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "effects/BulletHoleDecal.hpp"
+#include "effects/EnergyTeslaArcEffect.hpp"
 #include "effects/ExplosionVfxEffect.hpp"
 #include "effects/HitscanEffect.hpp"
 #include "effects/ImpactEffect.hpp"
@@ -86,6 +87,9 @@ public:
     /// @brief Drive molotov ground-fire visuals from a replicated FireField entity.
     void driveGroundFire(entt::entity fieldEntity, glm::vec3 pos, float radius, float remaining, float duration);
 
+    /// @brief Spawn a short debug preview of the sustained EnergyGun Tesla arc.
+    void debugEnergyTeslaArc(glm::vec3 origin, glm::vec3 guidePoint, glm::vec3 hitPoint, bool locked, float lockStrength);
+
     // SDF text (queued per frame, flushed in render)
 
     /// @brief Queue world-space SDF text for this frame.
@@ -135,7 +139,10 @@ public:
     [[nodiscard]] uint32_t tracerCount() const { return tracers_.count(); }
     [[nodiscard]] uint32_t ribbonVertexCount() const { return ribbons_.count(); }
     [[nodiscard]] uint32_t hitscanBeamCount() const { return hitscan_.activeBeamCount(); }
-    [[nodiscard]] uint32_t arcVertexCount() const { return hitscan_.arcCount() + tesla_.arcCount(); }
+    [[nodiscard]] uint32_t railgunArcVertexCount() const { return hitscan_.arcCount(); }
+    [[nodiscard]] uint32_t energyTeslaArcVertexCount() const { return energyTesla_.arcCount(); }
+    [[nodiscard]] uint32_t energyTeslaBeamCount() const { return energyTesla_.activeBeamCount(); }
+    [[nodiscard]] uint32_t arcVertexCount() const { return hitscan_.arcCount() + tesla_.arcCount() + energyTesla_.arcCount(); }
     [[nodiscard]] uint32_t smokeCount() const { return smoke_.count(); }
     [[nodiscard]] uint32_t explosionSpriteCount() const { return explosionVfx_.spriteCount(); }
     [[nodiscard]] uint32_t explosionDebrisCount() const { return explosionVfx_.debrisCount(); }
@@ -151,6 +158,7 @@ private:
     RibbonTrail ribbons_;
     HitscanEffect hitscan_;
     TeslaBeamEffect tesla_;
+    EnergyTeslaArcEffect energyTesla_;
     SmokeEffect smoke_;
     ImpactEffect impact_;
     BulletHoleDecal decals_;
@@ -167,6 +175,6 @@ private:
 
     float frameDt_ = 0.016f; // last dt, needed by spawn callbacks
 
-    // Scratch buffer: hitscan + tesla arc verts merged for a single upload.
+    // Scratch buffer: railgun + legacy tesla + energy tesla arc verts merged for a single upload.
     std::vector<ArcVertex> arcScratch_;
 };

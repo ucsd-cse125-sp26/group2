@@ -933,7 +933,10 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         {"Tracers (caps.)", ps.tracerCount(), 512},
         {"Ribbon verts", ps.ribbonVertexCount(), 24576},
         {"Hitscan beams", ps.hitscanBeamCount(), 64},
-        {"Arc verts", ps.arcVertexCount(), 2048},
+        {"Railgun arc verts", ps.railgunArcVertexCount(), 4096},
+        {"Energy arc verts", ps.energyTeslaArcVertexCount(), 8192},
+        {"Energy arc beams", ps.energyTeslaBeamCount(), 8},
+        {"Merged arc verts", ps.arcVertexCount(), 8192},
         {"Smoke", ps.smokeCount(), 1024},
         {"Explosion sprites", ps.explosionSpriteCount(), 2048},
         {"Explosion debris", ps.explosionDebrisCount(), 1024},
@@ -987,6 +990,18 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         const glm::vec3 hitPoint = hipfireOrigin + forward * particleSpawnDist_;
         ps.spawnHitscanBeam(hipfireOrigin, hitPoint, WeaponType::EnergyGun);
         ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyGun);
+    }
+
+    if (ImGui::Button("Energy Tesla Straight", {160.f, 0.f})) {
+        const glm::vec3 guidePoint = hipfireOrigin + forward * particleSpawnDist_;
+        ps.debugEnergyTeslaArc(hipfireOrigin, guidePoint, guidePoint, false, 0.0f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Energy Tesla Locked", {155.f, 0.f})) {
+        const glm::vec3 guidePoint = hipfireOrigin + forward * particleSpawnDist_;
+        const glm::vec3 targetPoint = hipfireOrigin + forward * (particleSpawnDist_ * 0.68f) + camRight * 95.0f +
+                                      worldUp * 32.0f;
+        ps.debugEnergyTeslaArc(hipfireOrigin, guidePoint, targetPoint, true, 1.0f);
     }
 
     if (ImGui::Button("Smoke Cloud", {120.f, 0.f}))

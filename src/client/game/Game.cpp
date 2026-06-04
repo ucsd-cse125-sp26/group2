@@ -4673,6 +4673,7 @@ SDL_AppResult Game::iterate()
 
             glm::vec3 lightStart = beam.origin;
             glm::vec3 lightEnd = beam.hitPoint;
+            glm::vec3 guideEnd = (glm::length(beam.guidePoint - beam.origin) > 0.5f) ? beam.guidePoint : beam.hitPoint;
 
             // The auto-lock Tesla beam endpoint is server-authoritative (the
             // locked target, or a forward point capped at maxRange), so the
@@ -4691,15 +4692,28 @@ SDL_AppResult Game::iterate()
             const float len = glm::length(delta);
             if (len < 1.0f)
                 return;
-            const int numLights = std::max(2, static_cast<int>(len / 80.0f) + 1);
-            const glm::vec3 lightColor{0.3f, 1.0f, 0.2f};
+            const int numLights = (beam.type == WeaponType::EnergyGun)
+                                      ? std::max(2, static_cast<int>(len / 130.0f) + 1)
+                                      : std::max(2, static_cast<int>(len / 80.0f) + 1);
+            const glm::vec3 lightColor = (beam.type == WeaponType::EnergyGun) ? glm::vec3{0.16f, 0.78f, 1.0f}
+                                                                              : glm::vec3{0.3f, 1.0f, 0.2f};
             for (int i = 0; i < numLights && dynLights.size() < 14; ++i) {
                 const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
+                glm::vec3 lightPos = lightStart + delta * t;
+                float intensity = 3.0f;
+                float range = 200.0f;
+                if (beam.type == WeaponType::EnergyGun) {
+                    const float tail = (beam.locked != 0) ? std::clamp((t - 0.62f) / 0.38f, 0.0f, 1.0f) : 0.0f;
+                    const glm::vec3 straightPos = glm::mix(lightStart, guideEnd, t);
+                    lightPos = glm::mix(straightPos, lightStart + delta * t, tail * beam.lockStrength);
+                    intensity = (beam.locked != 0 && t > 0.75f) ? 3.2f : 2.0f;
+                    range = (beam.locked != 0 && t > 0.75f) ? 190.0f : 155.0f;
+                }
                 dynLights.push_back(PointLight{
-                    .position = lightStart + delta * t,
-                    .intensity = 3.0f,
+                    .position = lightPos,
+                    .intensity = intensity,
                     .color = lightColor,
-                    .range = 200.0f,
+                    .range = range,
                 });
                 ++beamPointLights;
             }
