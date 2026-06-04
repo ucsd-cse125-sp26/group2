@@ -10,6 +10,7 @@
 #include "menus/host/HostConfig.hpp"
 #include "menus/lobby/Lobby.hpp"
 #include "menus/main/MainMenu.hpp"
+#include "menus/postmatch/PostMatchScoreboard.hpp"
 #include "menus/title/TitleScreen.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
@@ -397,6 +398,32 @@ SDL_AppResult App::iterate()
         }
         break;
     }
+    case Screen::PostMatch: {
+        auto* postMatch = dynamic_cast<PostMatchScoreboard*>(screen_.get());
+        if (!postMatch)
+            break;
+
+        if (postMatch->consumeReturnToMenu()) {
+            const bool showServerShutdownNotice = postMatch->consumeServerShutdownNotice();
+            if (hostedServer.isRunning()) {
+                shutdownHostedServerGracefully();
+            }
+            client.shutdown();
+            if (showServerShutdownNotice) {
+                transitionTo(Screen::MainMenu);
+                showMainMenuPopupMessage("Server shutdown");
+            } else {
+                transitionTo(Screen::MainMenu);
+            }
+            break;
+        }
+
+        if (postMatch->consumeReturnToLobby()) {
+            transitionTo(Screen::Lobby);
+            break;
+        }
+        break;
+    }
     case Screen::InGame: {
         auto* game = dynamic_cast<Game*>(screen_.get());
         if (!game)
@@ -419,6 +446,11 @@ SDL_AppResult App::iterate()
 
         if (developerConfig.skipLobby)
             break;
+        if (auto postMatchResult = game->consumePostMatchResult()) {
+            pendingPostMatchResult_ = std::move(*postMatchResult);
+            transitionTo(Screen::PostMatch);
+            break;
+        }
         if (game->shouldReturnToLobby()) {
             transitionTo(Screen::Lobby);
         }
@@ -475,6 +507,30 @@ void App::transitionTo(Screen next)
             current = next;
         } else {
             lobby->quit();
+        }
+        break;
+    }
+    case Screen::PostMatch: {
+        if (!pendingPostMatchResult_) {
+            next = Screen::Lobby;
+            auto lobby = std::make_unique<Lobby>();
+            if (lobby->init(ctx)) {
+                screen_ = std::move(lobby);
+                current = next;
+            } else {
+                lobby->quit();
+            }
+            break;
+        }
+
+        auto postMatch = std::make_unique<PostMatchScoreboard>();
+        if (postMatch->init(ctx, std::move(*pendingPostMatchResult_))) {
+            pendingPostMatchResult_.reset();
+            screen_ = std::move(postMatch);
+            current = next;
+        } else {
+            pendingPostMatchResult_.reset();
+            postMatch->quit();
         }
         break;
     }

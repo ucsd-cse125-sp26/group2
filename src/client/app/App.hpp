@@ -7,6 +7,7 @@
 #include "IScreen.hpp"
 #include "config/UserSettings.hpp"
 #include "host/HostedServer.hpp"
+#include "menus/postmatch/PostMatchResult.hpp"
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
 #include "renderer-new/NewRenderer.hpp"
@@ -14,6 +15,7 @@
 #include <SDL3/SDL.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 
 /// @brief Root application class; owns shared resources and manages screen transitions.
@@ -46,6 +48,7 @@ public:
         MainMenu,    ///< Join/server-browser main menu screen.
         HostConfig,  ///< Local hosting configuration screen.
         Lobby,       ///< Pre-match lobby waiting room.
+        PostMatch,   ///< Dedicated scoreboard shown after a completed match.
         InGame       ///< Active match session.
     };
 
@@ -75,9 +78,10 @@ private:
         .maxPlayers = 8,
     }; ///< Persistent host screen draft state.
 
-    Screen current = Screen::TitleScreen; ///< Which screen is currently active.
-    std::unique_ptr<IScreen> screen_;     ///< Active screen instance.
-    bool imguiContextOwned = false;       ///< True once App has created the ImGui context.
+    Screen current = Screen::TitleScreen;                   ///< Which screen is currently active.
+    std::unique_ptr<IScreen> screen_;                       ///< Active screen instance.
+    bool imguiContextOwned = false;                         ///< True once App has created the ImGui context.
+    std::optional<PostMatchResult> pendingPostMatchResult_; ///< Result data used to open the post-match screen.
 
     /// @brief Destroy all subsystems without asserting on partial-init state.
     void cleanup();

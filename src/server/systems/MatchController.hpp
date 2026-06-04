@@ -53,7 +53,7 @@ private:
     static constexpr float k_warmupDuration =
         30.0f; ///< Max time to wait for players to load/spawn before starting after host start.
     static constexpr float k_countdownDuration = 5.0f; ///< Seconds for the pre-match countdown.
-    static constexpr float k_finishedDuration = 15.0f; ///< 5s result banner + 10s scoreboard before reset.
+    static constexpr float k_finishedDuration = 5.0f;  ///< Seconds to show the in-game result banner before post-match.
 
     MatchConfig config; ///< Configuration for current match (e.g. kill threshold to win).
 
