@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "menus/host/ui/HostConfigUI.hpp"
 #include "network/DiscoveryClient.hpp"
 #include "network/discovery/GlobalDiscoveryProtocol.hpp"
 
@@ -10,24 +11,33 @@
 #include <string_view>
 #include <vector>
 
+/// @brief Tabs available on the server browser screen.
+enum class ServerBrowserTab
+{
+    LocalListing,
+    GlobalListing,
+    HostConfig,
+};
+
 /// @brief Mutable widget state for the server join form.
 struct JoinMenuState
 {
-    std::string serverIp = "127.0.0.1"; ///< Server hostname or IP address entered by the user.
-    int serverPort = 2310;              ///< Server port entered by the user.
-    bool joining = false;               ///< True while an outbound join attempt is in progress.
-    std::string joiningLabel;           ///< Target label shown while joining.
+    std::string serverAddress;                                   ///< Server address entered by the user.
+    ServerBrowserTab activeTab = ServerBrowserTab::LocalListing; ///< Currently selected browser tab.
+    bool applyInitialTabSelection = true; ///< True when the active tab should be forced selected once.
+    bool joining = false;                 ///< True while an outbound join attempt is in progress.
+    std::string joiningLabel;             ///< Target label shown while joining.
 };
 
 /// @brief Output from a single main menu UI frame.
 struct JoinMenuResult
 {
     bool connectClicked = false;             ///< True if the user pressed "Join" this frame.
-    bool hostClicked = false;                ///< True if the user pressed "Host" this frame.
     bool refreshClicked = false;             ///< True if the user requested a global browser refresh.
     bool returnToTitleScreenClicked = false; ///< True if the user pressed "Return to Title Screen" this frame.
     int localServerIndex = -1;               ///< Index of a discovered local server to join, or -1.
     int globalServerIndex = -1;              ///< Index of a discovered server to join, or -1.
+    HostConfigResult hostConfig;             ///< Actions emitted by the host-config tab.
 };
 
 namespace main_menu_ui
@@ -46,6 +56,8 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                              const std::vector<DiscoveryClient::DiscoveredServer>& localServers,
                              const std::vector<net::discovery::ServerInfo>& globalServers,
                              std::string_view browserError,
-                             bool browserRefreshing);
+                             bool browserRefreshing,
+                             bool directConnectDisabled,
+                             const HostConfigUIInputs& hostInputs);
 
 } // namespace main_menu_ui

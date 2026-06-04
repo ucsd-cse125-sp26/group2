@@ -7,6 +7,7 @@
 #include "IScreen.hpp"
 #include "config/UserSettings.hpp"
 #include "host/HostedServer.hpp"
+#include "menus/main/ui/MainMenuUI.hpp"
 #include "menus/postmatch/PostMatchResult.hpp"
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
@@ -50,7 +51,7 @@ public:
         TitleScreen, ///< Top-level landing/title screen.
         Settings,    ///< Dedicated front-end settings screen.
         MainMenu,    ///< Join/server-browser main menu screen.
-        HostConfig,  ///< Local hosting configuration screen.
+        HostConfig,  ///< Deprecated alias for opening the server browser host tab.
         Lobby,       ///< Pre-match lobby waiting room.
         Loading,     ///< Match-loading screen shown before synchronous game init.
         PostMatch,   ///< Dedicated scoreboard shown after a completed match.
@@ -83,9 +84,10 @@ private:
         .maxPlayers = 8,
     }; ///< Persistent host screen draft state.
 
-    Screen current = Screen::TitleScreen;                   ///< Which screen is currently active.
-    Screen settingsReturnScreen_ = Screen::TitleScreen;     ///< Front-end screen to restore after Settings closes.
-    std::unique_ptr<IScreen> screen_;                       ///< Active screen instance.
+    Screen current = Screen::TitleScreen;               ///< Which screen is currently active.
+    Screen settingsReturnScreen_ = Screen::TitleScreen; ///< Front-end screen to restore after Settings closes.
+    ServerBrowserTab nextMainMenuTab_ = ServerBrowserTab::LocalListing; ///< Initial tab for the next MainMenu open.
+    std::unique_ptr<IScreen> screen_;                                   ///< Active screen instance.
     bool imguiContextOwned = false;                         ///< True once App has created the ImGui context.
     std::optional<PostMatchResult> pendingPostMatchResult_; ///< Result data used to open the post-match screen.
 

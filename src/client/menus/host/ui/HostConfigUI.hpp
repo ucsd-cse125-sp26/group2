@@ -37,4 +37,9 @@ namespace host_config_ui
 /// @param inputs Current host settings and hosted-server status.
 /// @return Buttons/actions selected by the user this frame.
 HostConfigResult buildHostConfigMenu(const HostConfigUIInputs& inputs);
+
+/// @brief Render host-configuration controls inside an already-open ImGui window/tab.
+/// @param inputs Current host settings and hosted-server status.
+/// @return Buttons/actions selected by the user this frame.
+HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs);
 } // namespace host_config_ui

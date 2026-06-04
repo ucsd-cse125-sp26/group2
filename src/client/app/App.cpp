@@ -213,11 +213,13 @@ SDL_AppResult App::iterate()
             return SDL_APP_SUCCESS;
         }
         if (titleScreen->consumePlayRequest()) {
+            nextMainMenuTab_ = ServerBrowserTab::LocalListing;
             transitionTo(Screen::MainMenu);
             break;
         }
         if (titleScreen->consumeHostRequest()) {
-            transitionTo(Screen::HostConfig);
+            nextMainMenuTab_ = ServerBrowserTab::HostConfig;
+            transitionTo(Screen::MainMenu);
             break;
         }
         if (titleScreen->consumeSettingsRequest()) {
@@ -253,8 +255,48 @@ SDL_AppResult App::iterate()
             startJoinAttempt(*joinRequest);
         }
 
-        if (mainMenu->consumeHostRequest()) {
-            transitionTo(Screen::HostConfig);
+        if (mainMenu->consumeLaunchRequest()) {
+            if (client.isConnected()) {
+                client.shutdown();
+            }
+
+            HostConfigState config = mainMenu->consumeDraftConfig();
+            hostConfigState = config;
+
+            if (config.useLegacyTcp && !config.useSpecificPort) {
+                mainMenu->setLaunchError("Legacy TCP requires a specific port");
+                break;
+            }
+
+            std::string error;
+            if (!hostedServer.start(config, error)) {
+                mainMenu->setLaunchError(error.empty() ? "Failed to start hosted server" : error);
+                break;
+            }
+
+            SDL_Log("Hosted server started on port %d, connecting client...", hostedServer.port());
+            TransportConfig hostedTransport = networkConfig.transport;
+            if (config.useLegacyTcp) {
+                hostedTransport.useUdpSessions = false;
+            }
+            const ConnectError connectError = client.init("127.0.0.1", hostedServer.port(), hostedTransport);
+            if (connectError != ConnectError::None) {
+                SDL_Log("Failed to connect to hosted server: %s", connectErrorLogName(connectError));
+                mainMenu->setLaunchError(joinErrorMessage(connectError));
+                hostedServer.shutdown();
+            } else {
+                SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
+                currentServerName = config.serverName;
+            }
+        }
+
+        if (mainMenu->consumeShutdownRequest()) {
+            shutdownHostedServerGracefully();
+            client.shutdown();
+        }
+
+        if (mainMenu->consumeGoToLobbyRequest() && (hostedServer.isRunning() || client.isConnected())) {
+            transitionTo(Screen::Lobby);
         }
         break;
     }
@@ -327,7 +369,8 @@ SDL_AppResult App::iterate()
             break;
 
         if (lobby->consumeReturnToHostConfig()) {
-            transitionTo(Screen::HostConfig);
+            nextMainMenuTab_ = ServerBrowserTab::HostConfig;
+            transitionTo(Screen::MainMenu);
             break;
         }
 
@@ -343,9 +386,11 @@ SDL_AppResult App::iterate()
             client.shutdown();
 
             if (showServerShutdownNotice) {
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
                 transitionTo(Screen::MainMenu);
                 showMainMenuPopupMessage("Server shutdown");
             } else {
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
                 transitionTo(Screen::MainMenu);
             }
             break;
@@ -384,9 +429,11 @@ SDL_AppResult App::iterate()
             }
             client.shutdown();
             if (showServerShutdownNotice) {
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
                 transitionTo(Screen::MainMenu);
                 showMainMenuPopupMessage("Server shutdown");
             } else {
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
                 transitionTo(Screen::MainMenu);
             }
             break;
@@ -414,9 +461,11 @@ SDL_AppResult App::iterate()
             }
             client.shutdown();
             if (showServerShutdownNotice) {
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
                 transitionTo(Screen::MainMenu);
                 showMainMenuPopupMessage("Server shutdown");
             } else {
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
                 transitionTo(Screen::MainMenu);
             }
             break;
@@ -477,7 +526,8 @@ void App::transitionTo(Screen next)
             game->quit();
             client.shutdown();
             auto mainMenu = std::make_unique<MainMenu>();
-            if (mainMenu->init(ctx)) {
+            nextMainMenuTab_ = ServerBrowserTab::LocalListing;
+            if (mainMenu->init(ctx, nextMainMenuTab_)) {
                 mainMenu->setPopupMessage("Failed to initialize match");
                 screen_ = std::move(mainMenu);
                 current = Screen::MainMenu;
@@ -542,18 +592,18 @@ void App::transitionTo(Screen next)
         break;
     }
     case Screen::HostConfig: {
-        auto hostConfig = std::make_unique<HostConfig>();
-        if (hostConfig->init(ctx)) {
-            screen_ = std::move(hostConfig);
-            current = next;
+        auto mainMenu = std::make_unique<MainMenu>();
+        if (mainMenu->init(ctx, ServerBrowserTab::HostConfig)) {
+            screen_ = std::move(mainMenu);
+            current = Screen::MainMenu;
         } else {
-            hostConfig->quit();
+            mainMenu->quit();
         }
         break;
     }
     case Screen::MainMenu: {
         auto mainMenu = std::make_unique<MainMenu>();
-        if (mainMenu->init(ctx)) {
+        if (mainMenu->init(ctx, nextMainMenuTab_)) {
             screen_ = std::move(mainMenu);
             current = next;
         } else {
