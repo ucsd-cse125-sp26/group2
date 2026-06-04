@@ -16,9 +16,9 @@
 // uses 64. Keep this in lockstep with the shader-side value, which is injected
 // at build time via -DMAX_MOVING_POINT_LIGHTS in CMakeLists.txt.
 #if defined(__APPLE__)
-#define MAX_MOVING_POINT_LIGHTS 16
+#define MAX_MOVING_POINT_LIGHTS 56
 #else
-#define MAX_MOVING_POINT_LIGHTS 16
+#define MAX_MOVING_POINT_LIGHTS 64
 #endif
 #define MAX_SHADOW_COUNT MAX_POINT_LIGHTS
 

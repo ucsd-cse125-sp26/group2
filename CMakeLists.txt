@@ -635,9 +635,9 @@ message(STATUS "Shader targets: ${_shader_targets}")
 # macOS/Metal must stay at 56; every other backend uses 64. Keep this in
 # lockstep with MAX_MOVING_POINT_LIGHTS in src/client/renderer-new/Boilerplate.hpp.
 if(APPLE)
-    set(MAX_MOVING_POINT_LIGHTS 16)
+    set(MAX_MOVING_POINT_LIGHTS 56)
 else()
-    set(MAX_MOVING_POINT_LIGHTS 16)
+    set(MAX_MOVING_POINT_LIGHTS 64)
 endif()
 set(SHADER_DEFINE_FLAGS "-DMAX_MOVING_POINT_LIGHTS=${MAX_MOVING_POINT_LIGHTS}")
 message(STATUS "Shader MAX_MOVING_POINT_LIGHTS: ${MAX_MOVING_POINT_LIGHTS}")
