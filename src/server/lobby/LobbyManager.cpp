@@ -3,10 +3,12 @@
 #include "lobby/LobbyManager.hpp"
 
 #include "ecs/components/ClientId.hpp"
+#include "ecs/components/PlayerName.hpp"
 #include "network/Server.hpp"
 #include "network/lobby/LobbyStatus.hpp"
 
 #include <algorithm>
+#include <cstddef>
 
 bool LobbyManager::init(Server& serverPtr)
 {
@@ -14,11 +16,19 @@ bool LobbyManager::init(Server& serverPtr)
     return true;
 }
 
-bool LobbyManager::addPlayer(ClientId id)
+bool LobbyManager::addPlayer(ClientId id, const char* displayName)
 {
     SDL_Log("LobbyManager: adding player with clientId %u", id.value);
     LobbyPlayer newPlayer{id};
+    if (displayName != nullptr) {
+        std::size_t i = 0;
+        for (; i < PlayerName::k_maxLen && displayName[i] != '\0'; ++i)
+            newPlayer.displayName[i] = displayName[i];
+        newPlayer.displayName[i] = '\0';
+    }
+
     LobbyUpdateEvent updateEvent{.type = LobbyUpdateEvent::Type::PlayerJoined, .id = id};
+    updateEvent.displayName = newPlayer.displayName;
 
     // If first player to join
     if (players.size() == 0) {

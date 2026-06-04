@@ -28,6 +28,7 @@
 #include "ecs/registry/Registry.hpp"
 #include "hud/Hud.hpp"
 #include "menus/pause/PauseMenu.hpp"
+#include "menus/postmatch/PostMatchResult.hpp"
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/RegistrySerialization.hpp"
@@ -113,6 +114,9 @@ public:
     /// @brief True once the server has returned the match phase to the lobby.
     bool shouldReturnToLobby() const;
 
+    /// @brief Return the final scoreboard snapshot captured before the server reset match stats.
+    std::optional<PostMatchResult> consumePostMatchResult();
+
     /// @brief True if the user requested leaving the match for the main menu, then clear that request.
     bool consumeReturnToMainMenu();
 
@@ -180,6 +184,9 @@ private:
     evaluateReconciliationSkip(const PredictedPlayerState& authoritative,
                                const PredictedPlayerState* predictedAtAck,
                                const std::optional<PredictedPlayerState>& currentBeforeSnapshot) const noexcept;
+
+    /// @brief Refresh the final post-match scoreboard snapshot while FINISHED stats are still replicated.
+    void updateCachedPostMatchResult();
 
     /// @brief Enter chat input mode and release normal gameplay input capture.
     void openChat();
@@ -345,19 +352,19 @@ private:
     // emote wheel fires, cleared on local movement/combat input or death. Drives
     // the local animator override, the third-person emote camera, and showing
     // the local body. Remote players' emotes are server-driven via AnimSnapshot.
-    int localEmote_{-1};            ///< Active local emote index (EmoteCatalog), or -1.
-    float emoteCamBlend_{0.0f};     ///< 0 = first-person, 1 = third-person emote cam (eased).
+    int localEmote_{-1};        ///< Active local emote index (EmoteCatalog), or -1.
+    float emoteCamBlend_{0.0f}; ///< 0 = first-person, 1 = third-person emote cam (eased).
 
     // Killcam: while dead and awaiting respawn, hold the camera at the death
     // position and rotate it to keep the killer centered on screen.
-    bool killcamActive_{false};            ///< True this frame while the killcam is driving the camera.
-    glm::vec3 killcamEye_{0.0f};           ///< Eye position locked at the moment of death.
-    float killcamYaw_{0.0f};               ///< Smoothed killcam yaw (radians).
-    float killcamPitch_{0.0f};             ///< Smoothed killcam pitch (radians).
-    glm::vec3 killcamKillerCenter_{0.0f};  ///< Killer AABB center (world) for the HUD label.
-    glm::vec3 killcamKillerHalf_{0.0f};    ///< Killer AABB half-extents (world) for the HUD label.
+    bool killcamActive_{false};                    ///< True this frame while the killcam is driving the camera.
+    glm::vec3 killcamEye_{0.0f};                   ///< Eye position locked at the moment of death.
+    float killcamYaw_{0.0f};                       ///< Smoothed killcam yaw (radians).
+    float killcamPitch_{0.0f};                     ///< Smoothed killcam pitch (radians).
+    glm::vec3 killcamKillerCenter_{0.0f};          ///< Killer AABB center (world) for the HUD label.
+    glm::vec3 killcamKillerHalf_{0.0f};            ///< Killer AABB half-extents (world) for the HUD label.
     entt::entity killcamKillerEntity_{entt::null}; ///< Killer entity (drives the chams pass), or null.
-    std::string killcamKillerName_;        ///< Killer's display nickname (for the HUD label).
+    std::string killcamKillerName_;                ///< Killer's display nickname (for the HUD label).
 
     // Map collision data — loaded from GLB, owns the vectors that back activeWorld().
     physics::MapCollisionData mapCollision_;
@@ -767,6 +774,7 @@ private:
     MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.
     ClientId currentWinnerId = ClientId{-1};          ///< ClientId of the current match winner, if in POSTMATCH.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
+    std::optional<PostMatchResult> cachedPostMatchResult_; ///< Final scoreboard snapshot captured during FINISHED.
     bool returnToLobbyRequested = false;         ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
     bool returnToMainMenuRequested_ = false;     ///< Latched true when the pause menu or disconnect requests leaving.
     bool serverShutdownNoticeRequested_ = false; ///< Latched true when leaving because the server connection closed.

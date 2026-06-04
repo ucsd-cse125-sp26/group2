@@ -27,15 +27,20 @@ public:
 
     void poll();
 
+    /// @brief Immediately send a LAN discovery request.
+    /// @param clearExisting True when starting a user-requested fresh scan.
+    void refresh(bool clearExisting = false);
+
     std::vector<DiscoveredServer> getServers();
 
 private:
     uint16_t discoveryPort = 0;
     NET_Address* broadcastAddr = nullptr;
     NET_Address* loopbackAddr = nullptr;
+    std::vector<NET_Address*> subnetBroadcastAddrs;
     uint64_t lastRequestMs = 0;
 
     NET_DatagramSocket* socket = nullptr;
 
-    std::unordered_map<std::string, DiscoveredServer> discoveredServers; // key is host IP
+    std::unordered_map<std::string, DiscoveredServer> discoveredServers; // key is host:port
 };

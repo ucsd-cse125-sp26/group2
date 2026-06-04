@@ -1122,15 +1122,32 @@ add_executable(group2
         src/client/app/AppContext.hpp
         src/client/app/App.hpp
         src/client/app/App.cpp
+        src/client/IScreen.hpp
+        src/client/IScreen.cpp
         src/client/menus/lobby/Lobby.hpp
         src/client/menus/lobby/Lobby.cpp
         src/client/menus/lobby/ui/LobbyUI.hpp
         src/client/menus/lobby/ui/LobbyUI.cpp
+        src/client/menus/loading/LoadingScreen.hpp
+        src/client/menus/loading/LoadingScreen.cpp
+        src/client/menus/postmatch/PostMatchResult.hpp
+        src/client/menus/postmatch/PostMatchScoreboard.hpp
+        src/client/menus/postmatch/PostMatchScoreboard.cpp
+        src/client/menus/title/TitleScreen.hpp
+        src/client/menus/title/TitleScreen.cpp
+        src/client/menus/title/ui/TitleScreenUI.hpp
+        src/client/menus/title/ui/TitleScreenUI.cpp
         src/client/renderer-new/RendererTypes.hpp
-        src/client/menus/home/Home.hpp
-        src/client/menus/home/Home.cpp
-        src/client/menus/home/ui/HomeUI.hpp
-        src/client/menus/home/ui/HomeUI.cpp
+        src/client/menus/main/MainMenu.hpp
+        src/client/menus/main/MainMenu.cpp
+        src/client/menus/main/ui/MainMenuUI.hpp
+        src/client/menus/main/ui/MainMenuUI.cpp
+        src/client/menus/settings/SettingsEditor.hpp
+        src/client/menus/settings/SettingsEditor.cpp
+        src/client/menus/settings/SystemMenuOverlay.hpp
+        src/client/menus/settings/SystemMenuOverlay.cpp
+        src/client/menus/settings/SettingsScreen.hpp
+        src/client/menus/settings/SettingsScreen.cpp
         src/client/menus/MenuTheme.hpp
         src/client/menus/MenuTheme.cpp
         src/ecs/components/PowerupSpawner.hpp

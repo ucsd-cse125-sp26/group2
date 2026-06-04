@@ -1212,8 +1212,7 @@ bool Game::init(AppContext& ctx)
         // Pop a brief point light at the muzzle on every shot so the flash
         // lights up nearby geometry. For the local player prefer the exact
         // viewmodel muzzle; for everyone else use the shot's muzzle origin.
-        if (evt.effectType == ParticleEffectType::BulletTracer ||
-            evt.effectType == ParticleEffectType::HitscanBeam) {
+        if (evt.effectType == ParticleEffectType::BulletTracer || evt.effectType == ParticleEffectType::HitscanBeam) {
             // Local player: 10 units ahead of the right palm along the view dir
             // (muzzleFlashOrigin). Remote players: the shot's muzzle origin.
             const glm::vec3 flashPos = (evt.source == localPlayer) ? muzzleFlashOrigin(evtOrigin) : evtOrigin;
@@ -1260,8 +1259,11 @@ bool Game::init(AppContext& ctx)
             }
             break;
         case ParticleEffectType::Explosion:
-            particleSystem.spawnExplosionVfx(
-                evt.pos1, glm::length(evt.pos2) > 0.001f ? glm::normalize(evt.pos2) : glm::vec3{0.0f, 1.0f, 0.0f}, evt.param, explosionVfxKindForWeapon(evt.weaponType));
+            particleSystem.spawnExplosionVfx(evt.pos1,
+                                             glm::length(evt.pos2) > 0.001f ? glm::normalize(evt.pos2)
+                                                                            : glm::vec3{0.0f, 1.0f, 0.0f},
+                                             evt.param,
+                                             explosionVfxKindForWeapon(evt.weaponType));
             spawnExplosionFlashLight(evt.pos1, evt.weaponType, evt.param);
             // Dispatch ExplosionEvent so SfxSystem plays the explosion sound.
             {
@@ -1860,7 +1862,7 @@ SDL_AppResult Game::event(SDL_Event* event)
     if (event->type == SDL_EVENT_KEY_DOWN) {
         if (event->key.key == SDLK_ESCAPE && !event->key.repeat) {
             if (pauseMenu.isOpen()) {
-                if (pauseMenu.handleEscape()) {
+                if (userSettings == nullptr || pauseMenu.handleEscape(*userSettings)) {
                     pauseMenu.close();
                     mouseCaptured = true;
                     SDL_SetWindowRelativeMouseMode(window, true);
@@ -2020,7 +2022,7 @@ SDL_AppResult Game::event(SDL_Event* event)
     // Gamepad Start (right menu button) toggles the pause menu, mirroring ESC.
     if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && event->gbutton.button == SDL_GAMEPAD_BUTTON_START) {
         if (pauseMenu.isOpen()) {
-            if (pauseMenu.handleEscape()) {
+            if (userSettings == nullptr || pauseMenu.handleEscape(*userSettings)) {
                 pauseMenu.close();
                 mouseCaptured = true;
                 SDL_SetWindowRelativeMouseMode(window, true);
@@ -2814,9 +2816,8 @@ SDL_AppResult Game::iterate()
                 snap.emoteRequest = static_cast<std::int8_t>(emoteRequestThisFrame);
                 // Local prediction: cancel the emote the moment the player moves
                 // or fights, matching the server's break condition.
-                if (snap.forward || snap.back || snap.left || snap.right || snap.jump || snap.crouch ||
-                    snap.shooting || snap.scoped || snap.reload || snap.throwGrenade || snap.ability1 ||
-                    snap.ability2)
+                if (snap.forward || snap.back || snap.left || snap.right || snap.jump || snap.crouch || snap.shooting ||
+                    snap.scoped || snap.reload || snap.throwGrenade || snap.ability1 || snap.ability2)
                     localEmote_ = -1;
             });
         systems::runInputSend(registry, *client);
@@ -2957,7 +2958,7 @@ SDL_AppResult Game::iterate()
             const glm::vec3 forward{
                 std::sin(renderYaw) * cosPitch, -std::sin(renderPitch), std::cos(renderYaw) * cosPitch};
             constexpr float k_emoteCamDistance = 260.0f; // units behind the eye.
-            constexpr float k_emoteCamHeight = 70.0f;     // units above the eye.
+            constexpr float k_emoteCamHeight = 70.0f;    // units above the eye.
             renderEye += emoteCamBlend_ * (-forward * k_emoteCamDistance + glm::vec3{0.0f, k_emoteCamHeight, 0.0f});
         }
     }
@@ -4683,8 +4684,8 @@ SDL_AppResult Game::iterate()
             if (dynLights.size() < k_maxDynLights) {
                 float env;
                 if (it->age < k_flashAttack) {
-                    const float x = it->age / k_flashAttack;     // [0, 1)
-                    env = 1.0f - (1.0f - x) * (1.0f - x);        // ease-out: fast rise, smooth into peak
+                    const float x = it->age / k_flashAttack; // [0, 1)
+                    env = 1.0f - (1.0f - x) * (1.0f - x);    // ease-out: fast rise, smooth into peak
                 } else {
                     const float decayTime = std::max(1e-4f, it->lifetime - k_flashAttack);
                     const float t = (it->age - k_flashAttack) / decayTime; // [0, 1)
@@ -5981,6 +5982,8 @@ SDL_AppResult Game::iterate()
     }
     phaseSnap(phaseStats.imguiMs);
 
+    updateCachedPostMatchResult();
+
     // Update and render HUD.
     if (hud_.getOutputTexture()) {
         HudGameState hudState{};
@@ -6059,7 +6062,7 @@ SDL_AppResult Game::iterate()
         // ── Round timer ──
         hudState.roundTimeRemaining = countdownTimer;
         hudState.currentPhase = currentMatchPhase;
-        hudState.forceScoreboardOpen = currentMatchPhase == MatchPhase::FINISHED && countdownTimer <= 10.0f;
+        hudState.forceScoreboardOpen = false;
 
         // ── Kill feed: convert KillFeedEvent → HudKillFeedEntry ──
         ClientId localClientId{-1};
@@ -6713,6 +6716,16 @@ bool Game::shouldReturnToLobby() const
     return returnToLobbyRequested;
 }
 
+std::optional<PostMatchResult> Game::consumePostMatchResult()
+{
+    if (!returnToLobbyRequested || !cachedPostMatchResult_)
+        return std::nullopt;
+
+    auto result = std::move(cachedPostMatchResult_);
+    cachedPostMatchResult_.reset();
+    return result;
+}
+
 bool Game::consumeReturnToMainMenu()
 {
     if (!returnToMainMenuRequested_)
@@ -6729,6 +6742,44 @@ bool Game::consumeServerShutdownNotice()
 
     serverShutdownNoticeRequested_ = false;
     return true;
+}
+
+void Game::updateCachedPostMatchResult()
+{
+    if (currentMatchPhase != MatchPhase::FINISHED)
+        return;
+
+    ClientId localClientId{-1};
+    registry.view<LocalPlayer, ClientId>().each([&](const ClientId& cid) { localClientId = cid; });
+
+    PostMatchResult result;
+    result.winnerId = currentWinnerId.value;
+    result.won = localClientId.value != -1 && currentWinnerId == localClientId;
+
+    registry.view<ClientId, Health, PlayerVisState>().each(
+        [&](entt::entity ent, const ClientId& cid, const Health&, const PlayerVisState&) {
+            PostMatchScoreRow row;
+            row.clientId = cid.value;
+            row.isLocal = localClientId.value != -1 && cid == localClientId;
+
+            if (const auto* pn = registry.try_get<PlayerName>(ent); pn != nullptr && !pn->empty()) {
+                row.name = pn->c_str();
+            } else {
+                char buf[16];
+                SDL_snprintf(buf, sizeof(buf), "Player #%d", cid.value);
+                row.name = buf;
+            }
+
+            if (const auto* stats = registry.try_get<PlayerMatchStats>(ent)) {
+                row.kills = stats->kills;
+                row.deaths = stats->deaths;
+            }
+
+            result.rows.push_back(std::move(row));
+        });
+
+    if (!result.rows.empty())
+        cachedPostMatchResult_ = std::move(result);
 }
 
 void Game::quit()

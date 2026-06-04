@@ -20,8 +20,9 @@ public:
     bool init(Server& serverPtr);
 
     /// @brief Register a newly connected player and broadcast a PlayerJoined event.
+    /// @param displayName NUL-terminated display name to attach to the lobby roster entry.
     /// @return False if the player was already present.
-    bool addPlayer(ClientId id);
+    bool addPlayer(ClientId id, const char* displayName);
 
     /// @brief Unregister a disconnected player, broadcast PlayerLeft, and reassign host if needed.
     /// @return False if the player was not found.
