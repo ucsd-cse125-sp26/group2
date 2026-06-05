@@ -194,6 +194,10 @@ private:
     float prevArmor_ = 100.0f;
     int prevDeaths_ = 0;
     int prevKills_ = 0;
+    bool prevLocalReloading_ = false;
+    bool prevLocalRailgunCharging_ = false;
+    std::unordered_map<entt::entity, float> prevGrenadeCooldowns_;
+    std::unordered_map<entt::entity, bool> knownFireFields_;
     float healingSoundCooldown_ = 0.0f; ///< Throttle the looping heal tick sound.
     bool stateInitialized_ = false;     ///< Skip sounds on the very first update().
 
