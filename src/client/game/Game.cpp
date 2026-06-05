@@ -3266,7 +3266,9 @@ SDL_AppResult Game::iterate()
                 const glm::vec3 hipToHit = hitPos - hip;
                 const float hipHitDist = glm::length(hipToHit);
                 const glm::vec3 hipDir = (hipHitDist > 0.1f) ? hipToHit / hipHitDist : cachedCamFwd_;
-                particleSystem.spawnBulletTracer(hip, hipDir, hipHitDist);
+                if (currentEquippedType_ != WeaponType::Rocket) {
+                    particleSystem.spawnBulletTracer(hip, hipDir, hipHitDist);
+                }
 
                 // Muzzle-flash point light for the local player's own shot.
                 // Spawned here (not in onRawParticleEvent) because the server
