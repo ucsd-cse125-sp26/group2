@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <imgui_internal.h>
 #include <string>
 #include <string_view>
 
@@ -460,10 +461,12 @@ bool terminalActionRow(const char* command, const char* description, const ImVec
     if (rowSize.y <= 0.0f || rowSize.y < minRowHeight)
         rowSize.y = minRowHeight;
 
-    const bool pressed = ImGui::InvisibleButton(id, rowSize);
-    const bool hovered = ImGui::IsItemHovered();
-    const bool focused = ImGui::IsItemFocused();
-    const bool active = ImGui::IsItemActive();
+    const bool rawPressed = ImGui::InvisibleButton(id, rowSize);
+    const bool disabled = (ImGui::GetItemFlags() & ImGuiItemFlags_Disabled) != 0;
+    const bool pressed = rawPressed && !disabled;
+    const bool hovered = !disabled && ImGui::IsItemHovered();
+    const bool focused = !disabled && ImGui::IsItemFocused();
+    const bool active = !disabled && ImGui::IsItemActive();
 
     const ImVec2 min = ImGui::GetItemRectMin();
     const ImVec2 max = ImGui::GetItemRectMax();
@@ -498,7 +501,7 @@ bool terminalActionRow(const char* command, const char* description, const ImVec
         std::snprintf(label, sizeof(label), "%s%s", prompt, command);
     }
 
-    const ImVec4 textColor = danger ? ImVec4{1.0f, 0.82f, 0.78f, 1.0f} : t.text;
+    const ImVec4 textColor = disabled ? t.textDim : (danger ? ImVec4{1.0f, 0.82f, 0.78f, 1.0f} : t.text);
     const float textX = min.x + 10.0f;
     const float textY = min.y + std::max(0.0f, (rowSize.y - ImGui::GetFontSize()) * 0.35f);
     dl->PushClipRect(min, max, true);
@@ -508,7 +511,8 @@ bool terminalActionRow(const char* command, const char* description, const ImVec
     if (focused)
         dl->AddRect(min, max, ImGui::GetColorU32(t.accent), 0.0f, 0, 1.0f);
 
-    playWidgetFeedback(command ? command : "", pressed, danger);
+    if (!disabled)
+        playWidgetFeedback(command ? command : "", pressed, danger);
     return pressed;
 }
 
