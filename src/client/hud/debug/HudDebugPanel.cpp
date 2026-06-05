@@ -20,6 +20,7 @@
 #include "hud/widgets/KillFeed.hpp"
 #include "hud/widgets/LevelBarWidget.hpp"
 #include "hud/widgets/Minimap.hpp"
+#include "hud/widgets/MiniScoreboardWidget.hpp"
 #include "hud/widgets/PickupNotification.hpp"
 #include "hud/widgets/PickupPrompt.hpp"
 #include "hud/widgets/PopupNotification.hpp"
@@ -108,6 +109,8 @@ const char* widgetName(const HudWidget* widget)
         return "Level Bar";
     if (dynamic_cast<const Minimap*>(widget))
         return "Minimap";
+    if (dynamic_cast<const MiniScoreboardWidget*>(widget))
+        return "Mini Scoreboard";
     if (dynamic_cast<const PickupNotification*>(widget))
         return "Pickup Notification";
     if (dynamic_cast<const PickupPrompt*>(widget))
@@ -432,6 +435,27 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "dotZoneOffsetX", minimap->dotZoneOffsetX);
         writeFloatParam(out, first, "dotZoneOffsetY", minimap->dotZoneOffsetY);
         writeBoolParam(out, first, "showDotZoneDebug", minimap->showDotZoneDebug);
+    } else if (const auto* mini = dynamic_cast<const MiniScoreboardWidget*>(&widget)) {
+        writeFloatParam(out, first, "backgroundWidth", mini->backgroundWidth);
+        writeFloatParam(out, first, "backgroundHeight", mini->backgroundHeight);
+        writeFloatParam(out, first, "backgroundScale", mini->backgroundScale);
+        writeFloatParam(out, first, "backgroundOffsetX", mini->backgroundOffsetX);
+        writeFloatParam(out, first, "backgroundOffsetY", mini->backgroundOffsetY);
+        writeFloatParam(out, first, "backgroundStretchX", mini->backgroundStretchX);
+        writeFloatParam(out, first, "backgroundStretchY", mini->backgroundStretchY);
+        writeFloatParam(out, first, "backgroundRotationDeg", mini->backgroundRotationDeg);
+        writeFloatParam(out, first, "rowsRotationDeg", mini->rowsRotationDeg);
+        writeBoolParam(out, first, "showRowBorders", mini->showRowBorders);
+        writeFloatParam(out, first, "rowFontSize", mini->rowFontSize);
+        writeFloatParam(out, first, "scoreFontSize", mini->scoreFontSize);
+        writeFloatParam(out, first, "colorCubeSize", mini->colorCubeSize);
+        writeFloatParam(out, first, "rowBorderPadding", mini->rowBorderPadding);
+        writeFloatParam(out, first, "cubeTextGap", mini->cubeTextGap);
+        writeFloatParam(out, first, "nameScoreGap", mini->nameScoreGap);
+        writeFloatParam(out, first, "topRowOffsetX", mini->rows[0].offsetX);
+        writeFloatParam(out, first, "topRowOffsetY", mini->rows[0].offsetY);
+        writeFloatParam(out, first, "bottomRowOffsetX", mini->rows[1].offsetX);
+        writeFloatParam(out, first, "bottomRowOffsetY", mini->rows[1].offsetY);
     } else if (const auto* pickup = dynamic_cast<const PickupNotification*>(&widget)) {
         writeFloatParam(out, first, "entryHeight", pickup->entryHeight);
         writeFloatParam(out, first, "entryGap", pickup->entryGap);
@@ -669,6 +693,27 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Dot Zone Offset X", minimap->dotZoneOffsetX, 0.5f, -400.0f, 400.0f);
         editFloat("Dot Zone Offset Y", minimap->dotZoneOffsetY, 0.5f, -400.0f, 400.0f);
         ImGui::Checkbox("Show Dot Zone Debug", &minimap->showDotZoneDebug);
+    } else if (auto* mini = dynamic_cast<MiniScoreboardWidget*>(&widget)) {
+        editFloat("BG Width", mini->backgroundWidth, 1.0f, 8.0f, 800.0f);
+        editFloat("BG Height", mini->backgroundHeight, 1.0f, 8.0f, 400.0f);
+        editFloat("BG Scale", mini->backgroundScale, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Offset X", mini->backgroundOffsetX, 0.5f, -2000.0f, 2000.0f);
+        editFloat("BG Offset Y", mini->backgroundOffsetY, 0.5f, -2000.0f, 2000.0f);
+        editFloat("BG Stretch X", mini->backgroundStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Stretch Y", mini->backgroundStretchY, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Rotation", mini->backgroundRotationDeg, 0.5f, -180.0f, 180.0f);
+        editFloat("Rows Rotation", mini->rowsRotationDeg, 0.5f, -180.0f, 180.0f);
+        ImGui::Checkbox("Show Row Borders", &mini->showRowBorders);
+        editFloat("Row Font Size", mini->rowFontSize, 0.5f, 4.0f, 96.0f);
+        editFloat("Score Font Size", mini->scoreFontSize, 0.5f, 4.0f, 96.0f);
+        editFloat("Color Cube Size", mini->colorCubeSize, 0.5f, 2.0f, 80.0f);
+        editFloat("Row Border Padding", mini->rowBorderPadding, 0.5f, 0.0f, 80.0f);
+        editFloat("Cube/Text Gap", mini->cubeTextGap, 0.5f, 0.0f, 80.0f);
+        editFloat("Name/Score Gap", mini->nameScoreGap, 0.5f, 0.0f, 160.0f);
+        editFloat("Top Row Offset X", mini->rows[0].offsetX, 0.5f, -400.0f, 400.0f);
+        editFloat("Top Row Offset Y", mini->rows[0].offsetY, 0.5f, -400.0f, 400.0f);
+        editFloat("Bottom Row Offset X", mini->rows[1].offsetX, 0.5f, -400.0f, 400.0f);
+        editFloat("Bottom Row Offset Y", mini->rows[1].offsetY, 0.5f, -400.0f, 400.0f);
     } else if (auto* pickup = dynamic_cast<PickupNotification*>(&widget)) {
         editFloat("Entry Height", pickup->entryHeight, 0.5f, 4.0f, 120.0f);
         editFloat("Entry Gap", pickup->entryGap, 0.25f, 0.0f, 80.0f);

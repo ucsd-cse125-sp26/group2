@@ -23,6 +23,7 @@
 #include "widgets/KillFeed.hpp"
 #include "widgets/LevelBarWidget.hpp"
 #include "widgets/Minimap.hpp"
+#include "widgets/MiniScoreboardWidget.hpp"
 #include "widgets/PickupNotification.hpp"
 #include "widgets/PickupPrompt.hpp"
 #include "widgets/PopupNotification.hpp"
@@ -222,7 +223,8 @@ void Hud::createWidgets()
     widgets_.push_back(std::make_unique<AbilitySelectionWidget>());
     widgets_.push_back(std::make_unique<EmoteWheelWidget>()); // Center radial emote menu (hold-B).
 
-    // Top right: killfeed.
+    // Top right: compact score panel + killfeed.
+    widgets_.push_back(std::make_unique<MiniScoreboardWidget>());
     widgets_.push_back(std::make_unique<KillFeed>());
     widgets_.push_back(std::make_unique<PickupNotification>());
 

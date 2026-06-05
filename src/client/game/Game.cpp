@@ -6183,7 +6183,8 @@ SDL_AppResult Game::iterate()
         registry.view<ClientId, Health, PlayerVisState>().each(
             [&](entt::entity ent, const ClientId& cid, const Health& hp, const PlayerVisState& ps) {
                 HudTeamMemberStatus status;
-                if (localClientId.value != -1 && cid == localClientId) {
+                status.isLocal = localClientId.value != -1 && cid == localClientId;
+                if (status.isLocal) {
                     status.name = "You";
                 } else if (const auto* pn = registry.try_get<PlayerName>(ent); pn != nullptr && !pn->empty()) {
                     status.name = pn->c_str();
@@ -6194,6 +6195,11 @@ SDL_AppResult Game::iterate()
                 }
                 status.health = static_cast<int>(hp.health);
                 status.isAlive = !ps.isDead;
+                if (const auto* pc = registry.try_get<PlayerColor>(ent); pc != nullptr) {
+                    status.color = HudColor{pc->rgb.r, pc->rgb.g, pc->rgb.b, 1.f};
+                } else {
+                    status.color = voidfall::k_textDim;
+                }
                 if (const auto* pms = registry.try_get<PlayerMatchStats>(ent)) {
                     status.kills = pms->kills;
                     status.deaths = pms->deaths;

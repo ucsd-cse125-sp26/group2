@@ -187,8 +187,10 @@ struct HudDamageAccum
 struct HudTeamMemberStatus
 {
     std::string name;
+    HudColor color = HudColor::white();
     int health = 100;
     bool isAlive = true;
+    bool isLocal = false;
     int kills = 0;
     int deaths = 0;
     int ping = 0;
