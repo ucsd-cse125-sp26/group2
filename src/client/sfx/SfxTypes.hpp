@@ -98,6 +98,7 @@ enum class SfxId : uint8_t
     VoiceStop,
     MenuMusic, ///< Music/Gamesong1.wav
     GameMusic, ///< Music/Gamesong2.wav
+    GameMusicLoop, ///< Music/Gamesong2_Main2.wav
 
     _Count
 };
@@ -274,6 +275,8 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "MenuMusic";
     case SfxId::GameMusic:
         return "GameMusic";
+    case SfxId::GameMusicLoop:
+        return "GameMusicLoop";
     default:
         return "Unknown";
     }

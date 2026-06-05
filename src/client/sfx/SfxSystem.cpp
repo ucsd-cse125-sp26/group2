@@ -213,6 +213,7 @@ bool SfxSystem::init()
     synthesizeClip(SfxId::VoiceStop, SfxCategory::Voice, 0.14f, 0.05f);
     loadClip(SfxId::MenuMusic, "Music/Gamesong1.wav", SfxCategory::Music, 0.8f, 0.0f);
     loadClip(SfxId::GameMusic, "Music/Gamesong2.wav", SfxCategory::Music, 0.8f, 0.0f);
+    loadClip(SfxId::GameMusicLoop, "Music/Gamesong2_Main2.wav", SfxCategory::Music, 0.8f, 0.0f);
 
     convertClipsToMixer();
 
@@ -327,14 +328,36 @@ void SfxSystem::stopSource(SourceHandle handle)
 
 void SfxSystem::playMusic(SfxId id, float gain)
 {
+    bool musicActive = false;
     {
         std::lock_guard lock(mixerMutex_);
-        if (currentMusic_ == id && findSource(musicHandle_))
+        musicActive = findSource(musicHandle_) != nullptr;
+        if (id == SfxId::GameMusic && currentMusic_ == SfxId::GameMusicLoop && musicActive)
+            return;
+        if (currentMusic_ == id && musicActive)
             return;
     }
 
+    if (id == SfxId::GameMusic && currentMusic_ == SfxId::GameMusic && !musicActive) {
+        musicHandle_ = startLoop(SfxId::GameMusicLoop, false, glm::vec3{0.0f}, gain, 2.0f);
+        currentMusic_ = musicHandle_ == kInvalidSource ? SfxId::_Count : SfxId::GameMusicLoop;
+        return;
+    }
+
     stopMusic();
-    musicHandle_ = startLoop(id, false, glm::vec3{0.0f}, gain, 2.0f);
+    musicHandle_ = id == SfxId::GameMusic
+                       ? startSource(id,
+                                     false,
+                                     false,
+                                     glm::vec3{0.0f},
+                                     glm::vec3{0.0f},
+                                     gain,
+                                     2.0f,
+                                     audio::kInvalidBus,
+                                     1.0f,
+                                     0,
+                                     0)
+                       : startLoop(id, false, glm::vec3{0.0f}, gain, 2.0f);
     currentMusic_ = musicHandle_ == kInvalidSource ? SfxId::_Count : id;
 }
 
