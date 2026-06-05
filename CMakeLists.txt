@@ -860,8 +860,6 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/CharacterAnimator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/AnimationTesterUI.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/WeaponViewmodelAnim.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/animation/WeaponViewmodelAnim.hpp"
     # HUD system
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTypes.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/HudTween.cpp"

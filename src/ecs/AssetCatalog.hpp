@@ -117,35 +117,3 @@ inline const std::array<AssetDefinition, 3> kEffectAssets{{
     {.name = "glow_sphere_movable", .role = AssetRole::Effect},
     {.name = "glow_cylinder", .role = AssetRole::Effect},
 }};
-
-/// @brief Per-weapon animated first-person viewmodel assets.
-///
-/// A weapon with a non-empty `viewmodelGlb` uses the animated viewmodel pipeline:
-/// a textured, skinned gun rig with baked first-person clips (draw/reload),
-/// rendered in first person (gun + `armsGlb` hands). A weapon with an empty
-/// `viewmodelGlb` falls back to the legacy static viewmodel mesh.
-///
-/// To add a weapon: run `tools/convert_weapon_viewmodel.py` on its Apex `_v`
-/// cast + textures + first-person clips to produce `apex_<weapon>.glb` +
-/// `apex_<weapon>_arms.glb`, then fill in the row here.
-struct WeaponViewmodelAssets
-{
-    const char* viewmodelGlb = ""; ///< Skinned gun GLB (textured, baked clips). Empty -> static fallback.
-    const char* armsGlb = "";      ///< First-person arms GLB (same baked clips). Empty -> no 1P hands.
-    bool flipUVs = false;          ///< Source UV orientation flip at load (skinned_geometry_textured.frag flips V).
-};
-
-inline const std::array<WeaponViewmodelAssets, kRenderableWeaponTypeCount> kWeaponViewmodelAssets{{
-    // Rifle (R-301) — animated first-person viewmodel. flipUVs=true: the lit
-    // geometry_shadowed.frag samples V un-flipped (like static models), so the
-    // glTF→DCC V convention is corrected at import (matches the world model path).
-    {.viewmodelGlb = "apex_r301.glb", .armsGlb = "apex_r301_arms.glb", .flipUVs = true},
-    // Rocket — static fallback (no first-person hands by design).
-    {},
-    // RailGun — Apex Nemesis (ptpov_nemesis): draw/reload/reload_empty/fire clips.
-    {.viewmodelGlb = "apex_nemesis.glb", .armsGlb = "apex_nemesis_arms.glb", .flipUVs = true},
-    // EnergyGun ("beamgun") — Apex Havoc (ptpov_beam_ar): draw/reload/reload_empty/fire/charge.
-    {.viewmodelGlb = "apex_havoc.glb", .armsGlb = "apex_havoc_arms.glb", .flipUVs = true},
-    // Shotgun — Apex Mastiff (ptpov_mastiff): draw + segmented (concatenated) reload; no fire clip.
-    {.viewmodelGlb = "apex_mastiff.glb", .armsGlb = "apex_mastiff_arms.glb", .flipUVs = true},
-}};
