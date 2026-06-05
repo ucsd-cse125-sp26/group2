@@ -104,10 +104,10 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
 {
     static constexpr std::array<ViewmodelParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle — existing tuning
-        {.scale = 39.0f,
-         .forward = 60.0f,
-         .right = 30.0f,
-         .down = -11.0f,
+        {.scale = 10.0f,
+         .forward = 18.0f,
+         .right = 8.0f,
+         .down = -4.0f,
          .yawOffset = 0.0f,
          .pitchOffset = -1.0f,
          .rollOffset = 0.0f},
