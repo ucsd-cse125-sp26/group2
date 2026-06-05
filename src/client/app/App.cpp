@@ -91,7 +91,8 @@ bool App::init()
     }
 
     // Create window
-    window = SDL_CreateWindow(k_appName, 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    window = SDL_CreateWindow(
+        k_appName, 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_FULLSCREEN);
     if (!window) {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
         cleanup();
@@ -153,9 +154,11 @@ bool App::init()
         return false;
     }
 
+    sfxSystem.setPlaybackDeviceName(userSettings.audioOutputDeviceName);
     if (!sfxSystem.init()) {
         SDL_Log("[client] SfxSystem init failed (non-fatal — music and sound effects disabled)");
     }
+    menu_theme::setSfxSystem(&sfxSystem);
     applyAudioSettings();
     previousAudioCounter_ = SDL_GetPerformanceCounter();
 
@@ -309,6 +312,9 @@ SDL_AppResult App::iterate()
             } else {
                 SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
                 currentServerName = config.serverName;
+                currentServerIp = "127.0.0.1";
+                currentServerPort = hostedServer.port();
+                menu_theme::playUiSound(UiSoundAction::Success);
             }
         }
 
@@ -318,6 +324,7 @@ SDL_AppResult App::iterate()
         }
 
         if (mainMenu->consumeGoToLobbyRequest() && (hostedServer.isRunning() || client.isConnected())) {
+            menu_theme::playUiSound(UiSoundAction::Success);
             transitionTo(Screen::Lobby);
         }
         break;
@@ -359,6 +366,8 @@ SDL_AppResult App::iterate()
             } else {
                 SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
                 currentServerName = config.serverName;
+                currentServerIp = "127.0.0.1";
+                currentServerPort = hostedServer.port();
             }
         }
 
@@ -689,6 +698,8 @@ AppContext App::screenContext()
         .userSettings = userSettings,
         .userSettingsPath = userSettingsPath,
         .currentServerName = currentServerName,
+        .currentServerIp = currentServerIp,
+        .currentServerPort = currentServerPort,
     };
 }
 
@@ -697,6 +708,7 @@ void App::applyAudioSettings()
     if (!sfxSystem.isInitialized())
         return;
 
+    sfxSystem.setPlaybackDeviceName(userSettings.audioOutputDeviceName);
     sfxSystem.setCategoryVolume(SfxCategory::Music, userSettings.musicVolume);
     sfxSystem.setCategoryVolume(SfxCategory::Weapons, userSettings.sfxVolume);
     sfxSystem.setCategoryVolume(SfxCategory::Impacts, userSettings.sfxVolume);
@@ -827,6 +839,9 @@ void App::pollJoinAttempt()
 
     SDL_Log("Successfully connected to server at %s:%d", result.serverIp.c_str(), result.serverPort);
     currentServerName = result.serverName.empty() ? result.serverIp : result.serverName;
+    currentServerIp = result.serverIp;
+    currentServerPort = result.serverPort;
+    menu_theme::playUiSound(UiSoundAction::Success);
     transitionTo(Screen::Lobby);
 }
 

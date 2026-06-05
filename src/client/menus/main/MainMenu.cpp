@@ -3,6 +3,7 @@
 
 #include "MainMenu.hpp"
 
+#include "menus/MenuTheme.hpp"
 #include "network/ServerName.hpp"
 #include "ui/MainMenuUI.hpp"
 #include "util/InputCapture.hpp"
@@ -218,6 +219,7 @@ SDL_AppResult MainMenu::iterate()
     beginMenuFrame(renderer);
     if (openPopupMessage) {
         ImGui::OpenPopup("Server Notice");
+        menu_theme::playUiSound(UiSoundAction::ModalOpen);
         openPopupMessage = false;
     }
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -226,6 +228,7 @@ SDL_AppResult MainMenu::iterate()
         ImGui::TextUnformatted(popupMessage.c_str());
         ImGui::Spacing();
         if (ImGui::Button("OK")) {
+            menu_theme::playUiSound(UiSoundAction::Confirm);
             popupMessage.clear();
             ImGui::CloseCurrentPopup();
         }
@@ -280,6 +283,7 @@ SDL_AppResult MainMenu::iterate()
         const auto parsedAddress = parseServerAddress(joinMenuState.serverAddress, defaultPort);
         if (!parsedAddress) {
             joinError = "Enter a valid server address";
+            menu_theme::playUiSound(UiSoundAction::Error);
             SDL_Log("Invalid server address: %s", joinMenuState.serverAddress.c_str());
         } else {
             SDL_Log("Join button clicked! Address: %s:%u",
@@ -295,6 +299,7 @@ SDL_AppResult MainMenu::iterate()
         const auto& server = servers[static_cast<std::size_t>(result.globalServerIndex)];
         if (server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers) {
             joinError = "Lobby full";
+            menu_theme::playUiSound(UiSoundAction::Disabled);
         } else {
             joinError.clear();
             if (const auto* localMirror = findLocalMirror(server, localServers)) {
@@ -322,6 +327,7 @@ SDL_AppResult MainMenu::iterate()
         const auto& server = localServers[static_cast<std::size_t>(result.localServerIndex)];
         if (server.maxPlayers != 0 && server.currentPlayers >= server.maxPlayers) {
             joinError = "Lobby full";
+            menu_theme::playUiSound(UiSoundAction::Disabled);
         } else {
             joinError.clear();
             pendingJoinRequest = JoinRequest{.serverIp = server.hostIp,
@@ -457,11 +463,15 @@ bool MainMenu::consumeExitRequest()
 void MainMenu::setJoinError(const std::string& error)
 {
     joinError = error;
+    if (!joinError.empty())
+        menu_theme::playUiSound(UiSoundAction::Error);
 }
 
 void MainMenu::setLaunchError(const std::string& error)
 {
     lastHostError = error;
+    if (!lastHostError.empty())
+        menu_theme::playUiSound(UiSoundAction::Error);
 }
 
 void MainMenu::setJoinInProgress(bool joining, const std::string& label)
@@ -557,16 +567,19 @@ bool MainMenu::updateServerSettings()
     draft->powerupRespawnCooldownSeconds = config.powerupRespawnCooldownSeconds;
     if (!client->sendMatchConfig(config)) {
         lastHostError = "Failed to send match settings update";
+        menu_theme::playUiSound(UiSoundAction::Error);
         return false;
     }
     if (!client->sendDiscoverySettings(discoverySettings)) {
         lastHostError = "Failed to send discovery settings update";
+        menu_theme::playUiSound(UiSoundAction::Error);
         return false;
     }
 
     lastHostError.clear();
     lastSyncedMatchConfig = config;
     lastSyncedDiscoverySettings = discoverySettings;
+    menu_theme::playUiSound(UiSoundAction::Success);
     return true;
 }
 

@@ -473,6 +473,20 @@ void ServerGame::eventHandler(const Event& event)
         }
         break;
     }
+    case EventType::CancelStartMatchRequested: {
+        GROUP2_PROF_SCOPE("eventLobby");
+        if (lobbyStartCountdownActive && lobbyManager.isHost(event.clientId)) {
+            lobbyStartCountdownActive = false;
+            lobbyStartCountdownTimer = 0.0f;
+            lobbyStartRequester = ClientId{-1};
+            server->broadcastMatchStatus(MatchStatePacket{
+                .phase = MatchPhase::LOBBY,
+                .countdownTimer = 0.0f,
+                .winnerId = -1,
+            });
+        }
+        break;
+    }
     case EventType::ShotIntent: {
         GROUP2_PROF_SCOPE("eventShotIntent");
         // PR-27: stash the per-shot client assertion under

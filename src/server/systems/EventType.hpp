@@ -6,12 +6,13 @@
 /// @brief Enumeration of gameplay event types for server-side queueing.
 enum class EventType
 {
-    Connected,           ///< A new client has connected.
-    Disconnected,        ///< A client has disconnected.
-    Input,               ///< A client has sent an input snapshot.
-    PlayerReady,         ///< A client has marked themselves ready in the lobby.
-    PlayerUnready,       ///< A client has marked themselves unready in the lobby.
-    StartMatchRequested, ///< A client has requested a host-started match transition.
+    Connected,                 ///< A new client has connected.
+    Disconnected,              ///< A client has disconnected.
+    Input,                     ///< A client has sent an input snapshot.
+    PlayerReady,               ///< A client has marked themselves ready in the lobby.
+    PlayerUnready,             ///< A client has marked themselves unready in the lobby.
+    StartMatchRequested,       ///< A client has requested a host-started match transition.
+    CancelStartMatchRequested, ///< A client has canceled an active host-started match transition.
 
     /// @brief PR-27: client has reported its view of the target's
     /// animation state for a single shot (rising-edge of `shooting`).

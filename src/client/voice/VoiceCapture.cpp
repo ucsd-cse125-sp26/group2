@@ -9,9 +9,35 @@
 #include <cmath>
 #include <span>
 
-bool VoiceCapture::init()
+namespace
+{
+SDL_AudioDeviceID findRecordingDeviceByName(std::string_view name)
+{
+    if (name.empty())
+        return SDL_AUDIO_DEVICE_DEFAULT_RECORDING;
+
+    int count = 0;
+    SDL_AudioDeviceID* devices = SDL_GetAudioRecordingDevices(&count);
+    if (!devices)
+        return SDL_AUDIO_DEVICE_DEFAULT_RECORDING;
+
+    SDL_AudioDeviceID match = SDL_AUDIO_DEVICE_DEFAULT_RECORDING;
+    for (int i = 0; i < count; ++i) {
+        const char* deviceName = SDL_GetAudioDeviceName(devices[i]);
+        if (deviceName && name == deviceName) {
+            match = devices[i];
+            break;
+        }
+    }
+    SDL_free(devices);
+    return match;
+}
+} // namespace
+
+bool VoiceCapture::init(std::string_view recordingDeviceName)
 {
     quit();
+    recordingDeviceName_ = std::string(recordingDeviceName);
     if (!encoder_.init())
         return false;
 
@@ -19,7 +45,11 @@ bool VoiceCapture::init()
     spec.format = SDL_AUDIO_F32LE;
     spec.channels = net::voice::k_channels;
     spec.freq = net::voice::k_sampleRate;
-    captureStream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_RECORDING, &spec, nullptr, nullptr);
+    const SDL_AudioDeviceID requestedDevice = findRecordingDeviceByName(recordingDeviceName_);
+    if (!recordingDeviceName_.empty() && requestedDevice == SDL_AUDIO_DEVICE_DEFAULT_RECORDING) {
+        SDL_Log("[voice] Recording device '%s' unavailable; using system default", recordingDeviceName_.c_str());
+    }
+    captureStream_ = SDL_OpenAudioDeviceStream(requestedDevice, &spec, nullptr, nullptr);
     if (!captureStream_) {
         SDL_Log("[voice] SDL_OpenAudioDeviceStream(recording) failed: %s", SDL_GetError());
         encoder_.reset();
@@ -39,6 +69,18 @@ void VoiceCapture::quit()
     capturePcm_.clear();
     captureReadOffset_ = 0;
     transmitting_ = false;
+}
+
+void VoiceCapture::setRecordingDeviceName(std::string_view name)
+{
+    if (recordingDeviceName_ == name)
+        return;
+
+    const bool wasTransmitting = transmitting_;
+    if (!init(name))
+        return;
+    if (wasTransmitting)
+        setPushToTalk(true);
 }
 
 void VoiceCapture::setPushToTalk(bool active)

@@ -15,10 +15,13 @@ constexpr float k_viewportWindowMargin = 0.94f;
 void PauseMenu::open()
 {
     menuOpen = true;
+    menu_theme::playUiSound(UiSoundAction::ModalOpen);
 }
 
 void PauseMenu::close()
 {
+    if (menuOpen)
+        menu_theme::playUiSound(UiSoundAction::ModalClose);
     menuOpen = false;
     settingsEditor_.close();
     pendingConfirm_ = PendingConfirm::None;

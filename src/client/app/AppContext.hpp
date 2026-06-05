@@ -29,4 +29,6 @@ struct AppContext
     UserSettings& userSettings;         ///< User-specific input and gameplay settings.
     std::string_view userSettingsPath;  ///< Save path for user-specific settings.
     std::string_view currentServerName; ///< Display name for the connected server, if known.
+    std::string_view currentServerIp;   ///< Address used for the current server connection, if known.
+    uint16_t currentServerPort = 0;     ///< Port used for the current server connection, if known.
 };

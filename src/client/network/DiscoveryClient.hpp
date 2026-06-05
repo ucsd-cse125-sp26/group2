@@ -36,7 +36,6 @@ public:
 private:
     uint16_t discoveryPort = 0;
     NET_Address* broadcastAddr = nullptr;
-    NET_Address* loopbackAddr = nullptr;
     std::vector<NET_Address*> subnetBroadcastAddrs;
     uint64_t lastRequestMs = 0;
 

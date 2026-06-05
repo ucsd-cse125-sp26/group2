@@ -95,13 +95,6 @@ bool DiscoveryClient::start(uint16_t port)
         return false;
     }
 
-    loopbackAddr = NET_ResolveHostname("127.0.0.1");
-    if (NET_WaitUntilResolved(loopbackAddr, -1) == NET_FAILURE) {
-        SDL_Log("DiscoveryClient: failed to resolve loopback address: %s", SDL_GetError());
-        NET_UnrefAddress(loopbackAddr);
-        loopbackAddr = nullptr;
-    }
-
     subnetBroadcastAddrs = resolveSubnetBroadcastAddresses();
     refresh();
     return true;
@@ -116,10 +109,6 @@ void DiscoveryClient::stop()
     if (broadcastAddr) {
         NET_UnrefAddress(broadcastAddr);
         broadcastAddr = nullptr;
-    }
-    if (loopbackAddr) {
-        NET_UnrefAddress(loopbackAddr);
-        loopbackAddr = nullptr;
     }
     unrefAddresses(subnetBroadcastAddrs);
 }
@@ -192,9 +181,6 @@ void DiscoveryClient::refresh(bool clearExisting)
     NET_SendDatagram(socket, broadcastAddr, discoveryPort, buf, sizeof(buf));
     for (NET_Address* subnetBroadcastAddr : subnetBroadcastAddrs) {
         NET_SendDatagram(socket, subnetBroadcastAddr, discoveryPort, buf, sizeof(buf));
-    }
-    if (loopbackAddr) {
-        NET_SendDatagram(socket, loopbackAddr, discoveryPort, buf, sizeof(buf));
     }
     lastRequestMs = SDL_GetTicks();
 }

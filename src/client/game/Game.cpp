@@ -955,7 +955,7 @@ bool Game::init(AppContext& ctx)
     // SFX init result so recoil visuals still work in silent test runs.
     dispatcher.sink<WeaponFiredEvent>().connect<&Game::onWeaponFired>(*this);
     if (ctx.developerConfig.voiceCapture)
-        voiceChat_.init();
+        voiceChat_.init(userSettings ? userSettings->audioInputDeviceName : std::string_view{});
 
     // HUD system — needs device + shader format from renderer, SDF atlas from particles.
     if (particleSystem.sdfReady()) {
@@ -6565,6 +6565,7 @@ SDL_AppResult Game::iterate()
     phaseSnap(phaseStats.hudMs);
 
     const PauseMenuResult pauseResult = pauseMenu.render(*userSettings, userSettingsPath_);
+    voiceChat_.setRecordingDeviceName(userSettings->audioInputDeviceName);
     if (pauseResult.settingsApplied) {
         mouseSensitivity = userSettings->mouseSensitivity;
         horizontalFovDegrees = userSettings->horizontalFovDegrees;

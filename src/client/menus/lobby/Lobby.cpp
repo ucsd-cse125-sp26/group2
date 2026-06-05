@@ -30,7 +30,12 @@ bool Lobby::init(AppContext& ctx)
         serverName = ctx.hostConfigState.serverName;
     }
     hostPort = ctx.hostedServer.port();
-    hostLanIp = isHosting ? local_address::firstLanIPv4() : std::string{};
+    if (isHosting) {
+        hostLanIp = local_address::firstLanIPv4();
+    } else {
+        hostLanIp = std::string(ctx.currentServerIp);
+        hostPort = ctx.currentServerPort;
+    }
     hostAddressesVisible = false;
 
     client->onLobbyState([this](const std::vector<LobbyPlayer>& snapshot, ClientId localId) {
@@ -173,6 +178,9 @@ SDL_AppResult Lobby::iterate()
 
     if (result.startMatchClicked) {
         client->sendStartMatch();
+    }
+    if (result.cancelStartMatchClicked) {
+        client->sendCancelStartMatch();
     }
 
     if (result.returnToMenuClicked) {

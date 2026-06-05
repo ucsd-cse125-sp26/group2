@@ -16,6 +16,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -57,6 +58,53 @@ namespace
 
 constexpr float kPi = 3.1415926535f;
 constexpr float kDefaultVoiceChatGain = 2.0f;
+constexpr float kMenuUiGain = 0.45f;
+
+struct UiSoundActionConfig
+{
+    std::span<const SfxId> variants;
+    float cooldownSeconds = 0.0f;
+};
+
+constexpr std::array<SfxId, 2> kUiHoverVariants{SfxId::UiHover01, SfxId::UiHover02};
+constexpr std::array<SfxId, 2> kUiConfirmVariants{SfxId::UiConfirm01, SfxId::UiConfirm02};
+constexpr std::array<SfxId, 1> kUiBackVariants{SfxId::UiBack01};
+constexpr std::array<SfxId, 1> kUiToggleVariants{SfxId::UiToggle01};
+constexpr std::array<SfxId, 1> kUiSliderVariants{SfxId::UiSliderStep01};
+constexpr std::array<SfxId, 1> kUiModalVariants{SfxId::UiModal01};
+constexpr std::array<SfxId, 1> kUiSuccessVariants{SfxId::UiSuccess01};
+constexpr std::array<SfxId, 2> kUiErrorVariants{SfxId::UiError01, SfxId::UiError02};
+constexpr std::array<SfxId, 1> kUiDisabledVariants{SfxId::UiDisabled01};
+constexpr std::array<SfxId, 1> kUiDangerVariants{SfxId::UiDanger01};
+
+UiSoundActionConfig uiSoundActionConfig(UiSoundAction action) noexcept
+{
+    switch (action) {
+    case UiSoundAction::Hover:
+        return {kUiHoverVariants, 0.08f};
+    case UiSoundAction::Confirm:
+        return {kUiConfirmVariants, 0.03f};
+    case UiSoundAction::Back:
+        return {kUiBackVariants, 0.03f};
+    case UiSoundAction::Toggle:
+        return {kUiToggleVariants, 0.04f};
+    case UiSoundAction::SliderStep:
+        return {kUiSliderVariants, 0.08f};
+    case UiSoundAction::ModalOpen:
+    case UiSoundAction::ModalClose:
+        return {kUiModalVariants, 0.10f};
+    case UiSoundAction::Success:
+        return {kUiSuccessVariants, 0.08f};
+    case UiSoundAction::Error:
+        return {kUiErrorVariants, 0.08f};
+    case UiSoundAction::Disabled:
+        return {kUiDisabledVariants, 0.08f};
+    case UiSoundAction::Danger:
+        return {kUiDangerVariants, 0.08f};
+    default:
+        return {};
+    }
+}
 
 bool sequenceNewer(std::uint16_t a, std::uint16_t b) noexcept
 {
@@ -108,6 +156,28 @@ std::string_view explosionEventForWeapon(WeaponType type) noexcept
         return "explosion";
     }
     return "explosion";
+}
+
+SDL_AudioDeviceID findAudioDeviceByName(std::string_view name, bool recording)
+{
+    if (name.empty())
+        return recording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+
+    int count = 0;
+    SDL_AudioDeviceID* devices = recording ? SDL_GetAudioRecordingDevices(&count) : SDL_GetAudioPlaybackDevices(&count);
+    if (!devices)
+        return recording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+
+    SDL_AudioDeviceID match = recording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+    for (int i = 0; i < count; ++i) {
+        const char* deviceName = SDL_GetAudioDeviceName(devices[i]);
+        if (deviceName && name == deviceName) {
+            match = devices[i];
+            break;
+        }
+    }
+    SDL_free(devices);
+    return match;
 }
 
 audio::AudioObjectId sfxAudioObjectForEntity(entt::entity entity) noexcept
@@ -215,6 +285,33 @@ bool SfxSystem::init()
     loadClip(SfxId::GameMusic, "Music/Gamesong2.wav", SfxCategory::Music, 0.8f, 0.0f);
     loadClip(SfxId::GameMusicLoop, "Music/Gamesong2_Main2.wav", SfxCategory::Music, 0.8f, 0.0f);
 
+    loadClip(
+        SfxId::UiHover01, "MenuSFX/Bluezone_BC0268_switch_button_click_small_005.wav", SfxCategory::UI, 0.22f, 0.02f);
+    loadClip(SfxId::UiHover02, "MenuSFX/Bleeps_Blops_Clicks_DDM29.wav", SfxCategory::UI, 0.18f, 0.02f);
+    loadClip(SfxId::UiConfirm01, "MenuSFX/MenuSound_DDM23.1_Wav.wav", SfxCategory::UI, 0.32f, 0.02f);
+    loadClip(SfxId::UiConfirm02,
+             "MenuSFX/Bluezone_BC0268_switch_button_click_high_tech_interface_001.wav",
+             SfxCategory::UI,
+             0.26f,
+             0.02f);
+    loadClip(SfxId::UiBack01, "MenuSFX/Cancel Action_3.wav", SfxCategory::UI, 0.30f, 0.02f);
+    loadClip(SfxId::UiToggle01,
+             "MenuSFX/Bluezone_BC0268_switch_button_click_high_tech_mechanical_007_01.wav",
+             SfxCategory::UI,
+             0.24f,
+             0.02f);
+    loadClip(SfxId::UiSliderStep01, "MenuSFX/PM_FSSF2_USER_INTERFACE_SIMPLE_56.wav", SfxCategory::UI, 0.16f, 0.02f);
+    loadClip(SfxId::UiModal01, "MenuSFX/PM_FSSF2_USER_INTERFACE_SIMPLE_56.wav", SfxCategory::UI, 0.24f, 0.02f);
+    loadClip(SfxId::UiSuccess01,
+             "MenuSFX/Bluezone_BC0268_switch_button_click_high_tech_interface_001.wav",
+             SfxCategory::UI,
+             0.34f,
+             0.02f);
+    loadClip(SfxId::UiError01, "MenuSFX/Access_Denied_High_DDM16.wav", SfxCategory::UI, 0.36f, 0.02f);
+    loadClip(SfxId::UiError02, "MenuSFX/Deny Access Signal Lo-fi 12.wav", SfxCategory::UI, 0.36f, 0.02f);
+    loadClip(SfxId::UiDisabled01, "MenuSFX/Deny Access Signal Lo-fi 12.wav", SfxCategory::UI, 0.24f, 0.02f);
+    loadClip(SfxId::UiDanger01, "MenuSFX/Access_Denied_High_DDM16.wav", SfxCategory::UI, 0.44f, 0.02f);
+
     convertClipsToMixer();
 
     std::vector<std::string> manifestErrors;
@@ -281,6 +378,32 @@ SfxSystem::SourceHandle SfxSystem::play2D(SfxId id, float gain, float priority)
 {
     return startSource(
         id, false, false, glm::vec3{0.0f}, glm::vec3{0.0f}, gain, priority, audio::kInvalidBus, 1.0f, 0, 0);
+}
+
+SfxSystem::SourceHandle SfxSystem::playUi(UiSoundAction action, float gain)
+{
+    const size_t actionIndex = static_cast<size_t>(action);
+    if (actionIndex >= uiActionCooldowns_.size() || uiActionCooldowns_[actionIndex] > 0.0f)
+        return kInvalidSource;
+
+    const UiSoundActionConfig config = uiSoundActionConfig(action);
+    std::array<SfxId, 4> loadedVariants{};
+    std::size_t loadedCount = 0;
+    for (const SfxId id : config.variants) {
+        const size_t clipIndex = static_cast<size_t>(id);
+        if (clipIndex < clips_.size() && clips_[clipIndex].loaded && !clips_[clipIndex].samples.empty() &&
+            loadedCount < loadedVariants.size())
+        {
+            loadedVariants[loadedCount++] = id;
+        }
+    }
+    if (loadedCount == 0)
+        return kInvalidSource;
+
+    const std::size_t selected = uiActionVariantCursors_[actionIndex] % loadedCount;
+    ++uiActionVariantCursors_[actionIndex];
+    uiActionCooldowns_[actionIndex] = config.cooldownSeconds;
+    return play2D(loadedVariants[selected], gain * kMenuUiGain, 1.0f);
 }
 
 SfxSystem::SourceHandle
@@ -515,6 +638,16 @@ void SfxSystem::setCategoryVolume(SfxCategory cat, float v)
     categoryVolumes_[static_cast<size_t>(cat)] = std::clamp(v, 0.0f, 2.0f);
 }
 
+void SfxSystem::setPlaybackDeviceName(std::string_view name)
+{
+    if (playbackDeviceName_ == name)
+        return;
+
+    playbackDeviceName_ = std::string(name);
+    if (mixStream_)
+        pendingReopen_ = true;
+}
+
 float SfxSystem::categoryVolume(SfxCategory cat) const
 {
     return categoryVolumes_[static_cast<size_t>(cat)];
@@ -589,6 +722,10 @@ void SfxSystem::update(float dt)
         return;
 
     for (auto& cd : cooldowns_) {
+        if (cd > 0.0f)
+            cd = (cd > dt) ? (cd - dt) : 0.0f;
+    }
+    for (auto& cd : uiActionCooldowns_) {
         if (cd > 0.0f)
             cd = (cd > dt) ? (cd - dt) : 0.0f;
     }
@@ -1134,8 +1271,11 @@ bool SfxSystem::openDevice()
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "1024");
 #endif
 
-    mixStream_ =
-        SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &mixerSpec_, &SfxSystem::mixCallback, this);
+    const SDL_AudioDeviceID requestedDevice = findAudioDeviceByName(playbackDeviceName_, false);
+    if (!playbackDeviceName_.empty() && requestedDevice == SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK) {
+        SDL_Log("[sfx] Playback device '%s' unavailable; using system default", playbackDeviceName_.c_str());
+    }
+    mixStream_ = SDL_OpenAudioDeviceStream(requestedDevice, &mixerSpec_, &SfxSystem::mixCallback, this);
 
     if (!mixStream_) {
         SDL_Log("[sfx] SDL_OpenAudioDeviceStream failed: %s", SDL_GetError());

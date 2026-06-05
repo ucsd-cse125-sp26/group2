@@ -17,10 +17,13 @@ constexpr float k_viewportWindowMargin = 0.94f;
 void SystemMenuOverlay::open()
 {
     open_ = true;
+    menu_theme::playUiSound(UiSoundAction::ModalOpen);
 }
 
 void SystemMenuOverlay::close()
 {
+    if (open_)
+        menu_theme::playUiSound(UiSoundAction::ModalClose);
     open_ = false;
     settingsEditor_.close();
     confirm_.cancel();
