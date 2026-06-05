@@ -360,8 +360,10 @@ public:
                                                  ///< Game.cpp drives this each frame from the local player's ADS state.
     bool imguiEnabled = true;                    ///< Master toggle for the ImGui debug overlay.
     RenderToggles toggles{};                     ///< Per-pass on/off toggles (see RenderToggles in RendererTypes.hpp).
-    float metallicTextureStrength = 0.35f;       ///< Scales sampled metallic texture values before lighting.
-    float ambientColorMultiplier = 0.5f;         ///< Scales the geometry shader ambient colour contribution.
+    float roughnessTextureStrength = 1.0f;       ///< Scales sampled roughness texture values before lighting.
+    float metallicTextureStrength = 0.5f;        ///< Scales sampled metallic texture values before lighting.
+    float ambientColorMultiplier = 1.0f;         ///< Scales the geometry shader ambient colour contribution.
+    float lightIntensityMultiplier = 8.0f;       ///< Scales direct geometry light intensity.
     float hdrExposure = 1.0f;                    ///< Debug exposure multiplier used by the tonemap pass.
     float hdrWhitePoint = 4.0f;                  ///< Debug white point for Extended Reinhard tonemapping.
     float ssaoRadius = 24.0f;                    ///< World-space AO sampling radius.

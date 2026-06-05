@@ -50,8 +50,12 @@ layout(set = 3, binding = 1) uniform MaterialFlags {
     uint useRoughnessTexture;
     uint useMetallicTexture;
     uint useTint;
+    float roughnessTextureStrength;
     float metallicTextureStrength;
     float ambientColorMultiplier;
+    float lightIntensityMultiplier;
+    uint _pad0;
+    uint _pad1;
     uint _pad2;
 } materialFlags;
 
@@ -105,7 +109,9 @@ void main()
         albedo.rgb = mix(albedo.rgb, pow(material.diffuse.rgb, vec3(2.2f)), material.diffuse.a);
     }
     vec2 mr = texture(metallicRoughnessTex, frag_vt).gb;
-    float roughness = materialFlags.useRoughnessTexture != 0 ? clamp(mr.x, 0.0, 1.0) : 0.5;
+    float roughness = materialFlags.useRoughnessTexture != 0
+        ? clamp(mr.x * materialFlags.roughnessTextureStrength, 0.0, 1.0)
+        : 0.5;
     float metallic = materialFlags.useMetallicTexture != 0
         ? clamp(mr.y * materialFlags.metallicTextureStrength, 0.0, 1.0)
         : 0.0;
@@ -147,7 +153,7 @@ void main()
 
         vec3 lightDir = -lightToWorldPos / r;
         float cosT_i = max(0.0f, dot(lightDir, normal));
-        vec3 lightRadiance = shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion;
+        vec3 lightRadiance = shadow_i * pLight_i.color * (pLight_i.intensity * materialFlags.lightIntensityMultiplier) * attenutaion;
         diffuseIrradiance += lightRadiance * cosT_i;
 
         vec3 halfDir = normalize(lightDir + viewDir);
@@ -172,7 +178,7 @@ void main()
 
         vec3 lightDir = -lightToWorldPos / r;
         float cosT_i = max(0.0f, dot(lightDir, normal));
-        vec3 lightRadiance = shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion;
+        vec3 lightRadiance = shadow_i * pLight_i.color * (pLight_i.intensity * materialFlags.lightIntensityMultiplier) * attenutaion;
         diffuseIrradiance += lightRadiance * cosT_i;
 
         vec3 halfDir = normalize(lightDir + viewDir);

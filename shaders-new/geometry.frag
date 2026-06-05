@@ -21,8 +21,12 @@ layout(set = 3, binding = 1) uniform MaterialFlags {
     uint useRoughnessTexture;
     uint useMetallicTexture;
     uint useTint;
+    float roughnessTextureStrength;
     float metallicTextureStrength;
     float ambientColorMultiplier;
+    float lightIntensityMultiplier;
+    uint _pad0;
+    uint _pad1;
     uint _pad2;
 } materialFlags;
 
@@ -47,13 +51,16 @@ void main()
         albedo.rgb = mix(albedo.rgb, material.diffuse.rgb, material.diffuse.a);
     }
     vec2 mr = texture(metallicRoughnessTex, frag_vt).gb;
-    float roughness = materialFlags.useRoughnessTexture != 0 ? clamp(mr.x, 0.0, 1.0) : 0.5;
+    float roughness = materialFlags.useRoughnessTexture != 0
+        ? clamp(mr.x * materialFlags.roughnessTextureStrength, 0.0, 1.0)
+        : 0.5;
     float metallic = materialFlags.useMetallicTexture != 0
         ? clamp(mr.y * materialFlags.metallicTextureStrength, 0.0, 1.0)
         : 0.0;
 
     float cosT = max(0.0f, dot(-light_direction, normal));
-    vec4 irradiance = light_color * cosT + vec4(ambient_color * materialFlags.ambientColorMultiplier, 1.0f);
+    vec4 irradiance = light_color * (cosT * materialFlags.lightIntensityMultiplier) +
+        vec4(ambient_color * materialFlags.ambientColorMultiplier, 1.0f);
 
     vec3 diffuse = albedo.rgb * (1.0 - metallic) * irradiance.rgb;
     vec3 specularTint = mix(vec3(0.04), albedo.rgb, metallic);
