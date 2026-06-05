@@ -56,9 +56,9 @@ layout(set = 3, binding = 2) uniform lightBlock{
     uint numSpotLights;
     float pointLightFarPlane;
     float pointLightNearPlane;
-    uint _pad0;
-    uint _pad1;
-    uint _pad2;
+    float cameraPosX;
+    float cameraPosY;
+    float cameraPosZ;
     PointLight pointLights[MAX_POINT_LIGHTS];
     PointLight movingPointLights[MAX_MOVING_POINT_LIGHTS];
 } lightInfo;
@@ -72,6 +72,16 @@ layout(location = 1) out vec4 normalColor;
 const vec3 ambient_color = 0.5f * vec3(0.08f, 0.08f,0.12f); // dark-blue
 //const vec3 ambient_color = normalize(vec3(0.08f, 0.08f,0.12f)); // dark-blue
 //const vec3 ambient_color = vec3(0.0f, 0.0f,0.0f); // dark-black
+
+float roughnessToShininess(float roughness)
+{
+    return mix(256.0, 4.0, clamp(roughness, 0.0, 1.0));
+}
+
+vec3 specularTint(vec3 albedo, float metallic)
+{
+    return mix(vec3(0.04), albedo, clamp(metallic, 0.0, 1.0));
+}
 
 void main()
 {
@@ -91,9 +101,9 @@ void main()
     }
     vec2 mr = materialFlags.useMetallicRoughnessTexture != 0
         ? texture(metallicRoughnessTex, frag_vt).gb
-        : vec2(1.0, 0.0);
-    float roughness = mr.x;
-    float metallic = mr.y;
+        : vec2(0.5, 0.0);
+    float roughness = clamp(mr.x, 0.0, 1.0);
+    float metallic = clamp(mr.y, 0.0, 1.0);
 
 //    float depthA = lightInfo.pointLightFarPlane / (lightInfo.pointLightFarPlane - lightInfo.pointLightNearPlane );
 //    float depthB = depthA * lightInfo.pointLightNearPlane;
@@ -105,7 +115,13 @@ void main()
 
 //    float cosT = max(0.0f, dot(-light_direction, normal));
 //    vec4 irradiance = light_color * cosT + ambient_color;
-    vec3 irradiance = ambient_color;
+    vec3 diffuseIrradiance = ambient_color;
+    vec3 specularIrradiance = vec3(0.0);
+    vec3 cameraPos = vec3(lightInfo.cameraPosX, lightInfo.cameraPosY, lightInfo.cameraPosZ);
+    vec3 viewDir = normalize(cameraPos - frag_worldPos);
+    float shininess = roughnessToShininess(roughness);
+    float specularStrength = mix(1.0, 0.12, roughness);
+    vec3 specTint = specularTint(albedo.rgb, metallic);
 
     for (int i = 0; i < lightInfo.numPointLights; i++ ){
         PointLight pLight_i = lightInfo.pointLights[i];
@@ -124,8 +140,15 @@ void main()
 
         float attenutaion = 1.0f / (r * r);
 
-        float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
-        irradiance += shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion * cosT_i;
+        vec3 lightDir = -lightToWorldPos / r;
+        float cosT_i = max(0.0f, dot(lightDir, normal));
+        vec3 lightRadiance = shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion;
+        diffuseIrradiance += lightRadiance * cosT_i;
+
+        vec3 halfDir = normalize(lightDir + viewDir);
+        float specAngle = max(dot(normal, halfDir), 0.0);
+        float specular = pow(specAngle, shininess) * specularStrength * cosT_i;
+        specularIrradiance += lightRadiance * specular;
 
     }
     for (int i = 0; i < lightInfo.numMovingPointLights; i++ ){
@@ -142,13 +165,20 @@ void main()
 
         float attenutaion = 1.0f / (r * r);
 
-        float cosT_i = max(0.0f, dot(-lightToWorldPos/r, normal));
-        irradiance += shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion * cosT_i;
+        vec3 lightDir = -lightToWorldPos / r;
+        float cosT_i = max(0.0f, dot(lightDir, normal));
+        vec3 lightRadiance = shadow_i * pLight_i.color * (pLight_i.intensity) * attenutaion;
+        diffuseIrradiance += lightRadiance * cosT_i;
+
+        vec3 halfDir = normalize(lightDir + viewDir);
+        float specAngle = max(dot(normal, halfDir), 0.0);
+        float specular = pow(specAngle, shininess) * specularStrength * cosT_i;
+        specularIrradiance += lightRadiance * specular;
 
     }
 
-    vec3 diffuse = albedo.rgb * (1.0 - metallic) * irradiance;
-    vec3 metal = albedo.rgb * metallic * irradiance * (1.0 - 0.5 * roughness);
-    color = vec4(diffuse + metal, albedo.a);
+    vec3 diffuse = albedo.rgb * (1.0 - metallic) * diffuseIrradiance;
+    vec3 specular = specTint * specularIrradiance;
+    color = vec4(diffuse + specular, albedo.a);
     normalColor = vec4(normal * 0.5 + 0.5, 1.0);
 }

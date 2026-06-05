@@ -29,7 +29,7 @@ const vec4 ambient_color = vec4(normalize(vec3(0.08f, 0.08f,0.12f)),1.0f); // da
 
 void main()
 {
-    vec3 normal = gl_FrontFacing ? frag_normal : -frag_normal;
+    vec3 normal = normalize(gl_FrontFacing ? frag_normal : -frag_normal);
     if (materialFlags.useNormalTexture != 0) {
         vec3 tangent = normalize(frag_tangent.xyz - normal * dot(normal, frag_tangent.xyz));
         vec3 bitangent = normalize(cross(normal, tangent) * frag_tangent.w);
@@ -44,15 +44,19 @@ void main()
     }
     vec2 mr = materialFlags.useMetallicRoughnessTexture != 0
         ? texture(metallicRoughnessTex, frag_vt).gb
-        : vec2(1.0, 0.0);
-    float roughness = mr.x;
-    float metallic = mr.y;
+        : vec2(0.5, 0.0);
+    float roughness = clamp(mr.x, 0.0, 1.0);
+    float metallic = clamp(mr.y, 0.0, 1.0);
 
     float cosT = max(0.0f, dot(-light_direction, normal));
     vec4 irradiance = light_color * cosT + ambient_color;
 
-    albedo.rgb *= (normal * 0.5f) + 0.5f;
     vec3 diffuse = albedo.rgb * (1.0 - metallic) * irradiance.rgb;
-    vec3 metal = albedo.rgb * metallic * light_color.rgb * cosT * (1.0 - 0.5 * roughness);
-    color = vec4(diffuse + metal, albedo.a);
+    vec3 specularTint = mix(vec3(0.04), albedo.rgb, metallic);
+    vec3 viewDir = normalize(-frag_worldPos);
+    vec3 halfDir = normalize(-light_direction + viewDir);
+    float shininess = mix(256.0, 4.0, roughness);
+    float specularStrength = mix(1.0, 0.12, roughness);
+    float specular = pow(max(dot(normal, halfDir), 0.0), shininess) * specularStrength * cosT;
+    color = vec4(diffuse + specularTint * light_color.rgb * specular, albedo.a);
 }

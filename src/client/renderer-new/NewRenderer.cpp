@@ -270,8 +270,8 @@ bool NewRenderer::init(SDL_Window* window)
     sampleLights.push_back(pl4);
 
     PointLight pl5{};
-    pl5.position = glm::vec3(-292.0f, -239.0f, 854.0f);
-    pl5.intensity = globalIntensity;
+    pl5.position = glm::vec3(-1144.0f, 316.0f, -854.0f);
+    pl5.intensity = globalIntensity * 100;
     pl5.color = glm::vec3(1.0f, 0.7f, 0.5f);
     pl5.range = 500.0f;
     sampleLights.push_back(pl5);
@@ -883,6 +883,10 @@ void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUComm
 
     SDL_BindGPUFragmentSamplers(renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings, 3);
 
+    const glm::vec3 cameraPos = camera_.getEye();
+    sceneLightInfo_.cameraPosX = cameraPos.x;
+    sceneLightInfo_.cameraPosY = cameraPos.y;
+    sceneLightInfo_.cameraPosZ = cameraPos.z;
     SDL_PushGPUFragmentUniformData(cmd, 2, &sceneLightInfo_, sizeof(LightUBO));
 }
 void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)

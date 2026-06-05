@@ -59,7 +59,9 @@ struct LightUBO
     uint32_t numSpotLights = 0;
     float pointLightFarPlane = 4000.0f;
     float pointLightNearPlane = 5.0f;
-    uint32_t _pad0[3];
+    float cameraPosX = 0.0f;
+    float cameraPosY = 0.0f;
+    float cameraPosZ = 0.0f;
     PointLight pointLights[MAX_POINT_LIGHTS];
     PointLight movingPointLights[MAX_MOVING_POINT_LIGHTS];
 };

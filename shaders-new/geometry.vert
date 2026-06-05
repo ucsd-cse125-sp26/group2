@@ -25,6 +25,6 @@ void main()
     frag_worldPos = worldPos.xyz;
     frag_normal = normalize(normalMatrix * vn);
     frag_vt = vt;
-    frag_tangent = vec4(normalize(mat3(object.model) * tangent.xyz), tangent.w);
+    frag_tangent = vec4(normalize(normalMatrix * tangent.xyz), tangent.w);
     gl_Position = camera.view_projection * worldPos;
 }
