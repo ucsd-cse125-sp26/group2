@@ -28,6 +28,7 @@ layout(location = 0) out vec3 frag_normal;
 layout(location = 1) out vec2 frag_vt;
 layout(location = 2) out vec3 frag_worldPos;
 layout(location = 3) out vec4 frag_tangent;
+layout(location = 4) out vec4 frag_tint;
 
 layout(set = 0, binding = 0) readonly buffer BonePallete {
     mat4 pallete[];
@@ -63,4 +64,5 @@ void main()
     frag_tangent = vec4(normalize(mat3(model) * tangent.xyz), tangent.w);
     frag_worldPos = worldPos.xyz;
     frag_vt = vt;
+    frag_tint = skinedInst.tint;
 }
