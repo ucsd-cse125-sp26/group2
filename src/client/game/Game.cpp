@@ -64,6 +64,7 @@
 #include "ecs/systems/AbilitySystem.hpp"
 #include "ecs/systems/HitboxSystem.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "hud/VoidfallStyle.hpp"
 #include "hud/debug/HudDebugPanel.hpp"
 #include "menus/MenuTheme.hpp"
@@ -5973,6 +5974,8 @@ SDL_AppResult Game::iterate()
             hudState.maxHealth = 100;
             hudState.armor = static_cast<int>(hp.armor);
             hudState.maxArmor = 100;
+            hudState.overShield = static_cast<int>(hp.overShield);
+            hudState.maxOverShield = static_cast<int>(systems::overShieldMax);
         });
         registry.view<LocalPlayer, PlayerVisState>().each(
             [&](const PlayerVisState& ps) { hudState.isAlive = !ps.isDead; });

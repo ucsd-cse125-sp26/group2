@@ -11,6 +11,7 @@
 namespace
 {
 constexpr HudColor k_healthFill{1.0f, 0.35f, 0.32f, 1.0f};
+constexpr HudColor k_overShieldFill{0.18f, 1.0f, 0.34f, 1.0f};
 }
 
 HealthArmorBar::HealthArmorBar()
@@ -28,8 +29,11 @@ void HealthArmorBar::update(float /*dt*/, const HudGameState& state, HudTweenPoo
 
     maxHealth_ = std::max(1, state.maxHealth);
     maxArmor_ = std::max(1, state.maxArmor);
+    maxOverShield_ = std::max(1, state.maxOverShield);
     healthFill_ = std::clamp(static_cast<float>(state.health) / static_cast<float>(maxHealth_), 0.f, 1.f);
     armorFill_ = std::clamp(static_cast<float>(state.armor) / static_cast<float>(maxArmor_), 0.f, 1.f);
+    overShieldFill_ =
+        std::clamp(static_cast<float>(state.overShield) / static_cast<float>(maxOverShield_), 0.f, 1.f);
 }
 
 void HealthArmorBar::draw(HudContext& ctx, float x, float y)
@@ -52,6 +56,7 @@ void HealthArmorBar::draw(HudContext& ctx, float x, float y)
 
     ctx.svgMaskRangeX(HudIcon::HealthFrameBack, frameX, frameY, frameW, frameH, 0.f, healthFill_, k_healthFill);
     ctx.svgMaskRangeX(HudIcon::HealthFrameBack, frameX, frameY, frameW, frameH, 0.f, armorFill_, k_primary);
+    ctx.svgMaskRangeX(HudIcon::HealthFrameBack, frameX, frameY, frameW, frameH, 0.f, overShieldFill_, k_overShieldFill);
 
     ctx.svg(HudIcon::HealthFrameFront, frameX, frameY, frameW, frameH);
 }
