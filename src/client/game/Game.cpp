@@ -4601,19 +4601,12 @@ SDL_AppResult Game::iterate()
             world *= glm::mat4_cast(rend.orientation);
             world = glm::scale(world, rend.scale);
 
-            // Projectile entities carry a per-grenade tint; other entities use
-            // their Renderable tint.
-            glm::vec4 tint = rend.tint;
-            if (const auto* proj = registry.try_get<Projectile>(e)) {
-                tint = glm::vec4(proj->tint, 1.0f);
-            }
-
             const auto* powerup = registry.try_get<PowerupSpawner>(e);
             const bool occludedSilhouette = powerup != nullptr && powerup->hasPowerup;
 
             entityCmds.push_back(EntityRenderCmd{.modelIndex = rend.modelIndex,
                                                  .worldTransform = world,
-                                                 .tint = tint,
+                                                 .tint = rend.tint,
                                                  .occludedSilhouette = occludedSilhouette});
         });
 
