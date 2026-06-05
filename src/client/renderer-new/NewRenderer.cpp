@@ -1448,13 +1448,21 @@ void NewRenderer::drawModel(ModelIdInt modelId,
         {
             Uint32 useTexture;
             Uint32 useNormalTexture;
-            Uint32 useMetallicRoughnessTexture;
+            Uint32 useRoughnessTexture;
+            Uint32 useMetallicTexture;
             Uint32 useTint;
+            Uint32 _pad0;
+            Uint32 _pad1;
+            Uint32 _pad2;
         } materialFlags{
             useTexture ? 1u : 0u,
-            normalTexture != texture_ ? 1u : 0u,
-            metallicRoughnessTexture != texture_ ? 1u : 0u,
+            toggles.normalTextures && normalTexture != texture_ ? 1u : 0u,
+            toggles.roughnessTextures && metallicRoughnessTexture != texture_ ? 1u : 0u,
+            toggles.metallicTextures && metallicRoughnessTexture != texture_ ? 1u : 0u,
             useTint ? 1u : 0u,
+            0u,
+            0u,
+            0u,
         };
         if (materialFlags.useTint != 0u)
             materialDiffuse = tint;

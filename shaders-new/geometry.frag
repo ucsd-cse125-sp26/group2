@@ -18,8 +18,12 @@ layout(set = 3, binding = 0) uniform Material {
 layout(set = 3, binding = 1) uniform MaterialFlags {
     uint useTexture;
     uint useNormalTexture;
-    uint useMetallicRoughnessTexture;
+    uint useRoughnessTexture;
+    uint useMetallicTexture;
     uint useTint;
+    uint _pad0;
+    uint _pad1;
+    uint _pad2;
 } materialFlags;
 
 // Just a single directional light for now...
@@ -42,11 +46,9 @@ void main()
     if (materialFlags.useTint != 0) {
         albedo.rgb = mix(albedo.rgb, material.diffuse.rgb, material.diffuse.a);
     }
-    vec2 mr = materialFlags.useMetallicRoughnessTexture != 0
-        ? texture(metallicRoughnessTex, frag_vt).gb
-        : vec2(0.5, 0.0);
-    float roughness = clamp(mr.x, 0.0, 1.0);
-    float metallic = clamp(mr.y, 0.0, 1.0);
+    vec2 mr = texture(metallicRoughnessTex, frag_vt).gb;
+    float roughness = materialFlags.useRoughnessTexture != 0 ? clamp(mr.x, 0.0, 1.0) : 0.5;
+    float metallic = materialFlags.useMetallicTexture != 0 ? clamp(mr.y, 0.0, 1.0) : 0.0;
 
     float cosT = max(0.0f, dot(-light_direction, normal));
     vec4 irradiance = light_color * cosT + ambient_color;

@@ -6022,6 +6022,11 @@ SDL_AppResult Game::iterate()
         ImGui::SetNextWindowPos({300.f, 400.f}, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize({260.f, 150.f}, ImGuiCond_FirstUseEver);
         if (ImGui::Begin("HDR Debug", &showHdrDebugUI_)) {
+            ImGui::SeparatorText("Materials");
+            ImGui::Checkbox("Normal Textures", &renderer->toggles.normalTextures);
+            ImGui::Checkbox("Roughness Textures", &renderer->toggles.roughnessTextures);
+            ImGui::Checkbox("Metallic Textures", &renderer->toggles.metallicTextures);
+
             ImGui::SeparatorText("SSAO");
             ImGui::Checkbox("SSAO Enabled", &renderer->toggles.ssao);
 

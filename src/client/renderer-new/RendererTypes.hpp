@@ -30,6 +30,9 @@ struct RenderToggles
     bool entityModels = true;    ///< ECS-driven entity models (Renderable component).
     bool weaponViewmodel = true; ///< First-person weapon.
     bool skybox = true;          ///< Procedural / cubemap skybox.
+    bool normalTextures = true;  ///< Sample material normal maps when present.
+    bool roughnessTextures = true; ///< Sample material roughness maps when present.
+    bool metallicTextures = true;  ///< Sample material metallic maps when present.
 
     // Shadow
     bool shadows = true; ///< Shadow map pass + shadow sampling in PBR.
