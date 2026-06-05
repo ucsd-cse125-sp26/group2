@@ -28,7 +28,8 @@ struct PowerupConfig
     float amount = 0.0f;
 };
 
-inline constexpr float k_powerupSpawnCooldownSeconds = 240.0f;
+inline constexpr float k_powerupInitialSpawnDelaySeconds = 240.0f;
+inline constexpr float k_powerupRespawnCooldownSeconds = 30.0f;
 inline const glm::vec3 k_powerupPickupHalfExtents{32.0f, 32.0f, 32.0f};
 
 inline const PowerupConfig& getPowerupConfig(PowerupType type)
@@ -37,13 +38,13 @@ inline const PowerupConfig& getPowerupConfig(PowerupType type)
         PowerupConfig{
             .type = PowerupType::Damage,
             .duration = 15.0f,
-            .spawnCooldown = k_powerupSpawnCooldownSeconds,
+            .spawnCooldown = k_powerupRespawnCooldownSeconds,
             .amount = 2.0f,
         }, // Damage
         PowerupConfig{
             .type = PowerupType::Shield,
             .duration = 30.0f,
-            .spawnCooldown = k_powerupSpawnCooldownSeconds,
+            .spawnCooldown = k_powerupRespawnCooldownSeconds,
             .amount = 200.0f, // amount of over shield
         },                    // Shield
     }};

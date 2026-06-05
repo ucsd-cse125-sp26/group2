@@ -237,8 +237,12 @@ void ServerGame::run()
         PowerupConfig config = getPowerupConfig(powerupType);
 
         const entt::entity spawner = registry.create();
-        registry.emplace<PowerupSpawner>(
-            spawner, PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false});
+        registry.emplace<PowerupSpawner>(spawner,
+                                         PowerupSpawner{
+                                             .type = config.type,
+                                             .spawnCooldown = k_powerupInitialSpawnDelaySeconds,
+                                             .hasPowerup = false,
+                                         });
         CollisionShape shape{.halfExtents = k_powerupPickupHalfExtents};
         glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
 
