@@ -198,22 +198,22 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
         }, // RailGun
         WeaponConfig{
             .fireCooldown = 0.0f,
-            .magazineSize = 200,
-            .defaultAmmoCapacity = 200,
-            .damage = 5.0f,
+            .magazineSize = 400,
+            .defaultAmmoCapacity = 800,
+            .damage = 6.0f,
             .hitscan = true,
-            .hitscanRadius = 8.4f, // -30% cylinder hitreg (was 12.0)
+            .hitscanRadius = 12.0f,
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isBeam = true,
-            .dps = 14.0f, // ramp floor, -60% (was 35) — Tesla Cannon, low until lock-on ramps up
+            .dps = 16.0f, // ramp floor, -60% (was 35) — Tesla Cannon, low until lock-on ramps up
             .ammoPerSecond = 20.0f,
             .autoLockBeam = true,
-            .maxRange = 140.0f,             // -30% range (was 200)
+            .maxRange = 200.0f,
             .coneHalfAngleDeg = 30.0f,      // wide, forgiving — true no-aim
             .dpsMax = 19.6f,                // ramp ceiling = floor +40% (was 2× base) after dpsRampTime
             .dpsRampTime = 2.0f,            // seconds of continuous lock to reach dpsMax
-            .shieldDamageMultiplier = 0.2f, // energy-vs-energy: barely chips shields
+            .shieldDamageMultiplier = 0.5f, // energy-vs-energy: barely chips shields
             .reloadTime = 2.0f,
         },                                  // EnergyGun
         WeaponConfig{
@@ -221,7 +221,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             // The fire path in WeaponSystem.cpp checks `type == Shotgun` and loops
             // 9 raycasts in an asterisk pattern (1 center + 8 outer). Per-pellet
             // damage is `damage` below (so max body damage = 9 * damage).
-            .fireCooldown = 0.9f,
+            .fireCooldown = 0.225f, // 4× firerate (was 0.9)
             .magazineSize = 6,
             .defaultAmmoCapacity = 36,
             .damage = 10.0f,       // per-pellet; 11 pellets → 110 body max, ~165 head.

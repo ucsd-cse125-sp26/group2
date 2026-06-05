@@ -672,6 +672,9 @@ inline void handleFire(Registry& registry,
         gun.recoilIdleTime = 0.0f;
         if (auto* beam = registry.try_get<BeamState>(shooter)) {
             beam->active = false; // turn off beam visuals during reload / throw
+            beam->locked = 0;
+            beam->lockStrength = 0.0f;
+            beam->guidePoint = beam->hitPoint;
         }
         if (auto* lockState = registry.try_get<BeamLockState>(shooter)) {
             lockState->target = entt::null; // reload breaks the lock / resets ramp
@@ -686,6 +689,9 @@ inline void handleFire(Registry& registry,
 
         if (!input.shooting || gun.currentMagAmmo <= 0) {
             beam.active = false;
+            beam.locked = 0;
+            beam.lockStrength = 0.0f;
+            beam.guidePoint = beam.hitPoint;
             // Releasing the trigger breaks the lock: the ramp restarts from base
             // next time fire begins (strict, no carry-over).
             if (auto* lockState = registry.try_get<BeamLockState>(shooter)) {
@@ -722,6 +728,7 @@ inline void handleFire(Registry& registry,
             beam.active = true;
             beam.type = gun.type;
             beam.origin = eye;
+            beam.guidePoint = eye + direction * maxRange;
 
             if (lock.target != entt::null && registry.valid(lock.target)) {
                 // Maintain or (re)acquire: any target change resets the ramp.
@@ -749,11 +756,17 @@ inline void handleFire(Registry& registry,
                 applyBulletSlow(lock.target, registry);
 
                 beam.hitPoint = lock.point;
+                beam.locked = 1;
+                beam.lockStrength =
+                    (config.dpsRampTime > 0.0f) ? std::clamp(lockState.duration / config.dpsRampTime, 0.0f, 1.0f)
+                                                : 1.0f;
             } else {
                 // No valid lock: ramp resets; beam sprays forward to the cap.
                 lockState.target = entt::null;
                 lockState.duration = 0.0f;
-                beam.hitPoint = eye + direction * maxRange;
+                beam.hitPoint = beam.guidePoint;
+                beam.locked = 0;
+                beam.lockStrength = 0.0f;
             }
             return;
         }
@@ -796,6 +809,9 @@ inline void handleFire(Registry& registry,
         beam.type = gun.type;
         beam.origin = eye;
         beam.hitPoint = hit.point;
+        beam.guidePoint = hit.point;
+        beam.locked = 0;
+        beam.lockStrength = 0.0f;
         return;
     }
 
@@ -1044,14 +1060,18 @@ inline void handleFire(Registry& registry,
         }
 
     } else {
-        // Spawn projectile
+        // Raycast to find where the crosshair hits, then aim from muzzle toward that point.
+        const auto worldHit = physics::raycastWorld(eye, direction, physics::activeWorld());
+        const glm::vec3 target = worldHit.hit ? worldHit.point : (eye + direction * 5000.0f);
+        const glm::vec3 projDir = glm::normalize(target - muzzle);
+
         ProjectileConfig projConfig = getProjectileConfig(gun.type);
         const entt::entity projectile = registry.create();
         registry.emplace<Projectile>(
             projectile,
             Projectile{.type = gun.type, .damage = config.damage, .owner = shooter, .explosive = config.explosive});
         registry.emplace<Position>(projectile, Position{.value = muzzle});
-        registry.emplace<Velocity>(projectile, Velocity{.value = direction * config.initialProjectileSpeed});
+        registry.emplace<Velocity>(projectile, Velocity{.value = projDir * config.initialProjectileSpeed});
         registry.emplace<CollisionShape>(projectile, projConfig.shape);
     }
 }
@@ -1082,8 +1102,12 @@ void runWeapon(Registry& registry,
         const GunInstance& equipped = getEquippedGun(weapon);
         const WeaponConfig& cfg = getWeaponConfig(equipped.type);
         if (!cfg.isBeam) {
-            if (auto* beam = registry.try_get<BeamState>(shooter))
+            if (auto* beam = registry.try_get<BeamState>(shooter)) {
                 beam->active = false;
+                beam->locked = 0;
+                beam->lockStrength = 0.0f;
+                beam->guidePoint = beam->hitPoint;
+            }
         }
 
         handleGrenadeInput(registry, shooter, input, pos, shape, grenades, vis.gravityFlipped);

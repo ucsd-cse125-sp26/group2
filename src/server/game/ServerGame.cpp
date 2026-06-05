@@ -35,6 +35,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/PowerupState.hpp"
+#include "ecs/components/Ragdoll.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/RespawnTimer.hpp"
@@ -60,11 +61,10 @@
 #include "ecs/systems/KillzoneSystem.hpp"
 #include "ecs/systems/MatchSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
-#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
-#include "ecs/components/Ragdoll.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
 #include "ecs/systems/TriggerSystem.hpp"
 #include "ecs/systems/WeaponSpawnerSystem.hpp"
@@ -402,7 +402,10 @@ void ServerGame::eventHandler(const Event& event)
             deletePlayerEntity(event.clientId);
             break;
         }
-        lobbyManager.addPlayer(event.clientId);
+        const char* joinedDisplayName = "";
+        if (const auto* playerName = registry.try_get<PlayerName>(clientEntities[event.clientId]))
+            joinedDisplayName = playerName->c_str();
+        lobbyManager.addPlayer(event.clientId, joinedDisplayName);
         server->sendMatchConfigToClient(event.clientId, matchController.getMatchConfig());
         // Lobby updates already cover joins before the match starts. Once the
         // match is active, send a lightweight roster popup event instead.
@@ -1530,11 +1533,10 @@ void ServerGame::resetPlayersForCountdown()
 bool ServerGame::isGameplayInputAllowed(MatchPhase phase) const
 {
     switch (phase) {
-    case MatchPhase::COUNTDOWN:
-    case MatchPhase::FINISHED:
-        return false;
-    default:
+    case MatchPhase::IN_PROGRESS:
         return true;
+    default:
+        return false;
     }
 }
 

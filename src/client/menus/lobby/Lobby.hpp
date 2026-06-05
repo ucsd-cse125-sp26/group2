@@ -4,6 +4,7 @@
 #pragma once
 #include "IScreen.hpp"
 #include "app/AppContext.hpp"
+#include "menus/settings/SystemMenuOverlay.hpp"
 #include "network/Client.hpp"
 #include "network/MatchConfig.hpp"
 #include "network/lobby/LobbyStatus.hpp"
@@ -11,6 +12,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 /// @brief IScreen implementation for the pre-match lobby.
@@ -46,6 +48,9 @@ public:
     /// @brief True if returning home because the server connection closed, then clear that reason.
     bool consumeServerShutdownNotice();
 
+    /// @brief True if the user requested closing the application, then clear that request.
+    bool consumeExitRequest();
+
 private:
     /// @brief True when at least one non-host is connected and all connected non-host players are ready.
     bool canHostStartMatch() const;
@@ -56,6 +61,9 @@ private:
     NewRenderer* renderer = nullptr;                 ///< Shared renderer; not owned.
     SDL_Window* window = nullptr;                    ///< Application window; not owned.
     Client* client = nullptr;                        ///< Network client; not owned.
+    UserSettings* settings = nullptr;                ///< Live user settings; not owned.
+    std::string_view settingsPath;                   ///< Save path for user settings.
+    SystemMenuOverlay systemMenu_;                   ///< Shared Escape menu for front-end screens.
     std::vector<LobbyPlayer> players;                ///< Latest snapshot of connected players.
     ClientId localClientId{-1};                      ///< This client's own ID, set by the server on join.
     std::optional<MatchConfig> matchConfig;          ///< Latest match settings received from the server.
@@ -70,4 +78,6 @@ private:
     std::string serverName;                          ///< Display name for the connected server.
     std::string hostLanIp = "127.0.0.1";             ///< LAN IPv4 shown in the hosting banner.
     uint16_t hostPort = 0;                           ///< Hosted server port shown in the hosting banner.
+    bool exitRequested = false;                      ///< Set when the user confirms "Exit to Desktop".
+    bool hostAddressesVisible = false;               ///< Local UI flag: show listen/local addresses while hosting.
 };

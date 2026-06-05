@@ -11,6 +11,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+
 // init / quit
 
 bool ParticleSystem::init(SDL_GPUDevice* dev, SDL_GPUTextureFormat colorFmt, SDL_GPUShaderFormat shaderFmt)
@@ -59,29 +61,48 @@ void ParticleSystem::quit()
 
 void ParticleSystem::update(float dt, const NewCamera& cam, Registry& reg)
 {
+    update(dt, cam.getEye(), cam.getForward(), cam.getRight(), cam.getUp(), reg);
+}
+
+void ParticleSystem::update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec3 right, glm::vec3 up, Registry& reg)
+{
     frameDt_ = dt;
-    camPos_ = cam.getEye();
-    camForward_ = cam.getForward();
-    camRight_ = cam.getRight();
-    camUp_ = cam.getUp();
+    camPos_ = eye;
+    camForward_ = glm::normalize(forward);
+    camRight_ = glm::normalize(right);
+    camUp_ = glm::normalize(up);
 
     tracers_.update(dt, reg);
     ribbons_.update(dt, reg, camPos_);
     hitscan_.update(dt, camForward_);
 
-    // Tesla Cannon: drive a sustained, curved arc from each active EnergyGun
-    // beam to its locked target (server-set BeamState.hitPoint). The local
+    // EnergyGun: drive the Railgun-derived sustained Tesla arc. The local
     // player's arc is offset to a hip-fire muzzle so it doesn't shoot from the
     // camera's centre.
     reg.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
         if (!beam.active || beam.type != WeaponType::EnergyGun)
             return;
         glm::vec3 origin = beam.origin;
-        if (reg.all_of<LocalPlayer>(e))
+        glm::vec3 guidePoint = beam.guidePoint;
+        glm::vec3 hitPoint = beam.hitPoint;
+        if (reg.all_of<LocalPlayer>(e)) {
+            float guideLen = glm::length(beam.guidePoint - beam.origin);
+            if (guideLen < 0.5f)
+                guideLen = glm::length(beam.hitPoint - beam.origin);
+            if (guideLen < 0.5f)
+                guideLen = 140.0f;
             origin = camPos_ + camForward_ * 6.0f + camRight_ * 5.0f - camUp_ * 5.0f;
-        tesla_.drive(static_cast<uint32_t>(e), origin, beam.hitPoint);
+            guidePoint = origin + camForward_ * guideLen;
+            if (beam.locked == 0)
+                hitPoint = guidePoint;
+        }
+        if (glm::length(guidePoint - origin) < 0.5f)
+            guidePoint = hitPoint;
+        energyTesla_.drive(
+            static_cast<uint32_t>(e), origin, guidePoint, hitPoint, beam.locked != 0, beam.lockStrength);
     });
     tesla_.update(dt, camForward_);
+    energyTesla_.update(dt, camForward_);
 
     smoke_.update(dt, reg, camPos_, camForward_);
     explosionVfx_.update(dt, reg, camPos_, camForward_);
@@ -103,23 +124,26 @@ void ParticleSystem::uploadToGpu(SDL_GPUCommandBuffer* cmd)
     renderer_.uploadRibbon(cmd, ribbons_.data(), ribbons_.count());
     renderer_.uploadHitscan(cmd, hitscan_.beamData(), hitscan_.beamCount());
 
-    // Both lightning effects share one arc vertex buffer / draw call. Merge
-    // them, inserting a degenerate join so the two triangle strips don't link.
-    // Clamp to the GPU buffer capacity so an overflow can never read OOB.
-    constexpr uint32_t kMaxArcVerts = 4096;
+    // Railgun and EnergyGun lightning share one arc vertex buffer / draw call.
+    // Merge in priority order: Railgun, legacy arcs, EnergyGun main channels,
+    // then EnergyGun forks/coronas. Truncation drops lower-priority details.
+    constexpr uint32_t kMaxArcVerts = 8192;
     arcScratch_.clear();
-    const ArcVertex* h = hitscan_.arcData();
-    const uint32_t hN = hitscan_.arcCount();
-    arcScratch_.insert(arcScratch_.end(), h, h + hN);
-    const ArcVertex* t = tesla_.arcData();
-    const uint32_t tN = tesla_.arcCount();
-    if (tN > 0) {
+    auto appendArcStream = [&](const ArcVertex* data, uint32_t count) {
+        if (data == nullptr || count == 0 || arcScratch_.size() >= kMaxArcVerts)
+            return;
         if (!arcScratch_.empty()) {
             arcScratch_.push_back(arcScratch_.back()); // degenerate strip restart
-            arcScratch_.push_back(t[0]);
+            arcScratch_.push_back(data[0]);
         }
-        arcScratch_.insert(arcScratch_.end(), t, t + tN);
-    }
+        const size_t remaining = kMaxArcVerts - arcScratch_.size();
+        const size_t n = std::min<size_t>(remaining, count);
+        arcScratch_.insert(arcScratch_.end(), data, data + n);
+    };
+    appendArcStream(hitscan_.arcData(), hitscan_.arcCount());
+    appendArcStream(tesla_.arcData(), tesla_.arcCount());
+    appendArcStream(energyTesla_.mainArcData(), energyTesla_.mainArcCount());
+    appendArcStream(energyTesla_.detailArcData(), energyTesla_.detailArcCount());
     if (arcScratch_.size() > kMaxArcVerts)
         arcScratch_.resize(kMaxArcVerts);
     renderer_.uploadArcs(cmd, arcScratch_.data(), static_cast<uint32_t>(arcScratch_.size()));
@@ -200,6 +224,24 @@ void ParticleSystem::spawnExplosionVfx(glm::vec3 pos, glm::vec3 normal, float bl
 void ParticleSystem::driveGroundFire(entt::entity fieldEntity, glm::vec3 pos, float radius, float remaining, float duration)
 {
     explosionVfx_.driveGroundFire(fieldEntity, pos, radius, remaining, duration);
+}
+
+void ParticleSystem::debugEnergyTeslaArc(glm::vec3 origin,
+                                         glm::vec3 guidePoint,
+                                         glm::vec3 hitPoint,
+                                         bool locked,
+                                         float lockStrength)
+{
+    energyTesla_.debugPulse(origin, guidePoint, hitPoint, locked, lockStrength);
+}
+
+void ParticleSystem::debugEnergyTeslaPreview(glm::vec3 origin,
+                                             glm::vec3 guidePoint,
+                                             glm::vec3 hitPoint,
+                                             bool locked,
+                                             float lockStrength)
+{
+    energyTesla_.debugPreview(origin, guidePoint, hitPoint, locked, lockStrength);
 }
 
 void ParticleSystem::spawnDeathDissolve(const std::vector<glm::vec3>& worldPoints, glm::vec3 center, glm::vec4 color)

@@ -111,7 +111,7 @@ void CharacterRig::verticalBounds(float& outMinY, float& outMaxY) const
     }
 }
 
-bool CharacterRig::loadFromFBX(const std::string& path, const glm::quat& orientationFix, bool flipNormals)
+bool CharacterRig::loadFromFBX(const std::string& path, const glm::quat& orientationFix, bool flipNormals, bool flipUVs)
 {
     impl_->orientationFix = orientationFix;
 
@@ -121,9 +121,13 @@ bool CharacterRig::loadFromFBX(const std::string& path, const glm::quat& orienta
     // transform so the node hierarchy cleanly matches the bone hierarchy.
     importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false);
 
-    const auto flags =
+    auto flags =
         static_cast<unsigned int>(aiProcess_Triangulate | aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace |
                                   aiProcess_JoinIdenticalVertices | aiProcess_LimitBoneWeights);
+    // Match the static model loader's flipUVs convention (glTF vs DCC); needed
+    // so skinned viewmodel meshes sample their textures right-side-up.
+    if (flipUVs)
+        flags |= static_cast<unsigned int>(aiProcess_FlipUVs);
 
     const aiScene* scene = importer.ReadFile(path, flags);
     if (!scene || !scene->mRootNode) {
@@ -209,6 +213,7 @@ bool CharacterRig::loadFromFBX(const std::string& path, const glm::quat& orienta
             continue;
 
         RigMeshData rigMesh;
+        rigMesh.materialIndex = mesh->mMaterialIndex;
         rigMesh.baseVertices.resize(mesh->mNumVertices);
         rigMesh.skinWeights.resize(mesh->mNumVertices);
 

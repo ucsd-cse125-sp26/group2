@@ -9,14 +9,72 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <string>
 
 namespace
 {
-const menu_theme::ThemeSettings k_defaultSettings{};
-menu_theme::ThemeSettings g_settings = k_defaultSettings;
+menu_theme::ThemeSettings makeGameplaySettings()
+{
+    menu_theme::ThemeSettings t;
+    t.accent = ImVec4{0.20f, 0.80f, 0.94f, 1.00f};
+    t.accentHover = ImVec4{0.38f, 0.90f, 1.00f, 1.00f};
+    t.accentActive = ImVec4{0.12f, 0.55f, 0.66f, 1.00f};
+    t.accentText = ImVec4{0.03f, 0.09f, 0.12f, 1.00f};
+    t.text = ImVec4{0.88f, 0.93f, 0.97f, 1.00f};
+    t.textDim = ImVec4{0.55f, 0.62f, 0.70f, 1.00f};
+    t.windowBg = ImVec4{0.05f, 0.07f, 0.10f, 0.97f};
+    t.childBg = ImVec4{0.08f, 0.11f, 0.15f, 0.85f};
+    t.popupBg = ImVec4{0.06f, 0.08f, 0.12f, 0.98f};
+    t.frameBg = ImVec4{0.12f, 0.16f, 0.21f, 1.00f};
+    t.frameHover = ImVec4{0.16f, 0.22f, 0.28f, 1.00f};
+    t.frameActive = ImVec4{0.20f, 0.28f, 0.35f, 1.00f};
+    t.button = ImVec4{0.14f, 0.19f, 0.25f, 1.00f};
+    t.buttonHover = ImVec4{0.20f, 0.42f, 0.50f, 1.00f};
+    t.buttonActive = ImVec4{0.12f, 0.30f, 0.37f, 1.00f};
+    t.header = ImVec4{0.16f, 0.30f, 0.38f, 1.00f};
+    t.border = ImVec4{0.22f, 0.34f, 0.42f, 0.55f};
+    t.danger = ImVec4{0.62f, 0.16f, 0.16f, 1.00f};
+    t.dangerHover = ImVec4{0.78f, 0.20f, 0.20f, 1.00f};
+    t.dangerActive = ImVec4{0.48f, 0.10f, 0.10f, 1.00f};
+    t.titleBg = ImVec4{0.04f, 0.06f, 0.09f, 1.00f};
+    t.titleBgActive = ImVec4{0.07f, 0.11f, 0.15f, 1.00f};
+    t.titleBgCollapsed = ImVec4{0.04f, 0.06f, 0.09f, 0.80f};
+    t.menuBarBg = ImVec4{0.08f, 0.11f, 0.15f, 1.00f};
+    t.scrollbarBg = ImVec4{0.04f, 0.06f, 0.09f, 0.60f};
+    t.tableHeaderBg = ImVec4{0.10f, 0.14f, 0.19f, 1.00f};
+    t.tableBorderLight = ImVec4{0.18f, 0.24f, 0.30f, 0.40f};
+    t.tableRowBgAlt = ImVec4{1.00f, 1.00f, 1.00f, 0.025f};
+    t.textSelectedAlpha = 0.35f;
+
+    t.windowRounding = 6.0f;
+    t.childRounding = 2.0f;
+    t.frameRounding = 2.0f;
+    t.popupRounding = 6.0f;
+    t.grabRounding = 1.0f;
+    t.scrollbarRounding = 2.0f;
+    t.frameBorderSize = 0.0f;
+    t.windowPadding = ImVec2{22.0f, 20.0f};
+    t.framePadding = ImVec2{12.0f, 7.0f};
+    t.itemSpacing = ImVec2{10.0f, 9.0f};
+    t.scrollbarSize = 14.0f;
+    t.panelTitleRuleRounding = 2.0f;
+
+    t.backgroundTop = ImVec4{18.0f / 255.0f, 26.0f / 255.0f, 38.0f / 255.0f, 1.0f};
+    t.backgroundBottom = ImVec4{6.0f / 255.0f, 8.0f / 255.0f, 12.0f / 255.0f, 1.0f};
+    t.backgroundImageAlpha = 205.0f / 255.0f;
+    t.backgroundImageOverlay = ImVec4{6.0f / 255.0f, 8.0f / 255.0f, 12.0f / 255.0f, 120.0f / 255.0f};
+    t.backgroundGlow = ImVec4{22.0f / 255.0f, 92.0f / 255.0f, 112.0f / 255.0f, 70.0f / 255.0f};
+    t.backgroundGlowHeight = 0.45f;
+    return t;
+}
+
+const menu_theme::ThemeSettings k_terminalSettings{};
+const menu_theme::ThemeSettings k_gameplaySettings = makeGameplaySettings();
+menu_theme::ThemeSettings g_settings = k_terminalSettings;
 
 struct BgResources
 {
@@ -26,6 +84,32 @@ struct BgResources
     SDL_GPUTextureSamplerBinding binding{};
 };
 BgResources bgState;
+
+ImFont* g_terminalFont = nullptr;
+
+/// First terminal font file found on disk (relative to SDL base path or CWD).
+ImFont* tryLoadTerminalFont(ImGuiIO& io, const std::string& base)
+{
+    // NOTE: Can add more terminal fonts here if desired, only one will be loaded.
+    const std::string names[] = {"FSEX302.ttf"};
+    for (const std::string& name : names) {
+        std::string p1 = base;
+        p1.append("fonts/").append(name);
+        std::string p2 = base;
+        p2.append("assets/fonts/").append(name);
+        std::string p3 = "assets/fonts/";
+        p3.append(name);
+        const std::string candidates[] = {p1, p2, p3};
+        for (const std::string& path : candidates) {
+            std::error_code ec;
+            if (!std::filesystem::exists(path, ec))
+                continue;
+            if (ImFont* f = io.Fonts->AddFontFromFileTTF(path.c_str(), 20.0f))
+                return f;
+        }
+    }
+    return nullptr;
+}
 
 /// Try the conventional background-image names; first decodable one wins.
 bool tryLoadBackground(SDL_GPUDevice* device)
@@ -59,6 +143,16 @@ ThemeSettings& settings()
     return g_settings;
 }
 
+const ThemeSettings& terminalSettings()
+{
+    return k_terminalSettings;
+}
+
+const ThemeSettings& gameplaySettings()
+{
+    return k_gameplaySettings;
+}
+
 void applyStyle()
 {
     const ThemeSettings& t = g_settings;
@@ -80,6 +174,10 @@ void applyStyle()
     s.ScrollbarSize = t.scrollbarSize;
     s.GrabMinSize = t.grabMinSize;
     s.WindowTitleAlign = t.windowTitleAlign;
+    // Terminal pixel font glyphs sit visually low relative to em box; bias
+    // upward so buttons across all menus read as vertically centered.
+    s.ButtonTextAlign = ImVec2(0.5f, 0.35f);
+    s.SelectableTextAlign = ImVec2(0.0f, 0.35f);
 
     ImVec4* c = s.Colors;
     c[ImGuiCol_Text] = t.text;
@@ -120,7 +218,25 @@ void applyStyle()
     c[ImGuiCol_TableBorderLight] = t.tableBorderLight;
     c[ImGuiCol_TableRowBg] = t.tableRowBg;
     c[ImGuiCol_TableRowBgAlt] = t.tableRowBgAlt;
+    c[ImGuiCol_Tab] = ImVec4(0.18f, 0.18f, 0.17f, 1.0f);
+    c[ImGuiCol_TabHovered] = ImVec4(0.34f, 0.34f, 0.31f, 1.0f);
+    c[ImGuiCol_TabActive] = ImVec4(0.52f, 0.52f, 0.48f, 1.0f);
+    c[ImGuiCol_TabUnfocused] = ImVec4(0.14f, 0.14f, 0.13f, 1.0f);
+    c[ImGuiCol_TabUnfocusedActive] = ImVec4(0.46f, 0.46f, 0.42f, 1.0f);
+    c[ImGuiCol_NavHighlight] = t.accent;
     c[ImGuiCol_TextSelectedBg] = ImVec4(t.accent.x, t.accent.y, t.accent.z, t.textSelectedAlpha);
+}
+
+ScopedTheme::ScopedTheme(const ThemeSettings& theme) : previous(g_settings)
+{
+    g_settings = theme;
+    applyStyle();
+}
+
+ScopedTheme::~ScopedTheme()
+{
+    g_settings = previous;
+    applyStyle();
 }
 
 void loadFonts()
@@ -128,6 +244,8 @@ void loadFonts()
     ImGuiIO& io = ImGui::GetIO();
     const char* base = SDL_GetBasePath();
     const std::string b = base ? base : "";
+
+    ImFont* spaceGrotesk = nullptr;
     const std::string candidates[] = {
         b + "fonts/SpaceGrotesk.ttf",
         b + "assets/fonts/SpaceGrotesk.ttf",
@@ -138,11 +256,37 @@ void loadFonts()
         if (!std::filesystem::exists(path, ec))
             continue; // Pre-check avoids ImGui's missing-file assertion in debug builds.
         if (ImFont* f = io.Fonts->AddFontFromFileTTF(path.c_str(), 20.0f)) {
-            io.FontDefault = f;
-            return;
+            spaceGrotesk = f;
+            break;
         }
     }
-    // No font file present: keep ImGui's built-in font (graceful, no error).
+
+    g_terminalFont = tryLoadTerminalFont(io, b);
+
+    if (g_terminalFont)
+        io.FontDefault = g_terminalFont;
+    else if (spaceGrotesk)
+        io.FontDefault = spaceGrotesk;
+    // Otherwise keep ImGui's built-in font (graceful, no error).
+}
+
+ImFont* terminalFont()
+{
+    return g_terminalFont;
+}
+
+ScopedTerminalFont::ScopedTerminalFont()
+{
+    if (g_terminalFont) {
+        ImGui::PushFont(g_terminalFont);
+        pushed = true;
+    }
+}
+
+ScopedTerminalFont::~ScopedTerminalFont()
+{
+    if (pushed)
+        ImGui::PopFont();
 }
 
 float scaleFor(const ImVec2& display)
@@ -203,6 +347,16 @@ void endPanel()
     ImGui::End();
 }
 
+bool beginScrollBody(const char* id, float footerHeight)
+{
+    return ImGui::BeginChild(id, ImVec2(0.0f, -footerHeight), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
+}
+
+void endScrollBody()
+{
+    ImGui::EndChild();
+}
+
 void heading(const char* text)
 {
     const ThemeSettings& t = g_settings;
@@ -219,6 +373,80 @@ void heading(const char* text)
     ImGui::Dummy(ImVec2(0.0f, t.headingBottomSpacing));
 }
 
+void terminalSection(const char* text)
+{
+    const ThemeSettings& t = g_settings;
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Text, t.textDim);
+    ImGui::Text(":: %s", text);
+    ImGui::PopStyleColor();
+
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float fullW = ImGui::GetContentRegionAvail().x;
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        ImVec2(p.x, p.y + 1.0f), ImVec2(p.x + fullW, p.y + 2.0f), ImGui::GetColorU32(t.border));
+    ImGui::Dummy(ImVec2(0.0f, 7.0f));
+}
+
+bool terminalActionRow(const char* command, const char* description, const ImVec2& size, bool danger)
+{
+    const ThemeSettings& t = g_settings;
+    char label[512];
+    if (description && description[0] != '\0') {
+        std::snprintf(label, sizeof(label), "> %-18s  %s", command, description);
+    } else {
+        std::snprintf(label, sizeof(label), "> %s", command);
+    }
+
+    ImGui::PushStyleColor(ImGuiCol_Button, danger ? t.danger : t.header);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, danger ? t.dangerHover : t.buttonHover);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, danger ? t.dangerActive : t.buttonActive);
+    ImGui::PushStyleColor(ImGuiCol_Text, danger ? ImVec4{1.0f, 0.82f, 0.78f, 1.0f} : t.text);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.35f));
+    ImVec2 rowSize = size;
+    if (rowSize.x <= 0.0f)
+        rowSize.x = ImGui::GetContentRegionAvail().x;
+    // Ensure the button is tall enough for the (possibly scaled) font so text
+    // is not clipped/anchored to the bottom on larger panels.
+    const float minRowHeight = ImGui::GetFontSize() + 16.0f;
+    if (rowSize.y > 0.0f && rowSize.y < minRowHeight)
+        rowSize.y = minRowHeight;
+    const bool pressed = ImGui::Button(label, rowSize);
+    ImGui::PopStyleVar();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(4);
+
+    if (ImGui::IsItemFocused()) {
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImVec2 max = ImGui::GetItemRectMax();
+        ImGui::GetWindowDrawList()->AddRect(min, max, ImGui::GetColorU32(t.accent), 0.0f, 0, 1.0f);
+    }
+
+    return pressed;
+}
+
+void terminalStatusLine(const char* left, const char* right)
+{
+    const ThemeSettings& t = g_settings;
+    ImGui::Spacing();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float fullW = ImGui::GetContentRegionAvail().x;
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        ImVec2(p.x, p.y), ImVec2(p.x + fullW, p.y + 1.0f), ImGui::GetColorU32(t.border));
+    ImGui::Dummy(ImVec2(0.0f, 5.0f));
+
+    ImGui::PushStyleColor(ImGuiCol_Text, t.textDim);
+    ImGui::TextUnformatted(left ? left : "");
+    if (right && right[0] != '\0') {
+        const ImVec2 rightSize = ImGui::CalcTextSize(right);
+        const float x = ImGui::GetCursorPosX() + std::max(0.0f, fullW - rightSize.x);
+        ImGui::SameLine(x);
+        ImGui::TextUnformatted(right);
+    }
+    ImGui::PopStyleColor();
+}
+
 bool accentButton(const char* label, const ImVec2& size)
 {
     const ThemeSettings& t = g_settings;
@@ -226,7 +454,13 @@ bool accentButton(const char* label, const ImVec2& size)
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, t.accentHover);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, t.accentActive);
     ImGui::PushStyleColor(ImGuiCol_Text, t.accentText);
-    const bool pressed = ImGui::Button(label, size);
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.35f));
+    ImVec2 sz = size;
+    const float minH = ImGui::GetFontSize() + 16.0f;
+    if (sz.y > 0.0f && sz.y < minH)
+        sz.y = minH;
+    const bool pressed = ImGui::Button(label, sz);
+    ImGui::PopStyleVar();
     ImGui::PopStyleColor(4);
     return pressed;
 }
@@ -237,7 +471,13 @@ bool dangerButton(const char* label, const ImVec2& size)
     ImGui::PushStyleColor(ImGuiCol_Button, t.danger);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, t.dangerHover);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, t.dangerActive);
-    const bool pressed = ImGui::Button(label, size);
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.35f));
+    ImVec2 sz = size;
+    const float minH = ImGui::GetFontSize() + 16.0f;
+    if (sz.y > 0.0f && sz.y < minH)
+        sz.y = minH;
+    const bool pressed = ImGui::Button(label, sz);
+    ImGui::PopStyleVar();
     ImGui::PopStyleColor(3);
     return pressed;
 }
@@ -249,7 +489,7 @@ void drawBackground(SDL_GPUDevice* device)
     const ThemeSettings& t = g_settings;
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
 
-    // Base diagonal gradient: deep navy at the top fading to near-black at the bottom.
+    // Base gradient: almost black, with just enough lift for white panel outlines.
     const ImU32 top = ImGui::ColorConvertFloat4ToU32(t.backgroundTop);
     const ImU32 bottom = ImGui::ColorConvertFloat4ToU32(t.backgroundBottom);
     dl->AddRectFilledMultiColor(ImVec2(0.0f, 0.0f), disp, top, top, bottom, bottom);
@@ -268,18 +508,81 @@ void drawBackground(SDL_GPUDevice* device)
                      ImVec2(0.0f, 0.0f),
                      ImVec2(1.0f, 1.0f),
                      ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, t.backgroundImageAlpha)));
-        // Darken slightly so panel text stays legible over the photo.
+        // Darken heavily so white panel chrome dominates over any loaded image.
         dl->AddRectFilled(ImVec2(0.0f, 0.0f), disp, ImGui::GetColorU32(t.backgroundImageOverlay));
     }
 
-    // Cyan glow band fading down from the top edge for a little depth.
-    dl->AddRectFilledMultiColor(
-        ImVec2(0.0f, 0.0f),
-        ImVec2(disp.x, disp.y * std::clamp(t.backgroundGlowHeight, 0.0f, 1.0f)),
-        ImGui::GetColorU32(t.backgroundGlow),
-        ImGui::GetColorU32(t.backgroundGlow),
-        ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)),
-        ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)));
+    const float glowHeight = std::clamp(t.backgroundGlowHeight, 0.0f, 1.0f);
+    if (glowHeight > 0.0f && t.backgroundGlow.w > 0.0f) {
+        dl->AddRectFilledMultiColor(
+            ImVec2(0.0f, 0.0f),
+            ImVec2(disp.x, disp.y * glowHeight),
+            ImGui::GetColorU32(t.backgroundGlow),
+            ImGui::GetColorU32(t.backgroundGlow),
+            ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)),
+            ImGui::GetColorU32(ImVec4(t.backgroundGlow.x, t.backgroundGlow.y, t.backgroundGlow.z, 0.0f)));
+    }
+
+    // ── Background perspective grid (tweak these) ───────────────────────────
+    // HUD-cyan radial rays + nested rectangles. Drawn behind menu panels.
+    // Opaque dark cyan — mix more black in to dim if too bright, less to brighten.
+    constexpr ImVec4 k_gridColor{0.06f, 0.16f, 0.20f, 1.0f}; // RGBA
+    constexpr float k_gridLineThickness = 5.0f;              // px
+    constexpr int k_gridRadialLines = 24;                    // number of rays from center
+    constexpr int k_gridRings = 6;                           // number of nested rectangles
+    constexpr float k_gridOutermostRingScale = 0.95f;        // fraction of screen the outer ring covers
+    constexpr bool k_gridEnabled = true;
+
+    if (k_gridEnabled) {
+        const ImVec2 vp(disp.x * 0.5f, disp.y * 0.5f);
+        const ImU32 gridColor = ImGui::GetColorU32(k_gridColor);
+        const float maxR = std::sqrt(disp.x * disp.x + disp.y * disp.y);
+
+        // Rays are anchored to the outer ring's perimeter (evenly spaced per
+        // edge) so the rectangles' corners and edge-midpoints all land on a
+        // ray. k_gridRadialLines is rounded down to a multiple of 4.
+        const int perEdge = std::max(1, k_gridRadialLines / 4);
+        const float halfW = disp.x * k_gridOutermostRingScale * 0.5f;
+        const float halfH = disp.y * k_gridOutermostRingScale * 0.5f;
+        const ImVec2 corners[4] = {
+            {vp.x + halfW, vp.y - halfH}, // top-right
+            {vp.x + halfW, vp.y + halfH}, // bottom-right
+            {vp.x - halfW, vp.y + halfH}, // bottom-left
+            {vp.x - halfW, vp.y - halfH}, // top-left
+        };
+        for (int e = 0; e < 4; ++e) {
+            const ImVec2 a = corners[e];
+            const ImVec2 b = corners[(e + 1) % 4];
+            for (int j = 0; j < perEdge; ++j) {
+                const float tt = static_cast<float>(j) / static_cast<float>(perEdge);
+                const ImVec2 p{a.x + (b.x - a.x) * tt, a.y + (b.y - a.y) * tt};
+                const float dx = p.x - vp.x;
+                const float dy = p.y - vp.y;
+                const float len = std::sqrt(dx * dx + dy * dy);
+                if (len <= 0.0f)
+                    continue;
+                const ImVec2 end{vp.x + dx / len * maxR, vp.y + dy / len * maxR};
+                dl->AddLine(vp, end, gridColor, k_gridLineThickness);
+            }
+        }
+
+        for (int i = 1; i <= k_gridRings; ++i) {
+            const float t01 = static_cast<float>(i) / static_cast<float>(k_gridRings);
+            const float w = disp.x * t01 * k_gridOutermostRingScale;
+            const float h = disp.y * t01 * k_gridOutermostRingScale;
+            dl->AddRect(ImVec2(vp.x - w * 0.5f, vp.y - h * 0.5f),
+                        ImVec2(vp.x + w * 0.5f, vp.y + h * 0.5f),
+                        gridColor,
+                        0.0f,
+                        0,
+                        k_gridLineThickness);
+        }
+    }
+
+    const ImU32 scanline = ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.025f));
+    for (float y = 0.0f; y < disp.y; y += 8.0f) {
+        dl->AddLine(ImVec2(0.0f, y), ImVec2(disp.x, y), scanline);
+    }
 }
 
 void buildTweaker(bool* open)
@@ -306,7 +609,7 @@ void buildTweaker(bool* open)
     };
 
     if (ImGui::Button("Reset to defaults")) {
-        t = k_defaultSettings;
+        t = k_terminalSettings;
         changed = true;
     }
     ImGui::SameLine();

@@ -20,9 +20,12 @@ struct BeamState
     bool active{false};                     ///< True while the beam is firing.
     uint8_t _pad[3]{};                      ///< Padding for alignment.
     WeaponType type{WeaponType::EnergyGun}; ///< Weapon type (selects colour / VFX).
-    uint8_t _pad2[3]{};                     ///< Padding for alignment.
+    uint8_t locked{0};                      ///< True when the energy beam is damaging a locked target.
+    uint8_t _pad2[2]{};                     ///< Padding for alignment.
+    float lockStrength{0.0f};               ///< 0..1 visual ramp for Tesla arc attachment.
     glm::vec3 origin{0.0f};                 ///< World-space beam start (eye position).
     glm::vec3 hitPoint{0.0f};               ///< World-space beam end (hit or max range).
+    glm::vec3 guidePoint{0.0f};             ///< Straight-ahead endpoint used before arcing toward a target.
 };
 
 static_assert(std::is_trivially_copyable_v<BeamState>,

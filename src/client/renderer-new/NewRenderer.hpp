@@ -57,8 +57,8 @@ struct LightUBO
     uint32_t numPointLights = 0;
     uint32_t numMovingPointLights = 0;
     uint32_t numSpotLights = 0;
-    float pointLightFarPlane = 7500.0f;
-    float pointLightNearPlane = 1.0f;
+    float pointLightFarPlane = 4000.0f;
+    float pointLightNearPlane = 5.0f;
     uint32_t _pad0[3];
     PointLight pointLights[MAX_POINT_LIGHTS];
     PointLight movingPointLights[MAX_MOVING_POINT_LIGHTS];
@@ -343,6 +343,24 @@ public:
     bool setRig(const std::vector<RigMeshSource>& meshes, int numJoints);
 
     void setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
+
+    /// @brief Install the animated first-person weapon viewmodel rig (separate
+    /// from the player skinned rig).  Call once after the viewmodel GLB loads.
+    bool setViewmodelRig(const std::vector<RigMeshSource>& meshes, int numJoints);
+
+    /// @brief Per-frame palette + instance for the animated weapon viewmodel.
+    /// Drawn on top of the scene (like the static weapon viewmodel).
+    void setViewmodelFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
+
+    /// @brief Bind the per-mesh diffuse textures of a loaded model instance to the
+    /// animated weapon viewmodel (so the skinned gun renders textured).
+    void setViewmodelTexture(int modelInstanceIndex);
+
+    /// @brief First-person arms (hands) rig — a second skinned viewmodel rig
+    /// driven by the same clips as the gun so the hands hold the weapon.
+    bool setViewmodelArmsRig(const std::vector<RigMeshSource>& meshes, int numJoints);
+    void setViewmodelArmsFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
+    void setViewmodelArmsTexture(int modelInstanceIndex);
     // ─── Public settings members (mutable directly from Game / debug UI) ─────
     //
     // The legacy renderer exposed these as direct member access.  Keep the
@@ -388,9 +406,9 @@ private:
 
     bool createGeometryPipeline();
     SDL_GPUGraphicsPipeline* createDepthPipeline(const SDL_GPURasterizerState& rasterizer_state) const;
-    bool createDepthRes0Pipeline();
-    bool createDepthRes1Pipeline();
-    bool createDepthRes2Pipeline();
+    bool createDepthRes0Pipeline(bool reverseZ);
+    bool createDepthRes1Pipeline(bool reverseZ);
+    bool createDepthRes2Pipeline(bool reverseZ);
     bool createHudPipeline();
     bool createFxaaPipeline();
     bool createTonemapPipeline();
@@ -416,7 +434,8 @@ private:
                          bool staticGeometry,
                          bool entityGeometry,
                          bool skinnedGeometry,
-                         PointLightType lightType);
+                         PointLightType lightType,
+                         bool cullByCamera = true);
 
     void onFirstFrame(SDL_GPUCommandBuffer* cmd);
 
@@ -532,6 +551,14 @@ private:
     std::string pendingScreenshotPath_;
     // Skinned-character subsystem (see SkinnedRenderer.hpp) ──────────────────
     SkinnedRenderer skinnedRenderer_;
+
+    // Animated first-person weapon viewmodel — own rig + palette, drawn on top.
+    SkinnedRenderer viewmodelSkinned_;
+    // First-person arms (hands) — second skinned viewmodel rig, same clips.
+    SkinnedRenderer viewmodelArmsSkinned_;
+    // Neutral 1x1 fallback bound when a viewmodel mesh has no diffuse texture
+    // so the previously equipped weapon's texture doesn't bleed onto it.
+    SDL_GPUTexture* viewmodelFallbackTex_ = nullptr;
 
     // Telemetry counters (filled by drawFrame) ────────────────────────────────
     float lastAcquireMs_ = 0.0f;

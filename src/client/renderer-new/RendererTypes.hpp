@@ -168,4 +168,5 @@ struct RigMeshSource
     std::vector<ModelVertex> bindPoseVertices; ///< Bind-pose vertices (never deformed CPU-side).
     std::vector<BoneInfluence> boneInfluences; ///< Parallel to `bindPoseVertices`.  Must be same size.
     std::vector<uint32_t> indices;             ///< Triangle list (3 indices per triangle).
+    uint32_t materialIndex = 0;                ///< Source material index — picks this mesh's per-mesh diffuse texture.
 };

@@ -55,11 +55,11 @@ SDL_GPUColorTargetInfo makeColorTargetLoad(SDL_GPUTexture* texture)
     return target;
 }
 
-SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture, Uint8 layer, bool store)
+SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture, Uint8 layer, bool store,bool reverseZ)
 {
     SDL_GPUDepthStencilTargetInfo target{};
     target.texture = texture;
-    target.clear_depth = 1.0f;
+    target.clear_depth = reverseZ ? 0.0f : 1.0f;
     target.load_op = SDL_GPU_LOADOP_CLEAR;
     target.store_op = store ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
     target.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
@@ -193,7 +193,7 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device, Pipe
     pipelineInfo.target_info.has_depth_stencil_target = pipelineDesc.depthTest || pipelineDesc.depthWrite;
     pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
 
-    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pipelineInfo.depth_stencil_state.compare_op = pipelineDesc.reverseZ ?SDL_GPU_COMPAREOP_GREATER : SDL_GPU_COMPAREOP_LESS;
     pipelineInfo.depth_stencil_state.enable_depth_test = pipelineDesc.depthTest;
     pipelineInfo.depth_stencil_state.enable_depth_write = pipelineDesc.depthWrite;
 
@@ -554,7 +554,7 @@ SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device)
     return SDL_CreateGPUSampler(device, &samplerInfo);
 }
 
-SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device, SDL_GPUFilter filterMode)
+SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device, SDL_GPUFilter filterMode,bool reverseZ)
 {
     SDL_GPUSamplerCreateInfo samplerInfo{};
     samplerInfo.min_filter = filterMode;
@@ -565,7 +565,7 @@ SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device, SDL_GPUFilt
     samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 
     samplerInfo.enable_compare = true;
-    samplerInfo.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+    samplerInfo.compare_op = reverseZ ? SDL_GPU_COMPAREOP_GREATER: SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
 
     return SDL_CreateGPUSampler(device, &samplerInfo);
 }

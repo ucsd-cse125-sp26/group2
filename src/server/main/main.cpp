@@ -166,6 +166,12 @@ void closeCsv()
 /// @brief Server entry point -- initialises SDL/NET, runs the game loop, and cleans up.
 int main(int argc, char* argv[])
 {
+    // Disable CRT stdio buffering so the hosted-client parent (which reads our
+    // stdout via a pipe to wait for "READY <port>") sees writes immediately
+    // instead of stalling in a fully-buffered FILE* when stdout isn't a TTY.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
+
     // Setup argparse
     argparse::ArgumentParser program("group2_server");
     program.add_argument("--address").help("Address to listen on for game clients (default: 127.0.0.1)");

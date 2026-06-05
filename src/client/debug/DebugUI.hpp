@@ -429,5 +429,12 @@ private:
 
     // Particle UI state
     float particleSpawnDist_ = 200.f; ///< Units ahead of camera to spawn effects.
+    bool energyTeslaPreviewLive_ = false;
+    bool energyTeslaPreviewLocked_ = true;
+    float energyTeslaGuideDist_ = 200.f;
+    float energyTeslaEndpointForward_ = 136.f;
+    float energyTeslaEndpointRight_ = 95.f;
+    float energyTeslaEndpointUp_ = 32.f;
+    float energyTeslaPreviewLockStrength_ = 1.f;
     bool showParticleWindow_ = false;
 };
