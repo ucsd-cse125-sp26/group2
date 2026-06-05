@@ -189,8 +189,8 @@ int main(int argc, char* argv[])
         .help("Maximum accepted players, clamped to 2..128 (default: config global-discovery.max-players)");
     program.add_argument("--powerup-initial-spawn-seconds")
         .scan<'g', float>()
-        .default_value(240.0f)
-        .help("Seconds before powerups first appear (default: 240)");
+        .default_value(60.0f)
+        .help("Seconds before powerups first appear (default: 60)");
     program.add_argument("--powerup-respawn-seconds")
         .scan<'g', float>()
         .default_value(30.0f)
