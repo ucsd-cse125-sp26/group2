@@ -5,13 +5,16 @@
 
 #include "ecs/components/BeamState.hpp"
 #include "ecs/components/LocalPlayer.hpp"
+#include "ecs/components/Position.hpp"
 #include "ecs/components/RibbonEmitter.hpp"
 #include "ecs/components/TracerEmitter.hpp"
+#include "ecs/components/Velocity.hpp"
 #include "ecs/components/WeaponState.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
 
 // init / quit
 
@@ -107,6 +110,7 @@ void ParticleSystem::update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec
     tesla_.update(dt, camForward_);
     energyTesla_.update(dt, camForward_);
 
+    driveRocketSmokeTrails(dt, reg);
     smoke_.update(dt, reg, camPos_, camForward_);
     explosionVfx_.update(dt, reg, camPos_, camForward_);
     impact_.update(dt);
@@ -115,6 +119,42 @@ void ParticleSystem::update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec
 
     // Clear SDF queues for this frame (re-filled by drawWorldText/drawScreenText calls)
     sdf_.clear();
+}
+
+void ParticleSystem::driveRocketSmokeTrails(float dt, Registry& reg)
+{
+    constexpr float k_emitRate = 28.0f;
+    constexpr float k_emitInterval = 1.0f / k_emitRate;
+    constexpr float k_trailBackOffset = 34.0f;
+    constexpr float k_spawnRadius = 5.0f;
+
+    std::vector<entt::entity> liveRockets;
+    liveRockets.reserve(rocketSmokeAccumulators_.size());
+
+    reg.view<Position, Velocity, Projectile>().each(
+        [&](entt::entity e, const Position& pos, const Velocity& vel, const Projectile& projectile) {
+            if (projectile.type != WeaponType::Rocket)
+                return;
+
+            liveRockets.push_back(e);
+            float& accumulator = rocketSmokeAccumulators_[e];
+            accumulator += dt;
+
+            const float speedSq = glm::dot(vel.value, vel.value);
+            const glm::vec3 direction = speedSq > 0.001f ? vel.value / std::sqrt(speedSq) : glm::vec3{0.0f, 0.0f, 1.0f};
+            const glm::vec3 trailPos = pos.value - direction * k_trailBackOffset;
+            while (accumulator >= k_emitInterval) {
+                accumulator -= k_emitInterval;
+                smoke_.spawnTrailPuff(trailPos, k_spawnRadius);
+            }
+        });
+
+    for (auto it = rocketSmokeAccumulators_.begin(); it != rocketSmokeAccumulators_.end();) {
+        if (std::find(liveRockets.begin(), liveRockets.end(), it->first) == liveRockets.end())
+            it = rocketSmokeAccumulators_.erase(it);
+        else
+            ++it;
+    }
 }
 
 // uploadToGpu (copy pass, before render pass)

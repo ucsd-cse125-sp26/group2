@@ -23,6 +23,7 @@
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <string_view>
+#include <unordered_map>
 
 /// @brief Top-level particle system orchestrator.
 ///
@@ -176,6 +177,9 @@ public:
     [[nodiscard]] const SdfAtlas& sdfAtlas() const { return sdf_.atlas(); }
 
 private:
+    /// @brief Emit short smoke puffs behind live rocket projectile entities.
+    void driveRocketSmokeTrails(float dt, Registry& reg);
+
     ParticleRenderer renderer_;
     TracerEffect tracers_;
     RibbonTrail ribbons_;
@@ -200,6 +204,8 @@ private:
     float screenH_ = 720.f;
 
     float frameDt_ = 0.016f; // last dt, needed by spawn callbacks
+
+    std::unordered_map<entt::entity, float> rocketSmokeAccumulators_;
 
     // Scratch buffer: railgun + legacy tesla + energy tesla arc verts merged for a single upload.
     std::vector<ArcVertex> arcScratch_;
