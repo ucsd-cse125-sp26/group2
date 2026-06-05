@@ -497,7 +497,7 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
     //   gl_Position   = viewProjection * worldPos;
 }
 
-void SkinnedRenderer::drawChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* /*cmd*/)
+void SkinnedRenderer::drawChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
     if (!rigInstalled_ || !chamsPipeline_ || chamsIndices_.empty() || !palettesSsboInfo_.ssbo_ ||
         !instancesSsboInfo_.ssbo_)
@@ -506,6 +506,10 @@ void SkinnedRenderer::drawChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuf
     }
 
     SDL_BindGPUGraphicsPipeline(renderPass, chamsPipeline_);
+
+    // Wallhack chams: vivid red, boosted to survive HDR tone-mapping.
+    const glm::vec4 chamsTint{0.95f, 0.04f, 0.04f, 1.0f};
+    SDL_PushGPUFragmentUniformData(cmd, 0, &chamsTint, sizeof(chamsTint));
 
     // Same view-projection UBO the geometry pass already pushed at vertex slot 0.
     SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
@@ -530,7 +534,7 @@ void SkinnedRenderer::drawChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuf
     }
 }
 
-void SkinnedRenderer::drawKillcamHighlight(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* /*cmd*/)
+void SkinnedRenderer::drawKillcamHighlight(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
     if (!rigInstalled_ || !killcamHighlightPipeline_ || killcamHighlightIndices_.empty() || !palettesSsboInfo_.ssbo_ ||
         !instancesSsboInfo_.ssbo_)
@@ -539,6 +543,9 @@ void SkinnedRenderer::drawKillcamHighlight(SDL_GPURenderPass* renderPass, SDL_GP
     }
 
     SDL_BindGPUGraphicsPipeline(renderPass, killcamHighlightPipeline_);
+
+    const glm::vec4 highlightTint{0.95f, 0.04f, 0.04f, 1.0f};
+    SDL_PushGPUFragmentUniformData(cmd, 0, &highlightTint, sizeof(highlightTint));
 
     SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
@@ -725,6 +732,7 @@ bool SkinnedRenderer::createChamsPipeline()
     Boilerplate::ShaderInfo fragmentShaderInfo{};
     fragmentShaderInfo.path = "shaders-new/chams.frag";
     fragmentShaderInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShaderInfo.uniformBufferCount = 1;
 
     SDL_GPUShader* vertexShader = Boilerplate::loadShader(device_, vertexShaderInfo, shaderFormat_);
     SDL_GPUShader* fragmentShader = Boilerplate::loadShader(device_, fragmentShaderInfo, shaderFormat_);
@@ -804,6 +812,7 @@ bool SkinnedRenderer::createKillcamHighlightPipeline()
     Boilerplate::ShaderInfo fragmentShaderInfo{};
     fragmentShaderInfo.path = "shaders-new/chams.frag";
     fragmentShaderInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShaderInfo.uniformBufferCount = 1;
 
     SDL_GPUShader* vertexShader = Boilerplate::loadShader(device_, vertexShaderInfo, shaderFormat_);
     SDL_GPUShader* fragmentShader = Boilerplate::loadShader(device_, fragmentShaderInfo, shaderFormat_);
