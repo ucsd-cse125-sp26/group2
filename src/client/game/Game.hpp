@@ -781,8 +781,9 @@ private:
     [[nodiscard]] glm::vec3 muzzleFlashOrigin(const glm::vec3& fallback) const
     {
         constexpr float k_muzzleFlashForward = 10.0f;
+        constexpr float k_muzzleMarkerLightBack = 18.0f;
         if (cachedMuzzleValid_)
-            return cachedMuzzleWorld_;
+            return cachedMuzzleWorld_ - cachedCamFwd_ * k_muzzleMarkerLightBack;
         return cachedRightPalmValid_ ? cachedRightPalmWorld_ + cachedCamFwd_ * k_muzzleFlashForward : fallback;
     }
 
@@ -801,7 +802,7 @@ private:
     std::vector<TransientVfxLight> transientVfxLights_;
 
     /// @brief Spawn a transient muzzle-flash point light at @p pos.
-    void spawnMuzzleFlashLight(const glm::vec3& pos);
+    void spawnMuzzleFlashLight(const glm::vec3& pos, WeaponType weaponType);
 
     /// @brief Spawn a transient explosion point light at @p pos.
     void spawnExplosionFlashLight(const glm::vec3& pos, WeaponType weaponType, float radius);
