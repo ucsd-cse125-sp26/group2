@@ -2238,6 +2238,39 @@ void Game::adoptGamepad(SDL_JoystickID id)
     }
 }
 
+glm::vec3 Game::muzzleFlashOrigin(const glm::vec3& fallback) const
+{
+    constexpr float k_muzzleFlashForward = 10.0f;
+    glm::vec3 muzzleOrigin = fallback;
+    if (cachedMuzzleValid_) {
+        muzzleOrigin = cachedMuzzleWorld_;
+    } else if (cachedRightPalmValid_) {
+        muzzleOrigin = cachedRightPalmWorld_ + cachedCamFwd_ * k_muzzleFlashForward;
+    }
+    return muzzleFlashLightPosition(muzzleOrigin);
+}
+
+glm::vec3 Game::muzzleFlashLightPosition(const glm::vec3& muzzleOrigin) const
+{
+    constexpr glm::vec3 k_worldUp{0.0f, 1.0f, 0.0f};
+    glm::vec3 rightRaw = glm::cross(cachedCamFwd_, k_worldUp);
+    const float rightLen = glm::length(rightRaw);
+    glm::vec3 right = (rightLen > 1e-4f) ? (rightRaw / rightLen) : glm::vec3{1.0f, 0.0f, 0.0f};
+    glm::vec3 up = glm::normalize(glm::cross(right, cachedCamFwd_));
+
+    if (std::abs(currentCameraRoll_) > 0.001f) {
+        const float cosR = std::cos(currentCameraRoll_);
+        const float sinR = std::sin(currentCameraRoll_);
+        const glm::vec3 rolledRight = right * cosR + up * sinR;
+        const glm::vec3 rolledUp = up * cosR - right * sinR;
+        right = rolledRight;
+        up = rolledUp;
+    }
+
+    return muzzleOrigin + cachedCamFwd_ * muzzleFlashLightOffset_.x + up * muzzleFlashLightOffset_.y +
+           right * muzzleFlashLightOffset_.z;
+}
+
 void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
 {
     // Respect the "Muzzle Flash" setting — skip spawning when disabled. Lights
@@ -5584,6 +5617,37 @@ SDL_AppResult Game::iterate()
                 vmYawOffset = vp.yawOffset;
                 vmPitchOffset = vp.pitchOffset;
                 vmRollOffset = vp.rollOffset;
+            }
+
+            ImGui::SeparatorText("Muzzle Flash Light");
+            ImGui::DragFloat("Light Forward", &muzzleFlashLightOffset_.x, 0.25f, -100.0f, 100.0f, "%.2f");
+            ImGui::DragFloat("Light Up", &muzzleFlashLightOffset_.y, 0.25f, -100.0f, 100.0f, "%.2f");
+            ImGui::DragFloat("Light Right", &muzzleFlashLightOffset_.z, 0.25f, -100.0f, 100.0f, "%.2f");
+            if (ImGui::Button("Reset muzzle light offset"))
+                muzzleFlashLightOffset_ = glm::vec3{0.0f};
+            ImGui::Text("Muzzle marker: %s", cachedMuzzleValid_ ? "yes" : "no");
+            if (cachedMuzzleValid_) {
+                const glm::vec3 lightPos = muzzleFlashLightPosition(cachedMuzzleWorld_);
+                ImGui::Text("Muzzle: (%.1f, %.1f, %.1f)",
+                            static_cast<double>(cachedMuzzleWorld_.x),
+                            static_cast<double>(cachedMuzzleWorld_.y),
+                            static_cast<double>(cachedMuzzleWorld_.z));
+                ImGui::Text("Light:  (%.1f, %.1f, %.1f)",
+                            static_cast<double>(lightPos.x),
+                            static_cast<double>(lightPos.y),
+                            static_cast<double>(lightPos.z));
+            } else if (cachedRightPalmValid_) {
+                constexpr float k_muzzleFlashForward = 10.0f;
+                const glm::vec3 fallbackMuzzle = cachedRightPalmWorld_ + cachedCamFwd_ * k_muzzleFlashForward;
+                const glm::vec3 lightPos = muzzleFlashLightPosition(fallbackMuzzle);
+                ImGui::Text("Fallback muzzle: (%.1f, %.1f, %.1f)",
+                            static_cast<double>(fallbackMuzzle.x),
+                            static_cast<double>(fallbackMuzzle.y),
+                            static_cast<double>(fallbackMuzzle.z));
+                ImGui::Text("Light:           (%.1f, %.1f, %.1f)",
+                            static_cast<double>(lightPos.x),
+                            static_cast<double>(lightPos.y),
+                            static_cast<double>(lightPos.z));
             }
 
             ImGui::SeparatorText("Sway");

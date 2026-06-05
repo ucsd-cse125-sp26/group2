@@ -778,13 +778,15 @@ private:
     ///
     /// Prefer the weapon model's tagged muzzle marker (`is_muzzle` / socket_muzzle)
     /// when available; fall back to the old palm-derived point for untagged guns.
-    [[nodiscard]] glm::vec3 muzzleFlashOrigin(const glm::vec3& fallback) const
-    {
-        constexpr float k_muzzleFlashForward = 10.0f;
-        if (cachedMuzzleValid_)
-            return cachedMuzzleWorld_;
-        return cachedRightPalmValid_ ? cachedRightPalmWorld_ + cachedCamFwd_ * k_muzzleFlashForward : fallback;
-    }
+    [[nodiscard]] glm::vec3 muzzleFlashOrigin(const glm::vec3& fallback) const;
+
+    /// @brief Offset a muzzle point to the actual transient point-light position.
+    ///
+    /// `muzzleFlashLightOffset_` uses camera/viewmodel basis units:
+    /// x = forward, y = up, z = right.
+    [[nodiscard]] glm::vec3 muzzleFlashLightPosition(const glm::vec3& muzzleOrigin) const;
+
+    glm::vec3 muzzleFlashLightOffset_{-12.25f, 0.0f, -10.0f}; ///< Tunable point-light offset from the muzzle (fwd/up/right).
 
     // Transient VFX point lights. Muzzle flashes and explosions both feed this
     // short-lived list, then iterate() fades the survivors into the renderer's
