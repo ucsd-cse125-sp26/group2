@@ -6083,6 +6083,7 @@ SDL_AppResult Game::iterate()
             const GunInstance& gun = getEquippedGun(ws);
             hudState.primaryWeaponId = static_cast<int>(getSlot(ws, WeaponSlot::PRIMARY).type);
             hudState.secondarySlotWeaponId = static_cast<int>(getSlot(ws, WeaponSlot::SECONDARY).type);
+            hudState.activeWeaponSlot = ws.current == WeaponSlot::SECONDARY ? 1 : 0;
             hudState.ammoClip = gun.currentMagAmmo;
             hudState.ammoReserve = gun.totalAmmo;
             hudState.weaponId = static_cast<int>(gun.type);

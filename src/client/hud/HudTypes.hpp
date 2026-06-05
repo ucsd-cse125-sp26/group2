@@ -372,6 +372,7 @@ struct HudGameState
     int weaponId = 0;
     int primaryWeaponId = 0;   ///< WeaponType ordinal in the primary slot.
     int secondarySlotWeaponId = 2; ///< WeaponType ordinal in the secondary slot.
+    int activeWeaponSlot = 0;      ///< 0 = primary, 1 = secondary.
     bool railgunScoped = false;    ///< True while the local player holds right click with the railgun equipped.
     float railgunChargeTime = 0.f; ///< Current GunInstance::chargeTime for the equipped railgun.
     float roundTimeRemaining = 0.f;

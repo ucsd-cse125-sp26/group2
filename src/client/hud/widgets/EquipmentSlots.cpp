@@ -211,7 +211,11 @@ void drawAbilityElement(HudContext& ctx,
     const Rect bar = tunedRect(barBaseX, barBaseY, barW, barH, tuning.bar, uiScale);
 
     ctx.svg(HudIcon::AbilityIconFrame, frame.x, frame.y, frame.w, frame.h);
-    ctx.svgFlipped(abilityIcon, icon.x, icon.y, icon.w, icon.h, tuning.flipIconX, tuning.flipIconY);
+    if (abilityIcon != HudIcon::NoIcon && hasAbility && charge >= 0.999f)
+        ctx.svgMaskFlipped(abilityIcon, icon.x, icon.y, icon.w, icon.h, tuning.flipIconX, tuning.flipIconY, voidfall::k_cyan);
+    else
+        ctx.svgMaskFlipped(
+            abilityIcon, icon.x, icon.y, icon.w, icon.h, tuning.flipIconX, tuning.flipIconY, voidfall::k_textDim);
     drawCooldownBar(ctx, bar, side, charge, hasAbility, tuning.flipBarX, tuning.flipBarY);
 
     const float baseFs = bindingFontSize * uiScale;
