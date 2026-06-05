@@ -36,7 +36,7 @@ enum class SfxId : uint8_t
     HEExplosion,       ///< Weapons/Grenade/Explosion_HE.wav
 
     // Player feedback
-    DamageTaken, ///< Voicy_roblox ooof.mp3
+    DamageTaken, ///< damage.mp3
     ArmorBreak,  ///< Voicy_Fortnite Shield Break.mp3
     Death,       ///< Voicy_Minecraft Death Sound.mp3
     Respawn,     ///< Voicy_totem of undying sfx .mp3
@@ -98,6 +98,7 @@ enum class SfxId : uint8_t
     VoiceStop,
     MenuMusic, ///< Music/Gamesong1.wav
     GameMusic, ///< Music/Gamesong2.wav
+    GameMusicLoop, ///< Music/Gamesong2_Main2.wav
 
     _Count
 };
@@ -274,6 +275,8 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "MenuMusic";
     case SfxId::GameMusic:
         return "GameMusic";
+    case SfxId::GameMusicLoop:
+        return "GameMusicLoop";
     default:
         return "Unknown";
     }
