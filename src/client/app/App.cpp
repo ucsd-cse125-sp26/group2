@@ -158,6 +158,7 @@ bool App::init()
     if (!sfxSystem.init()) {
         SDL_Log("[client] SfxSystem init failed (non-fatal — music and sound effects disabled)");
     }
+    menu_theme::setSfxSystem(&sfxSystem);
     applyAudioSettings();
     previousAudioCounter_ = SDL_GetPerformanceCounter();
 
@@ -311,6 +312,7 @@ SDL_AppResult App::iterate()
             } else {
                 SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
                 currentServerName = config.serverName;
+                menu_theme::playUiSound(UiSoundAction::Success);
             }
         }
 
@@ -320,6 +322,7 @@ SDL_AppResult App::iterate()
         }
 
         if (mainMenu->consumeGoToLobbyRequest() && (hostedServer.isRunning() || client.isConnected())) {
+            menu_theme::playUiSound(UiSoundAction::Success);
             transitionTo(Screen::Lobby);
         }
         break;
@@ -830,6 +833,7 @@ void App::pollJoinAttempt()
 
     SDL_Log("Successfully connected to server at %s:%d", result.serverIp.c_str(), result.serverPort);
     currentServerName = result.serverName.empty() ? result.serverIp : result.serverName;
+    menu_theme::playUiSound(UiSoundAction::Success);
     transitionTo(Screen::Lobby);
 }
 

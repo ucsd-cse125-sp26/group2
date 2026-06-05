@@ -4,6 +4,7 @@
 #include "MenuTheme.hpp"
 
 #include "renderer-new/Boilerplate.hpp"
+#include "sfx/SfxSystem.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
@@ -14,6 +15,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace
 {
@@ -75,6 +77,11 @@ menu_theme::ThemeSettings makeGameplaySettings()
 const menu_theme::ThemeSettings k_terminalSettings{};
 const menu_theme::ThemeSettings k_gameplaySettings = makeGameplaySettings();
 menu_theme::ThemeSettings g_settings = k_terminalSettings;
+SfxSystem* g_sfxSystem = nullptr;
+std::string g_lastHoveredWidget;
+int g_uiSoundFrame = -1;
+int g_hoverScanFrame = -1;
+bool g_hoveredWidgetThisFrame = false;
 
 struct BgResources
 {
@@ -133,6 +140,40 @@ bool tryLoadBackground(SDL_GPUDevice* device)
     }
     bgState.binding = Boilerplate::makeTextureSamplerBinding(bgState.tex, bgState.sampler);
     return true;
+}
+
+UiSoundAction clickActionForLabel(std::string_view label, bool danger) noexcept
+{
+    if (label.find("BACK") != std::string_view::npos || label.find("Back") != std::string_view::npos ||
+        label.find("CANCEL") != std::string_view::npos || label.find("Cancel") != std::string_view::npos)
+    {
+        return UiSoundAction::Back;
+    }
+    return danger ? UiSoundAction::Confirm : UiSoundAction::Confirm;
+}
+
+void playWidgetFeedback(std::string_view label, bool pressed, bool danger = false)
+{
+    const int frame = ImGui::GetFrameCount();
+    if (g_hoverScanFrame != frame) {
+        if (!g_hoveredWidgetThisFrame)
+            g_lastHoveredWidget.clear();
+        g_hoverScanFrame = frame;
+        g_hoveredWidgetThisFrame = false;
+    }
+
+    if (pressed) {
+        menu_theme::playUiSound(clickActionForLabel(label, danger));
+        g_lastHoveredWidget.assign(label);
+        g_hoveredWidgetThisFrame = true;
+        return;
+    }
+    const bool hovered = ImGui::IsItemHovered();
+    g_hoveredWidgetThisFrame = g_hoveredWidgetThisFrame || hovered;
+    if (hovered && g_lastHoveredWidget != label) {
+        menu_theme::playUiSound(UiSoundAction::Hover);
+        g_lastHoveredWidget.assign(label);
+    }
 }
 } // namespace
 
@@ -225,6 +266,20 @@ void applyStyle()
     c[ImGuiCol_TabUnfocusedActive] = ImVec4(0.46f, 0.46f, 0.42f, 1.0f);
     c[ImGuiCol_NavHighlight] = t.accent;
     c[ImGuiCol_TextSelectedBg] = ImVec4(t.accent.x, t.accent.y, t.accent.z, t.textSelectedAlpha);
+}
+
+void setSfxSystem(SfxSystem* system)
+{
+    g_sfxSystem = system;
+}
+
+void playUiSound(UiSoundAction action, float gain)
+{
+    const int frame = ImGui::GetFrameCount();
+    if (g_uiSoundFrame == frame)
+        return;
+    if (g_sfxSystem && g_sfxSystem->isInitialized())
+        g_uiSoundFrame = g_sfxSystem->playUi(action, gain) != SfxSystem::kInvalidSource ? frame : g_uiSoundFrame;
 }
 
 ScopedTheme::ScopedTheme(const ThemeSettings& theme) : previous(g_settings)
@@ -451,6 +506,7 @@ bool terminalActionRow(const char* command, const char* description, const ImVec
     if (focused)
         dl->AddRect(min, max, ImGui::GetColorU32(t.accent), 0.0f, 0, 1.0f);
 
+    playWidgetFeedback(command ? command : "", pressed, danger);
     return pressed;
 }
 
@@ -488,6 +544,7 @@ bool accentButton(const char* label, const ImVec2& size)
     if (sz.y > 0.0f && sz.y < minH)
         sz.y = minH;
     const bool pressed = ImGui::Button(label, sz);
+    playWidgetFeedback(label ? label : "", pressed);
     ImGui::PopStyleVar();
     ImGui::PopStyleColor(4);
     return pressed;
@@ -505,6 +562,7 @@ bool dangerButton(const char* label, const ImVec2& size)
     if (sz.y > 0.0f && sz.y < minH)
         sz.y = minH;
     const bool pressed = ImGui::Button(label, sz);
+    playWidgetFeedback(label ? label : "", pressed, true);
     ImGui::PopStyleVar();
     ImGui::PopStyleColor(3);
     return pressed;

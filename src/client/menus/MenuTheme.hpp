@@ -6,9 +6,12 @@
 /// from a menu screen (after ImGui::NewFrame()) to paint the responsive backdrop.
 #pragma once
 
+#include "sfx/SfxTypes.hpp"
+
 #include <imgui.h>
 
 struct SDL_GPUDevice;
+class SfxSystem;
 
 namespace menu_theme
 {
@@ -101,6 +104,12 @@ const ThemeSettings& gameplaySettings();
 /// @brief Apply the cohesive white terminal style (colors + rounding + spacing).
 /// @note Call once after ImGui::CreateContext() (and after ImGui::StyleColorsDark()).
 void applyStyle();
+
+/// @brief Attach the shared SFX system used by menu widgets. Passing nullptr disables UI sounds.
+void setSfxSystem(SfxSystem* system);
+
+/// @brief Play a semantic UI sound when an SFX system is attached and initialized.
+void playUiSound(UiSoundAction action, float gain = 1.0f);
 
 /// @brief Temporarily replace the live menu theme and restore it when leaving scope.
 struct ScopedTheme

@@ -18,6 +18,7 @@
 #include <SDL3/SDL.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <span>
@@ -77,6 +78,7 @@ public:
     /// @param gain  Extra volume multiplier (stacks on top of master × category × clip gain).
     void play(SfxId id, float gain = 1.0f);
     SourceHandle play2D(SfxId id, float gain = 1.0f, float priority = 1.0f);
+    SourceHandle playUi(UiSoundAction action, float gain = 1.0f);
     SourceHandle play3D(SfxId id,
                         const glm::vec3& position,
                         const glm::vec3& velocity = glm::vec3{0.0f},
@@ -197,6 +199,8 @@ private:
 
     /// @brief Per-SfxId countdown to next allowed play (seconds remaining).
     std::array<float, static_cast<size_t>(SfxId::_Count)> cooldowns_{};
+    std::array<float, static_cast<size_t>(UiSoundAction::_Count)> uiActionCooldowns_{};
+    std::array<std::size_t, static_cast<size_t>(UiSoundAction::_Count)> uiActionVariantCursors_{};
 
     // --- Client-side state tracking for event detection ---
     float prevHealth_ = 100.0f;

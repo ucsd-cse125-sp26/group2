@@ -255,6 +255,7 @@ SettingsEditorResult SettingsEditor::render(UserSettings& settings, std::string_
     const float footerHeight = 34.0f * uiScale + spacingY * 4.0f + ImGui::GetTextLineHeight();
 
     menu_theme::beginScrollBody("##SettingsBody", footerHeight);
+    const Tab previousTab = activeTab_;
     if (ImGui::BeginTabBar("SettingsTabs")) {
         if (ImGui::BeginTabItem("General")) {
             activeTab_ = Tab::General;
@@ -278,6 +279,8 @@ SettingsEditorResult SettingsEditor::render(UserSettings& settings, std::string_
         }
         ImGui::EndTabBar();
     }
+    if (activeTab_ != previousTab)
+        menu_theme::playUiSound(UiSoundAction::Toggle);
 
     if (!statusMessage_.empty()) {
         ImGui::Spacing();
@@ -394,6 +397,7 @@ void SettingsEditor::apply(UserSettings& settings, std::string_view settingsPath
 
     const bool saved = user_settings::save(std::string(settingsPath), settings);
     statusMessage_ = saved ? "Settings saved." : "Settings could not be saved.";
+    menu_theme::playUiSound(saved ? UiSoundAction::Success : UiSoundAction::Error);
     dirty_ = false;
     originalMusicVolume_ = settings.musicVolume;
     originalSfxVolume_ = settings.sfxVolume;
@@ -436,13 +440,17 @@ void SettingsEditor::renderGeneralTab()
     const float previousFov = draftHorizontalFovDegrees_;
     ImGui::SliderFloat("Horizontal FOV", &draftHorizontalFovDegrees_, k_minFovDegrees, k_maxFovDegrees, "%.0f");
     draftHorizontalFovDegrees_ = std::clamp(draftHorizontalFovDegrees_, k_minFovDegrees, k_maxFovDegrees);
-    if (draftHorizontalFovDegrees_ != previousFov)
+    if (draftHorizontalFovDegrees_ != previousFov) {
         dirty_ = true;
+        menu_theme::playUiSound(UiSoundAction::SliderStep);
+    }
 
     const bool previousMuzzleFlash = draftMuzzleFlashEnabled_;
     ImGui::Checkbox("Muzzle Flash", &draftMuzzleFlashEnabled_);
-    if (draftMuzzleFlashEnabled_ != previousMuzzleFlash)
+    if (draftMuzzleFlashEnabled_ != previousMuzzleFlash) {
         dirty_ = true;
+        menu_theme::playUiSound(UiSoundAction::Toggle);
+    }
 }
 
 void SettingsEditor::renderAudioTab(UserSettings& settings)
@@ -455,6 +463,7 @@ void SettingsEditor::renderAudioTab(UserSettings& settings)
     if (draftMusicVolume_ != previousMusicVolume) {
         dirty_ = true;
         updateLiveAudioSettings(settings);
+        menu_theme::playUiSound(UiSoundAction::SliderStep);
     }
 
     const float previousSfxVolume = draftSfxVolume_;
@@ -463,6 +472,7 @@ void SettingsEditor::renderAudioTab(UserSettings& settings)
     if (draftSfxVolume_ != previousSfxVolume) {
         dirty_ = true;
         updateLiveAudioSettings(settings);
+        menu_theme::playUiSound(UiSoundAction::SliderStep);
     }
 
     ImGui::Spacing();
@@ -471,6 +481,7 @@ void SettingsEditor::renderAudioTab(UserSettings& settings)
     if (changed) {
         dirty_ = true;
         updateLiveAudioSettings(settings);
+        menu_theme::playUiSound(UiSoundAction::Toggle);
     }
 
     const std::vector<AudioDeviceOption> playbackOptions = audioDeviceOptions(false);
@@ -497,8 +508,10 @@ void SettingsEditor::renderKeyboardMouseTab(float uiScale)
     draftMouseSensitivity_ = displayedMouseSensitivity / user_settings::kMouseSensitivityDisplayScale;
     draftMouseSensitivity_ =
         std::clamp(draftMouseSensitivity_, user_settings::kMinMouseSensitivity, user_settings::kMaxMouseSensitivity);
-    if (draftMouseSensitivity_ != previousSensitivity)
+    if (draftMouseSensitivity_ != previousSensitivity) {
         dirty_ = true;
+        menu_theme::playUiSound(UiSoundAction::SliderStep);
+    }
 
     ImGui::Spacing();
     renderBindingsTable(BindingDevice::KeyboardMouse, uiScale);
@@ -517,8 +530,10 @@ void SettingsEditor::renderControllerTab(float uiScale)
                        "%.1f rad/s");
     draftGamepadYawSensitivity_ =
         std::clamp(draftGamepadYawSensitivity_, k_minGamepadSensitivity, k_maxGamepadSensitivity);
-    if (draftGamepadYawSensitivity_ != previousGamepadYawSensitivity)
+    if (draftGamepadYawSensitivity_ != previousGamepadYawSensitivity) {
         dirty_ = true;
+        menu_theme::playUiSound(UiSoundAction::SliderStep);
+    }
 
     const float previousGamepadPitchSensitivity = draftGamepadPitchSensitivity_;
     ImGui::SliderFloat("Vertical Look Sensitivity",
@@ -528,34 +543,44 @@ void SettingsEditor::renderControllerTab(float uiScale)
                        "%.1f rad/s");
     draftGamepadPitchSensitivity_ =
         std::clamp(draftGamepadPitchSensitivity_, k_minGamepadSensitivity, k_maxGamepadSensitivity);
-    if (draftGamepadPitchSensitivity_ != previousGamepadPitchSensitivity)
+    if (draftGamepadPitchSensitivity_ != previousGamepadPitchSensitivity) {
         dirty_ = true;
+        menu_theme::playUiSound(UiSoundAction::SliderStep);
+    }
 
     const float previousGamepadLookDeadzone = draftGamepadLookDeadzone_;
     ImGui::SliderFloat(
         "Right Stick Deadzone", &draftGamepadLookDeadzone_, k_minGamepadLookDeadzone, k_maxGamepadLookDeadzone, "%.2f");
     draftGamepadLookDeadzone_ =
         std::clamp(draftGamepadLookDeadzone_, k_minGamepadLookDeadzone, k_maxGamepadLookDeadzone);
-    if (draftGamepadLookDeadzone_ != previousGamepadLookDeadzone)
+    if (draftGamepadLookDeadzone_ != previousGamepadLookDeadzone) {
         dirty_ = true;
+        menu_theme::playUiSound(UiSoundAction::SliderStep);
+    }
 
     const float previousGamepadMoveDeadzone = draftGamepadMoveDeadzone_;
     ImGui::SliderFloat(
         "Left Stick Deadzone", &draftGamepadMoveDeadzone_, k_minGamepadMoveDeadzone, k_maxGamepadMoveDeadzone, "%.2f");
     draftGamepadMoveDeadzone_ =
         std::clamp(draftGamepadMoveDeadzone_, k_minGamepadMoveDeadzone, k_maxGamepadMoveDeadzone);
-    if (draftGamepadMoveDeadzone_ != previousGamepadMoveDeadzone)
+    if (draftGamepadMoveDeadzone_ != previousGamepadMoveDeadzone) {
         dirty_ = true;
+        menu_theme::playUiSound(UiSoundAction::SliderStep);
+    }
 
     const bool previousGamepadSwapSticks = draftGamepadSwapSticks_;
     ImGui::Checkbox("Swap Sticks (southpaw)", &draftGamepadSwapSticks_);
-    if (draftGamepadSwapSticks_ != previousGamepadSwapSticks)
+    if (draftGamepadSwapSticks_ != previousGamepadSwapSticks) {
         dirty_ = true;
+        menu_theme::playUiSound(UiSoundAction::Toggle);
+    }
 
     const bool previousAimAssistEnabled = draftAimAssistEnabled_;
     ImGui::Checkbox("Aim Assist", &draftAimAssistEnabled_);
-    if (draftAimAssistEnabled_ != previousAimAssistEnabled)
+    if (draftAimAssistEnabled_ != previousAimAssistEnabled) {
         dirty_ = true;
+        menu_theme::playUiSound(UiSoundAction::Toggle);
+    }
 
     const float previousAimAssistStrength = draftAimAssistStrength_;
     ImGui::BeginDisabled(!draftAimAssistEnabled_);
@@ -563,8 +588,10 @@ void SettingsEditor::renderControllerTab(float uiScale)
         "Aim Assist Strength", &draftAimAssistStrength_, k_minAimAssistStrength, k_maxAimAssistStrength, "%.2f");
     ImGui::EndDisabled();
     draftAimAssistStrength_ = std::clamp(draftAimAssistStrength_, k_minAimAssistStrength, k_maxAimAssistStrength);
-    if (draftAimAssistStrength_ != previousAimAssistStrength)
+    if (draftAimAssistStrength_ != previousAimAssistStrength) {
         dirty_ = true;
+        menu_theme::playUiSound(UiSoundAction::SliderStep);
+    }
 
     ImGui::Spacing();
     renderBindingsTable(BindingDevice::Controller, uiScale);
