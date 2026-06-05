@@ -13,9 +13,10 @@
 
 #include <algorithm>
 
-bool VoiceChatSystem::init()
+bool VoiceChatSystem::init(std::string_view recordingDeviceName)
 {
-    const bool ok = capture_.init();
+    captureInitialized_ = true;
+    const bool ok = capture_.init(recordingDeviceName);
     if (!ok)
         SDL_Log("[voice] Capture disabled; text chat and receive-side voice still work.");
     return true;
@@ -24,6 +25,7 @@ bool VoiceChatSystem::init()
 void VoiceChatSystem::quit()
 {
     capture_.quit();
+    captureInitialized_ = false;
     speakers_.clear();
     speaking_.clear();
     std::lock_guard lock(pendingMutex_);
@@ -33,6 +35,13 @@ void VoiceChatSystem::quit()
 void VoiceChatSystem::setPushToTalk(bool active)
 {
     capture_.setPushToTalk(active);
+}
+
+void VoiceChatSystem::setRecordingDeviceName(std::string_view name)
+{
+    if (!captureInitialized_)
+        return;
+    capture_.setRecordingDeviceName(name);
 }
 
 void VoiceChatSystem::enqueueFrame(const net::voice::ServerVoiceFrame& frame)

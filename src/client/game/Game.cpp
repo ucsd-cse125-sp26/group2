@@ -925,7 +925,7 @@ bool Game::init(AppContext& ctx)
     // SFX init result so recoil visuals still work in silent test runs.
     dispatcher.sink<WeaponFiredEvent>().connect<&Game::onWeaponFired>(*this);
     if (ctx.developerConfig.voiceCapture)
-        voiceChat_.init();
+        voiceChat_.init(userSettings ? userSettings->audioInputDeviceName : std::string_view{});
 
     // HUD system — needs device + shader format from renderer, SDF atlas from particles.
     if (particleSystem.sdfReady()) {
@@ -1310,7 +1310,8 @@ bool Game::init(AppContext& ctx)
             break;
         case ParticleEffectType::HitscanBeam:
             particleSystem.spawnHitscanBeam(evtOrigin, evt.pos2, evt.weaponType);
-            if (sfxSystem->isInitialized() && !(evt.source == localPlayer && getWeaponConfig(evt.weaponType).isCharge)) {
+            if (sfxSystem->isInitialized() && !(evt.source == localPlayer && getWeaponConfig(evt.weaponType).isCharge))
+            {
                 const std::string_view eventName = fireAudioEventForWeapon(evt.weaponType);
                 if (!eventName.empty()) {
                     const audio::AudioObjectId object = audioObjectForEntity(evt.source);
@@ -1328,8 +1329,8 @@ bool Game::init(AppContext& ctx)
                 const audio::AudioObjectId object = audioObjectForEntity(evt.source);
                 sfxSystem->setAudioObjectTransform(object, evt.pos1);
                 sfxSystem->postAudioEvent(evt.surfaceType == SurfaceType::Flesh ? "impact.flesh" : "impact.world",
-                                         object,
-                                         evt.surfaceType == SurfaceType::Flesh ? 0.65f : 0.32f);
+                                          object,
+                                          evt.surfaceType == SurfaceType::Flesh ? 0.65f : 0.32f);
             }
             break;
         case ParticleEffectType::Explosion:
@@ -3356,10 +3357,10 @@ SDL_AppResult Game::iterate()
             const bool isLocalBeam = registry.all_of<LocalPlayer>(entity);
             isLocalEnergyBeamNow = isLocalEnergyBeamNow || isLocalBeam;
             const glm::vec3 soundPos = isLocalBeam ? cachedEye_ : beam.origin;
-            const glm::vec3 soundVel = isLocalBeam ? audioListener.velocity
-                                                   : (registry.all_of<Velocity>(entity)
-                                                          ? registry.get<Velocity>(entity).value
-                                                          : glm::vec3{0.0f});
+            const glm::vec3 soundVel =
+                isLocalBeam
+                    ? audioListener.velocity
+                    : (registry.all_of<Velocity>(entity) ? registry.get<Velocity>(entity).value : glm::vec3{0.0f});
             const audio::AudioObjectId object = audioObjectForEntity(entity);
             sfxSystem->setAudioObjectTransform(object, soundPos, soundVel);
 
@@ -4046,8 +4047,8 @@ SDL_AppResult Game::iterate()
                             sfxSystem->setAudioObjectTransform(
                                 object, c.audioPosition + lateral * side, c.ai.velocityWorld);
                             sfxSystem->setAudioRtpc(object,
-                                                   audio::rtpcId("movement.intensity"),
-                                                   stepId == SfxId::FootstepHeavy ? 1.0f : 0.0f);
+                                                    audio::rtpcId("movement.intensity"),
+                                                    stepId == SfxId::FootstepHeavy ? 1.0f : 0.0f);
                             if (c.isLocal)
                                 sfxSystem->postLocalAudioEvent("footstep", object, gain);
                             else
@@ -4696,7 +4697,8 @@ SDL_AppResult Game::iterate()
             // pinned to the weapon while the player is moving.
             if (registry.all_of<LocalPlayer>(e) && beam.type != WeaponType::EnergyGun) {
                 lightStart = renderEye;
-                const auto predictedHit = physics::raycastWorld(renderEye, particleCamera.forward, physics::activeWorld());
+                const auto predictedHit =
+                    physics::raycastWorld(renderEye, particleCamera.forward, physics::activeWorld());
                 lightEnd = predictedHit.hit ? predictedHit.point : (renderEye + particleCamera.forward * 5000.0f);
             } else if (registry.all_of<LocalPlayer>(e) && beam.type == WeaponType::EnergyGun) {
                 float guideLen = glm::length(beam.guidePoint - beam.origin);
@@ -4711,8 +4713,8 @@ SDL_AppResult Game::iterate()
                     lightEnd = guideEnd;
             }
 
-            const glm::vec3 lightColor = (beam.type == WeaponType::EnergyGun) ? glm::vec3{0.16f, 0.78f, 1.0f}
-                                                                              : glm::vec3{0.3f, 1.0f, 0.2f};
+            const glm::vec3 lightColor =
+                (beam.type == WeaponType::EnergyGun) ? glm::vec3{0.16f, 0.78f, 1.0f} : glm::vec3{0.3f, 1.0f, 0.2f};
             if (beam.type == WeaponType::EnergyGun && beam.locked == 0) {
                 if (dynLights.size() < 14) {
                     dynLights.push_back(PointLight{
@@ -4730,9 +4732,8 @@ SDL_AppResult Game::iterate()
             const float len = glm::length(delta);
             if (len < 1.0f)
                 return;
-            const int numLights = (beam.type == WeaponType::EnergyGun)
-                                      ? std::max(2, static_cast<int>(len / 130.0f) + 1)
-                                      : std::max(2, static_cast<int>(len / 80.0f) + 1);
+            const int numLights = (beam.type == WeaponType::EnergyGun) ? std::max(2, static_cast<int>(len / 130.0f) + 1)
+                                                                       : std::max(2, static_cast<int>(len / 80.0f) + 1);
             for (int i = 0; i < numLights && dynLights.size() < 14; ++i) {
                 const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
                 glm::vec3 lightPos = lightStart + delta * t;
@@ -6494,6 +6495,7 @@ SDL_AppResult Game::iterate()
     phaseSnap(phaseStats.hudMs);
 
     const PauseMenuResult pauseResult = pauseMenu.render(*userSettings, userSettingsPath_);
+    voiceChat_.setRecordingDeviceName(userSettings->audioInputDeviceName);
     if (pauseResult.settingsApplied) {
         mouseSensitivity = userSettings->mouseSensitivity;
         horizontalFovDegrees = userSettings->horizontalFovDegrees;

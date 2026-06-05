@@ -45,6 +45,7 @@ private:
     enum class Tab
     {
         General,
+        Audio,
         KeyboardMouse,
         Controller,
     };
@@ -61,8 +62,11 @@ private:
     bool requestClose(const UserSettings& settings);
     void requestDiscardConfirm();
     void apply(UserSettings& settings, std::string_view settingsPath, SettingsEditorResult& result);
-    void resetToDefaults();
+    void resetToDefaults(UserSettings& settings);
+    void restoreOriginalAudioSettings(UserSettings& settings);
+    void updateLiveAudioSettings(UserSettings& settings);
     void renderGeneralTab();
+    void renderAudioTab(UserSettings& settings);
     void renderKeyboardMouseTab(float uiScale);
     void renderControllerTab(float uiScale);
     void renderBindingsTable(BindingDevice device, float uiScale);
@@ -83,6 +87,12 @@ private:
     bool draftMuzzleFlashEnabled_ = true;
     float draftMusicVolume_ = 0.7f;
     float draftSfxVolume_ = 1.0f;
+    std::string draftAudioOutputDeviceName_;
+    std::string draftAudioInputDeviceName_;
+    float originalMusicVolume_ = 0.7f;
+    float originalSfxVolume_ = 1.0f;
+    std::string originalAudioOutputDeviceName_;
+    std::string originalAudioInputDeviceName_;
     bool dirty_ = false;
     std::optional<ListeningBinding> listeningBinding_;
     std::string statusMessage_;

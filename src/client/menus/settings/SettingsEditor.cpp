@@ -2,10 +2,12 @@
 
 #include "menus/MenuTheme.hpp"
 
+#include <SDL3/SDL_audio.h>
 #include <SDL3/SDL_keyboard.h>
 
 #include <algorithm>
 #include <imgui.h>
+#include <vector>
 
 namespace
 {
@@ -19,6 +21,74 @@ constexpr float k_minGamepadMoveDeadzone = 0.0f;
 constexpr float k_maxGamepadMoveDeadzone = 0.5f;
 constexpr float k_minAimAssistStrength = 0.0f;
 constexpr float k_maxAimAssistStrength = 1.0f;
+
+struct AudioDeviceOption
+{
+    std::string name;
+    std::string label;
+};
+
+std::string defaultDeviceLabel(bool recording)
+{
+    const SDL_AudioDeviceID defaultDevice =
+        recording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+    if (const char* name = SDL_GetAudioDeviceName(defaultDevice))
+        return std::string("System Default (") + name + ")";
+    return "System Default";
+}
+
+std::vector<AudioDeviceOption> audioDeviceOptions(bool recording)
+{
+    std::vector<AudioDeviceOption> options;
+    options.push_back({{}, defaultDeviceLabel(recording)});
+
+    int count = 0;
+    SDL_AudioDeviceID* devices = recording ? SDL_GetAudioRecordingDevices(&count) : SDL_GetAudioPlaybackDevices(&count);
+    if (!devices)
+        return options;
+
+    for (int i = 0; i < count; ++i) {
+        const char* name = SDL_GetAudioDeviceName(devices[i]);
+        if (name && name[0] != '\0')
+            options.push_back({name, name});
+    }
+    SDL_free(devices);
+    return options;
+}
+
+bool deviceNameAvailable(const std::vector<AudioDeviceOption>& options, const std::string& name)
+{
+    return std::ranges::any_of(options, [&](const AudioDeviceOption& option) { return option.name == name; });
+}
+
+bool audioDeviceCombo(const char* label, std::string& selectedName, bool recording)
+{
+    bool changed = false;
+    const std::vector<AudioDeviceOption> options = audioDeviceOptions(recording);
+    std::string preview = options.empty() ? "System Default" : options.front().label;
+    for (const AudioDeviceOption& option : options) {
+        if (option.name == selectedName) {
+            preview = option.label;
+            break;
+        }
+    }
+    if (!selectedName.empty() && !deviceNameAvailable(options, selectedName))
+        preview = selectedName + " (unavailable)";
+
+    if (ImGui::BeginCombo(label, preview.c_str())) {
+        for (const AudioDeviceOption& option : options) {
+            const bool selected = option.name == selectedName;
+            if (ImGui::Selectable(option.label.c_str(), selected)) {
+                selectedName = option.name;
+                changed = true;
+            }
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
 
 MouseButton mouseButtonFromSdl(uint8_t button)
 {
@@ -76,6 +146,10 @@ void SettingsEditor::open(const UserSettings& settings)
 {
     open_ = true;
     resetDraft(settings);
+    originalMusicVolume_ = settings.musicVolume;
+    originalSfxVolume_ = settings.sfxVolume;
+    originalAudioOutputDeviceName_ = settings.audioOutputDeviceName;
+    originalAudioInputDeviceName_ = settings.audioInputDeviceName;
     dirty_ = false;
     listeningBinding_.reset();
     statusMessage_.clear();
@@ -187,6 +261,11 @@ SettingsEditorResult SettingsEditor::render(UserSettings& settings, std::string_
             renderGeneralTab();
             ImGui::EndTabItem();
         }
+        if (ImGui::BeginTabItem("Audio")) {
+            activeTab_ = Tab::Audio;
+            renderAudioTab(settings);
+            ImGui::EndTabItem();
+        }
         if (ImGui::BeginTabItem("Keyboard & Mouse")) {
             activeTab_ = Tab::KeyboardMouse;
             renderKeyboardMouseTab(uiScale);
@@ -212,7 +291,7 @@ SettingsEditorResult SettingsEditor::render(UserSettings& settings, std::string_
     const float colWidth = (fullWidth - spacingX * 3.0f) / 4.0f;
     const ImVec2 btnSize(colWidth, 34.0f * uiScale);
     if (menu_theme::terminalActionRow("RESET", nullptr, btnSize)) {
-        resetToDefaults();
+        resetToDefaults(settings);
     }
     ImGui::SameLine();
     if (menu_theme::terminalActionRow("APPLY", nullptr, btnSize)) {
@@ -233,6 +312,7 @@ SettingsEditorResult SettingsEditor::render(UserSettings& settings, std::string_
 
     const ConfirmResult confirmResult = confirm_.drawAndPoll();
     if (confirmResult == ConfirmResult::Confirmed) {
+        restoreOriginalAudioSettings(settings);
         resetDraft(settings);
         closeEditor();
         result.closeRequested = true;
@@ -258,6 +338,8 @@ void SettingsEditor::resetDraft(const UserSettings& settings)
     draftMuzzleFlashEnabled_ = settings.muzzleFlashEnabled;
     draftMusicVolume_ = settings.musicVolume;
     draftSfxVolume_ = settings.sfxVolume;
+    draftAudioOutputDeviceName_ = settings.audioOutputDeviceName;
+    draftAudioInputDeviceName_ = settings.audioInputDeviceName;
 }
 
 void SettingsEditor::closeEditor()
@@ -307,21 +389,44 @@ void SettingsEditor::apply(UserSettings& settings, std::string_view settingsPath
     settings.muzzleFlashEnabled = draftMuzzleFlashEnabled_;
     settings.musicVolume = draftMusicVolume_;
     settings.sfxVolume = draftSfxVolume_;
+    settings.audioOutputDeviceName = draftAudioOutputDeviceName_;
+    settings.audioInputDeviceName = draftAudioInputDeviceName_;
 
     const bool saved = user_settings::save(std::string(settingsPath), settings);
     statusMessage_ = saved ? "Settings saved." : "Settings could not be saved.";
     dirty_ = false;
+    originalMusicVolume_ = settings.musicVolume;
+    originalSfxVolume_ = settings.sfxVolume;
+    originalAudioOutputDeviceName_ = settings.audioOutputDeviceName;
+    originalAudioInputDeviceName_ = settings.audioInputDeviceName;
     listeningBinding_.reset();
     result.applied = true;
 }
 
-void SettingsEditor::resetToDefaults()
+void SettingsEditor::resetToDefaults(UserSettings& settings)
 {
     const UserSettings defaults;
     resetDraft(defaults);
+    updateLiveAudioSettings(settings);
     dirty_ = true;
     listeningBinding_.reset();
     statusMessage_.clear();
+}
+
+void SettingsEditor::restoreOriginalAudioSettings(UserSettings& settings)
+{
+    settings.musicVolume = originalMusicVolume_;
+    settings.sfxVolume = originalSfxVolume_;
+    settings.audioOutputDeviceName = originalAudioOutputDeviceName_;
+    settings.audioInputDeviceName = originalAudioInputDeviceName_;
+}
+
+void SettingsEditor::updateLiveAudioSettings(UserSettings& settings)
+{
+    settings.musicVolume = draftMusicVolume_;
+    settings.sfxVolume = draftSfxVolume_;
+    settings.audioOutputDeviceName = draftAudioOutputDeviceName_;
+    settings.audioInputDeviceName = draftAudioInputDeviceName_;
 }
 
 void SettingsEditor::renderGeneralTab()
@@ -338,19 +443,44 @@ void SettingsEditor::renderGeneralTab()
     ImGui::Checkbox("Muzzle Flash", &draftMuzzleFlashEnabled_);
     if (draftMuzzleFlashEnabled_ != previousMuzzleFlash)
         dirty_ = true;
+}
 
+void SettingsEditor::renderAudioTab(UserSettings& settings)
+{
     ImGui::Spacing();
+
     const float previousMusicVolume = draftMusicVolume_;
     ImGui::SliderFloat("Music Volume", &draftMusicVolume_, 0.0f, 1.0f, "%.2f");
     draftMusicVolume_ = std::clamp(draftMusicVolume_, 0.0f, 1.0f);
-    if (draftMusicVolume_ != previousMusicVolume)
+    if (draftMusicVolume_ != previousMusicVolume) {
         dirty_ = true;
+        updateLiveAudioSettings(settings);
+    }
 
     const float previousSfxVolume = draftSfxVolume_;
     ImGui::SliderFloat("SFX Volume", &draftSfxVolume_, 0.0f, 1.0f, "%.2f");
     draftSfxVolume_ = std::clamp(draftSfxVolume_, 0.0f, 1.0f);
-    if (draftSfxVolume_ != previousSfxVolume)
+    if (draftSfxVolume_ != previousSfxVolume) {
         dirty_ = true;
+        updateLiveAudioSettings(settings);
+    }
+
+    ImGui::Spacing();
+    bool changed = audioDeviceCombo("Output Device", draftAudioOutputDeviceName_, false);
+    changed = audioDeviceCombo("Input Device", draftAudioInputDeviceName_, true) || changed;
+    if (changed) {
+        dirty_ = true;
+        updateLiveAudioSettings(settings);
+    }
+
+    const std::vector<AudioDeviceOption> playbackOptions = audioDeviceOptions(false);
+    const std::vector<AudioDeviceOption> recordingOptions = audioDeviceOptions(true);
+    if (!draftAudioOutputDeviceName_.empty() && !deviceNameAvailable(playbackOptions, draftAudioOutputDeviceName_)) {
+        ImGui::TextWrapped("Output device unavailable; system default is active until it returns.");
+    }
+    if (!draftAudioInputDeviceName_.empty() && !deviceNameAvailable(recordingOptions, draftAudioInputDeviceName_)) {
+        ImGui::TextWrapped("Input device unavailable; system default is active until it returns.");
+    }
 }
 
 void SettingsEditor::renderKeyboardMouseTab(float uiScale)

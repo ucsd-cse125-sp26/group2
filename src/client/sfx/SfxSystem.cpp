@@ -110,6 +110,28 @@ std::string_view explosionEventForWeapon(WeaponType type) noexcept
     return "explosion";
 }
 
+SDL_AudioDeviceID findAudioDeviceByName(std::string_view name, bool recording)
+{
+    if (name.empty())
+        return recording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+
+    int count = 0;
+    SDL_AudioDeviceID* devices = recording ? SDL_GetAudioRecordingDevices(&count) : SDL_GetAudioPlaybackDevices(&count);
+    if (!devices)
+        return recording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+
+    SDL_AudioDeviceID match = recording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+    for (int i = 0; i < count; ++i) {
+        const char* deviceName = SDL_GetAudioDeviceName(devices[i]);
+        if (deviceName && name == deviceName) {
+            match = devices[i];
+            break;
+        }
+    }
+    SDL_free(devices);
+    return match;
+}
+
 audio::AudioObjectId sfxAudioObjectForEntity(entt::entity entity) noexcept
 {
     audio::StableId value = audio::stableHash("sfx.entity") ^ static_cast<audio::StableId>(entt::to_integral(entity));
@@ -489,6 +511,16 @@ void SfxSystem::stop(SfxId id)
 void SfxSystem::setCategoryVolume(SfxCategory cat, float v)
 {
     categoryVolumes_[static_cast<size_t>(cat)] = std::clamp(v, 0.0f, 2.0f);
+}
+
+void SfxSystem::setPlaybackDeviceName(std::string_view name)
+{
+    if (playbackDeviceName_ == name)
+        return;
+
+    playbackDeviceName_ = std::string(name);
+    if (mixStream_)
+        pendingReopen_ = true;
 }
 
 float SfxSystem::categoryVolume(SfxCategory cat) const
@@ -1110,8 +1142,11 @@ bool SfxSystem::openDevice()
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "1024");
 #endif
 
-    mixStream_ =
-        SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &mixerSpec_, &SfxSystem::mixCallback, this);
+    const SDL_AudioDeviceID requestedDevice = findAudioDeviceByName(playbackDeviceName_, false);
+    if (!playbackDeviceName_.empty() && requestedDevice == SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK) {
+        SDL_Log("[sfx] Playback device '%s' unavailable; using system default", playbackDeviceName_.c_str());
+    }
+    mixStream_ = SDL_OpenAudioDeviceStream(requestedDevice, &mixerSpec_, &SfxSystem::mixCallback, this);
 
     if (!mixStream_) {
         SDL_Log("[sfx] SDL_OpenAudioDeviceStream failed: %s", SDL_GetError());

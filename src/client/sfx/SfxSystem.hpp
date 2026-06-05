@@ -121,6 +121,7 @@ public:
     // --- Volume control ---
     void setMasterVolume(float v) { masterVolume_ = v; }
     void setCategoryVolume(SfxCategory cat, float v);
+    void setPlaybackDeviceName(std::string_view name);
     float masterVolume() const { return masterVolume_; }
     float categoryVolume(SfxCategory cat) const;
 
@@ -187,6 +188,7 @@ private:
     audio::AudioRuntime audioRuntime_;
     SfxRuntimeStats sfxStats_{};
     std::string manifestPath_;
+    std::string playbackDeviceName_;
     audio::ListenerState listener_{};
     std::array<float, 48000> reverbDelayL_{};
     std::array<float, 48000> reverbDelayR_{};

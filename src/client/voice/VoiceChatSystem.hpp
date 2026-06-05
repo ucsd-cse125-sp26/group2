@@ -12,6 +12,7 @@
 
 #include <glm/glm.hpp>
 #include <mutex>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -27,8 +28,9 @@ public:
         float remainingSeconds = 0.0f;
     };
 
-    bool init();
+    bool init(std::string_view recordingDeviceName = {});
     void quit();
+    void setRecordingDeviceName(std::string_view name);
     void setPushToTalk(bool active);
     void enqueueFrame(const net::voice::ServerVoiceFrame& frame);
     void update(float dt, Client& client, const Registry& registry, SfxSystem& sfx);
@@ -54,4 +56,5 @@ private:
     std::vector<SpeakingState> speaking_;
     std::vector<net::voice::ServerVoiceFrame> pendingFrames_;
     std::mutex pendingMutex_;
+    bool captureInitialized_ = false;
 };

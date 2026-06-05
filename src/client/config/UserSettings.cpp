@@ -33,6 +33,37 @@ std::string altKey(std::string_view key)
     alt += "-alt";
     return alt;
 }
+
+std::string tomlString(std::string_view value)
+{
+    std::string escaped;
+    escaped.reserve(value.size() + 2);
+    escaped.push_back('"');
+    for (const char c : value) {
+        switch (c) {
+        case '\\':
+            escaped += "\\\\";
+            break;
+        case '"':
+            escaped += "\\\"";
+            break;
+        case '\n':
+            escaped += "\\n";
+            break;
+        case '\r':
+            escaped += "\\r";
+            break;
+        case '\t':
+            escaped += "\\t";
+            break;
+        default:
+            escaped.push_back(c);
+            break;
+        }
+    }
+    escaped.push_back('"');
+    return escaped;
+}
 } // namespace
 
 std::string getPath()
@@ -104,6 +135,12 @@ UserSettings load(const std::string& path)
     if (auto v = audio["sfx-volume"].value<float>()) {
         settings.sfxVolume = std::clamp(*v, k_minVolume, k_maxVolume);
     }
+    if (auto v = audio["output-device"].value<std::string>()) {
+        settings.audioOutputDeviceName = *v;
+    }
+    if (auto v = audio["input-device"].value<std::string>()) {
+        settings.audioInputDeviceName = *v;
+    }
 
     auto loadBindingTable = [&](const auto table, BindingDevice device) {
         if (!table)
@@ -168,6 +205,8 @@ bool save(const std::string& path, const UserSettings& settings)
     out << "\n[audio]\n";
     out << "music-volume = " << std::clamp(settings.musicVolume, k_minVolume, k_maxVolume) << "\n";
     out << "sfx-volume = " << std::clamp(settings.sfxVolume, k_minVolume, k_maxVolume) << "\n";
+    out << "output-device = " << tomlString(settings.audioOutputDeviceName) << "\n";
+    out << "input-device = " << tomlString(settings.audioInputDeviceName) << "\n";
 
     out << "\n[input.keyboard]\n";
     for (Action action : InputBindings::actions()) {

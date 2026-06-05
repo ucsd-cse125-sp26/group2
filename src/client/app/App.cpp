@@ -154,6 +154,7 @@ bool App::init()
         return false;
     }
 
+    sfxSystem.setPlaybackDeviceName(userSettings.audioOutputDeviceName);
     if (!sfxSystem.init()) {
         SDL_Log("[client] SfxSystem init failed (non-fatal — music and sound effects disabled)");
     }
@@ -698,6 +699,7 @@ void App::applyAudioSettings()
     if (!sfxSystem.isInitialized())
         return;
 
+    sfxSystem.setPlaybackDeviceName(userSettings.audioOutputDeviceName);
     sfxSystem.setCategoryVolume(SfxCategory::Music, userSettings.musicVolume);
     sfxSystem.setCategoryVolume(SfxCategory::Weapons, userSettings.sfxVolume);
     sfxSystem.setCategoryVolume(SfxCategory::Impacts, userSettings.sfxVolume);
