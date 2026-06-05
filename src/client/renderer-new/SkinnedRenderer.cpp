@@ -671,12 +671,12 @@ bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, 
         Boilerplate::makeAttribute(5, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(BoneInfluence, boneWeights), 1),
     };
 
-    // overBlending = false: the character body is opaque. With blending enabled
-    // the fragment alpha (≈ lighting irradiance) made it render semi-transparent
-    // — visible once the normal-colour debug tint was removed. Depth test + cull
-    // NONE still handle the double-sided rig correctly.
+    // The skinned overlay pass runs against the same HDR + normal targets as
+    // the world geometry pass, so every skinned fragment shader must be paired
+    // with a two-target pipeline.
+    const std::vector<SDL_GPUTextureFormat> colorTargets{colorTarget, colorTarget};
     pipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, colorTarget, shaderFormat, vertexShader, fragmentShader, vertexLayout, true, false);
+        device_, colorTargets, shaderFormat, vertexShader, fragmentShader, vertexLayout, true, false);
 
     return pipeline_ != nullptr;
 }
@@ -793,17 +793,18 @@ bool SkinnedRenderer::createChamsPipeline()
     vertexInputState.num_vertex_attributes = static_cast<Uint32>(attributes.size());
     vertexInputState.vertex_attributes = attributes.data();
 
-    SDL_GPUColorTargetDescription colorTargetDesc{};
-    colorTargetDesc.format = colorFormat_;
-    colorTargetDesc.blend_state = Boilerplate::OVER_BLEND_MODE;
+    SDL_GPUColorTargetDescription colorTargetDescs[2]{};
+    colorTargetDescs[0].format = colorFormat_;
+    colorTargetDescs[0].blend_state = Boilerplate::OVER_BLEND_MODE;
+    colorTargetDescs[1].format = colorFormat_;
 
     SDL_GPUGraphicsPipelineCreateInfo info{};
     info.vertex_shader = vertexShader;
     info.fragment_shader = fragmentShader;
     info.vertex_input_state = vertexInputState;
     info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    info.target_info.color_target_descriptions = &colorTargetDesc;
-    info.target_info.num_color_targets = 1;
+    info.target_info.color_target_descriptions = colorTargetDescs;
+    info.target_info.num_color_targets = 2;
     info.target_info.has_depth_stencil_target = true;
     info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
     // GREATER: keep only fragments BEHIND the stored (world) depth → occluded.

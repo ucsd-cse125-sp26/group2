@@ -603,6 +603,11 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         return;
     }
 
+    // Set the main camera before any per-frame skinned culling/uploads or
+    // first-frame shadow work so every pass sees this frame's matrices.
+    float fov = 60.0f;
+    setMainCamera(eye, yaw, pitch, roll, width, height, fov);
+
     // Per-frame uploads (skinning palette/instances, etc.) happen BEFORE
     // the first render pass so the copy is sequenced ahead of the draws.
     {
@@ -620,11 +625,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         std::cout << "FIRST FRAME" << std::endl;
         firstFrame_ = false;
     }
-
-    // Set the main camera BEFORE the shadow passes so they can frustum-cull
-    // shadow-casting lights against the current view (camera_.getViewProjectionFrustumPlane()).
-    float fov = 60.0f;
-    setMainCamera(eye, yaw, pitch, roll, width, height, fov);
 
     drawToShadowMap(cmd, dynamicShadowMaps_,1, false, true, true,STATIC);
 
@@ -833,6 +833,10 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
     };
 
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, colorTargets, 2, &depthTarget_);
+    if (!geometryPass) {
+        SDL_Log("NewRenderer::drawGeometryPass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
     bindLightShadowInfo(geometryPass, cmd);
@@ -849,14 +853,22 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
 
 void NewRenderer::drawGeometryOverlayPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(sceneColor);
+    SDL_GPUColorTargetInfo colorTargets[2] = {
+        Boilerplate::makeColorTargetLoad(sceneColor),
+        Boilerplate::makeColorTargetLoad(sceneNormal_),
+    };
     SDL_GPUDepthStencilTargetInfo depthInfo = depthTarget_;
     depthInfo.load_op = SDL_GPU_LOADOP_LOAD;
     depthInfo.store_op = SDL_GPU_STOREOP_STORE;
 
-    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthInfo);
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, colorTargets, 2, &depthInfo);
+    if (!geometryPass) {
+        SDL_Log("NewRenderer::drawGeometryOverlayPass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
+    bindLightShadowInfo(geometryPass, cmd);
     drawSkinnedModels(geometryPass, cmd);
     drawParticles(geometryPass, cmd);
     SDL_EndGPURenderPass(geometryPass);
@@ -868,6 +880,10 @@ void NewRenderer::drawSsaoPass(
     SDL_GPUColorTargetInfo colorTarget =
         Boilerplate::makeColorTargetClear(ao, SDL_FColor{.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f});
     SDL_GPURenderPass* ssaoPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
+    if (!ssaoPass) {
+        SDL_Log("NewRenderer::drawSsaoPass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
     SDL_BindGPUGraphicsPipeline(ssaoPass, ssaoPipeline_);
 
     SDL_GPUTextureSamplerBinding bindings[2] = {
@@ -929,6 +945,10 @@ void NewRenderer::drawSsaoBlurPass(SDL_GPUTexture* ao,
     SDL_GPUColorTargetInfo colorTarget =
         Boilerplate::makeColorTargetClear(output, SDL_FColor{.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f});
     SDL_GPURenderPass* blurPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
+    if (!blurPass) {
+        SDL_Log("NewRenderer::drawSsaoBlurPass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
     SDL_BindGPUGraphicsPipeline(blurPass, ssaoBlurPipeline_);
 
     SDL_GPUTextureSamplerBinding bindings[3] = {
@@ -974,6 +994,10 @@ void NewRenderer::drawSsaoCompositePass(
     SDL_GPUColorTargetInfo colorTarget =
         Boilerplate::makeColorTargetClear(output, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f});
     SDL_GPURenderPass* compositePass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
+    if (!compositePass) {
+        SDL_Log("NewRenderer::drawSsaoCompositePass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
     SDL_BindGPUGraphicsPipeline(compositePass, ssaoCompositePipeline_);
 
     SDL_GPUTextureSamplerBinding bindings[3] = {
@@ -1013,6 +1037,10 @@ void NewRenderer::drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffe
     depthInfo.clear_depth = 1.0f;
 
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, colorTargets, 2, &depthInfo);
+    if (!geometryPass) {
+        SDL_Log("NewRenderer::drawWeaponPass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
@@ -1301,7 +1329,7 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
         depthTarget_.texture = nullptr;
     }
 
-    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, false,true);
+    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, false, false);
 
     if (!depthTarget_.texture)
         return false;
