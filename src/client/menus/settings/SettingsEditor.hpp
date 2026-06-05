@@ -81,6 +81,8 @@ private:
     float draftAimAssistStrength_ = 1.0f;
     bool draftGamepadSwapSticks_ = false;
     bool draftMuzzleFlashEnabled_ = true;
+    float draftMusicVolume_ = 0.7f;
+    float draftSfxVolume_ = 1.0f;
     bool dirty_ = false;
     std::optional<ListeningBinding> listeningBinding_;
     std::string statusMessage_;

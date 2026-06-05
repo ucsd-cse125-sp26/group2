@@ -24,6 +24,8 @@ constexpr float k_minGamepadMoveDeadzone = 0.0f;
 constexpr float k_maxGamepadMoveDeadzone = 0.5f;
 constexpr float k_minAimAssistStrength = 0.0f;
 constexpr float k_maxAimAssistStrength = 1.0f;
+constexpr float k_minVolume = 0.0f;
+constexpr float k_maxVolume = 1.0f;
 
 std::string altKey(std::string_view key)
 {
@@ -95,6 +97,13 @@ UserSettings load(const std::string& path)
     if (auto v = input["muzzle-flash"].value<bool>()) {
         settings.muzzleFlashEnabled = *v;
     }
+    const toml::node_view audio = tbl["audio"] ? tbl["audio"] : input;
+    if (auto v = audio["music-volume"].value<float>()) {
+        settings.musicVolume = std::clamp(*v, k_minVolume, k_maxVolume);
+    }
+    if (auto v = audio["sfx-volume"].value<float>()) {
+        settings.sfxVolume = std::clamp(*v, k_minVolume, k_maxVolume);
+    }
 
     auto loadBindingTable = [&](const auto table, BindingDevice device) {
         if (!table)
@@ -155,6 +164,10 @@ bool save(const std::string& path, const UserSettings& settings)
         << std::clamp(settings.aimAssistStrength, k_minAimAssistStrength, k_maxAimAssistStrength) << "\n";
     out << "gamepad-swap-sticks = " << (settings.gamepadSwapSticks ? "true" : "false") << "\n";
     out << "muzzle-flash = " << (settings.muzzleFlashEnabled ? "true" : "false") << "\n";
+
+    out << "\n[audio]\n";
+    out << "music-volume = " << std::clamp(settings.musicVolume, k_minVolume, k_maxVolume) << "\n";
+    out << "sfx-volume = " << std::clamp(settings.sfxVolume, k_minVolume, k_maxVolume) << "\n";
 
     out << "\n[input.keyboard]\n";
     for (Action action : InputBindings::actions()) {

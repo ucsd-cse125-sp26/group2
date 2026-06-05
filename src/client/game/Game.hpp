@@ -226,13 +226,13 @@ private:
     NewRenderer* renderer = nullptr;                               ///< Borrowed renderer owned by App.
     Registry registry;                                             ///< The shared ECS registry.
     Client* client = nullptr;                                      ///< Borrowed UDP network client owned by App.
+    SfxSystem* sfxSystem = nullptr;                                ///< Borrowed audio system owned by App.
     UserSettings* userSettings = nullptr;                          ///< Borrowed user settings owned by App.
     std::string_view userSettingsPath_;                            ///< Borrowed save path for user settings.
     std::optional<registry_serialization::Loader> snapshotLoader_; ///< Incremental loader; created on first snapshot.
     std::optional<entt::entity>
         mappedLocalPlayerEntity_;  ///< Local-registry entity for this client's player, once assigned.
     ParticleSystem particleSystem; ///< Client-side VFX particle system.
-    SfxSystem sfxSystem;           ///< Client-side sound effects system.
     VoiceChatSystem voiceChat_;    ///< Push-to-talk Opus proximity voice chat.
     Hud hud_;                      ///< In-game HUD overlay system.
     entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.

@@ -95,6 +95,8 @@ enum class SfxId : uint8_t
     GrenadeThrow,
     VoiceStart,
     VoiceStop,
+    MenuMusic, ///< Music/Gamesong1.wav
+    GameMusic, ///< Music/Gamesong2.wav
 
     _Count
 };
@@ -107,6 +109,7 @@ enum class SfxCategory : uint8_t
     Player,
     Footsteps,
     Voice,
+    Music,
     UI,
     _Count
 };
@@ -264,6 +267,10 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "VoiceStart";
     case SfxId::VoiceStop:
         return "VoiceStop";
+    case SfxId::MenuMusic:
+        return "MenuMusic";
+    case SfxId::GameMusic:
+        return "GameMusic";
     default:
         return "Unknown";
     }
@@ -292,6 +299,8 @@ inline const char* sfxCategoryName(SfxCategory category) noexcept
         return "Footsteps";
     case SfxCategory::Voice:
         return "Voice";
+    case SfxCategory::Music:
+        return "Music";
     case SfxCategory::UI:
         return "UI";
     default:

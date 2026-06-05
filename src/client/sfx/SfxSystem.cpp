@@ -210,6 +210,8 @@ bool SfxSystem::init()
     loadClip(SfxId::GrenadeThrow, "Weapons/Grenade/Grenade_Throw.wav", SfxCategory::Weapons, 0.45f, 0.12f);
     synthesizeClip(SfxId::VoiceStart, SfxCategory::Voice, 0.20f, 0.05f);
     synthesizeClip(SfxId::VoiceStop, SfxCategory::Voice, 0.14f, 0.05f);
+    loadClip(SfxId::MenuMusic, "Music/Gamesong1.wav", SfxCategory::Music, 0.8f, 0.0f);
+    loadClip(SfxId::GameMusic, "Music/Gamesong2.wav", SfxCategory::Music, 0.8f, 0.0f);
 
     convertClipsToMixer();
 
@@ -255,6 +257,8 @@ void SfxSystem::quit()
         for (Source& source : sources_)
             source = Source{};
         voiceSources_.clear();
+        musicHandle_ = kInvalidSource;
+        currentMusic_ = SfxId::_Count;
     }
 
     SDL_DestroyAudioStream(mixStream_);
@@ -313,7 +317,32 @@ void SfxSystem::stopSource(SourceHandle handle)
         return;
     if (source->voiceStream)
         voiceSources_.erase(source->speaker.value);
+    if (handle == musicHandle_) {
+        musicHandle_ = kInvalidSource;
+        currentMusic_ = SfxId::_Count;
+    }
     *source = Source{};
+}
+
+void SfxSystem::playMusic(SfxId id, float gain)
+{
+    {
+        std::lock_guard lock(mixerMutex_);
+        if (currentMusic_ == id && findSource(musicHandle_))
+            return;
+    }
+
+    stopMusic();
+    musicHandle_ = startLoop(id, false, glm::vec3{0.0f}, gain, 2.0f);
+    currentMusic_ = musicHandle_ == kInvalidSource ? SfxId::_Count : id;
+}
+
+void SfxSystem::stopMusic()
+{
+    if (musicHandle_ != kInvalidSource)
+        stopSource(musicHandle_);
+    musicHandle_ = kInvalidSource;
+    currentMusic_ = SfxId::_Count;
 }
 
 void SfxSystem::setListener(const audio::ListenerState& listener)
@@ -525,7 +554,7 @@ void SfxSystem::handleEvent(const SDL_Event& event)
 #endif
 }
 
-void SfxSystem::update(float dt, const Registry& registry)
+void SfxSystem::update(float dt)
 {
     if (pendingReopen_) {
         pendingReopen_ = false;
@@ -556,6 +585,14 @@ void SfxSystem::update(float dt, const Registry& registry)
             source.busGain = audioRuntime_.busGain(source.bus);
         }
     }
+}
+
+void SfxSystem::update(float dt, const Registry& registry)
+{
+    update(dt);
+
+    if (!mixStream_)
+        return;
 
     for (const auto entity : registry.view<const LocalPlayer, const Health, const PlayerMatchStats>()) {
         const auto& h = registry.get<const Health>(entity);
