@@ -96,7 +96,7 @@ void main()
     }
 
     vec4 albedo = materialFlags.useTexture != 0 ? texture(tex, frag_vt) : material.diffuse;
-    albedo.rgb = pow(albedo.rgb,vec3(2.2f));
+//    albedo.rgb = pow(albedo.rgb,vec3(2.2f));
     if (materialFlags.useTint != 0) {
         albedo.rgb = mix(albedo.rgb, pow(material.diffuse.rgb, vec3(2.2f)), material.diffuse.a);
     }
