@@ -330,7 +330,7 @@ void AudioManifest::buildDefault()
         makeClip("armor_break", SfxId::ArmorBreak, "Player", 1.0f, 3.2f, 1.0f, false, false, 2),
         makeClip("death", SfxId::Death, "Player", 1.0f, 3.0f, 2.0f, false, false, 1),
         makeClip("kill_confirm", SfxId::KillConfirm, "Player", 0.9f, 3.0f, 0.30f, false, false, 3),
-        makeClip("healing", SfxId::Healing, "Player", 0.55f, 1.2f, 1.0f, false, false, 1),
+        makeClip("healing", SfxId::Healing, "Player", 0.45f, 1.2f, 1.0f, false, false, 1),
         makeClip("powerup_pickup", SfxId::PowerupPickup, "Player", 0.85f, 2.2f, 0.15f, true, false, 4),
         makeClip("footstep_light", SfxId::FootstepLight, "Footsteps", 0.55f, 0.8f, 0.06f, true, false, 16),
         makeClip("footstep_heavy", SfxId::FootstepHeavy, "Footsteps", 0.75f, 0.9f, 0.06f, true, false, 16),

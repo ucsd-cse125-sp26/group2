@@ -13,6 +13,7 @@
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/WorldData.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -166,8 +167,7 @@ bool SfxSystem::init()
     loadClip(SfxId::ArmorBreak, "Voicy_Fortnite Shield Break.mp3", SfxCategory::Player, 0.9f, 1.00f);
     loadClip(SfxId::Death, "Death.wav", SfxCategory::Player, 1.0f, 2.00f);
     loadClip(SfxId::KillConfirm, "Voicy_Pilot Killed Indicator SFX.mp3", SfxCategory::Player, 0.9f, 0.30f);
-    loadClip(SfxId::Healing, "Voicy_Syringe SFX .mp3", SfxCategory::Player, 0.5f, 1.00f);
-    loadClip(SfxId::ShieldRecharge, "Voicy_Halo Shield Recharge.mp3", SfxCategory::Player, 0.5f, 1.00f);
+    loadClip(SfxId::Healing, "Health.wav", SfxCategory::Player, 0.35f, 1.00f);
     loadClip(SfxId::PowerupPickup, "csgo-case-open.mp3", SfxCategory::Player, 0.75f, 0.15f);
 
     synthesizeClip(SfxId::FootstepLight, SfxCategory::Footsteps, 0.40f, 0.06f);
@@ -662,6 +662,10 @@ void SfxSystem::update(float dt, const Registry& registry)
                 postAudioEvent("player.healing");
                 healingSoundCooldown_ = 1.0f;
             }
+            const bool finishedHealing =
+                h.health >= systems::healthMax - 0.001f && h.armor >= systems::armorMax - 0.001f;
+            if (finishedHealing)
+                stop(SfxId::Healing);
         }
 
         if (stats.kills > prevKills_)

@@ -48,10 +48,9 @@ enum class SfxId : uint8_t
     // Energy beam
     EnergyBeamLoop, ///< Weapons/EnergyWeapon/Energy_Shooting.wav (play while beam active)
 
-    // Healing / Shield
-    Healing,        ///< Voicy_Syringe SFX .mp3
-    ShieldRecharge, ///< Voicy_Halo Shield Recharge.mp3
-    PowerupPickup,  ///< Configurable filler pickup sound.
+    // Healing / pickups
+    Healing,       ///< Health.wav
+    PowerupPickup, ///< Configurable filler pickup sound.
 
     // Movement / equipment placeholders. FootstepLight/Heavy still back simple impact fallbacks.
     FootstepLight,
@@ -182,8 +181,6 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "EnergyBeamLoop";
     case SfxId::Healing:
         return "Healing";
-    case SfxId::ShieldRecharge:
-        return "ShieldRecharge";
     case SfxId::PowerupPickup:
         return "PowerupPickup";
     case SfxId::FootstepLight:
