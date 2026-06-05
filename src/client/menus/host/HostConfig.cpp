@@ -199,7 +199,7 @@ HostConfigState HostConfig::draftConfig() const
             .serverName = std::string(server_name::k_default),
             .killsToWin = 25,
             .maxPlayers = 8,
-            .powerupInitialSpawnDelaySeconds = 240.0f,
+            .powerupInitialSpawnDelaySeconds = 60.0f,
             .powerupRespawnCooldownSeconds = 30.0f,
         };
 
