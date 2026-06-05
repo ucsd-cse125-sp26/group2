@@ -2,6 +2,8 @@
 
 layout(location = 0) in vec3 frag_normal;
 layout(location = 1) in vec2 frag_vt;
+layout(location = 2) in vec3 frag_worldPos;
+layout(location = 3) in vec4 frag_tangent;
 layout(location = 4) in vec4 frag_tint;
 
 layout(location = 0) out vec4 color;
