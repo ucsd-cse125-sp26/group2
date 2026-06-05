@@ -1277,9 +1277,10 @@ bool Game::init(AppContext& ctx)
             if (shotgunPelletAccumCount_ < static_cast<int>(shotgunPelletAccum_.pellets.size())) {
                 const bool isHit = (evt.surfaceType == SurfaceType::Flesh);
                 const bool isHead = (evt.headshot != 0);
-                shotgunPelletAccum_.pellets[shotgunPelletAccumCount_].result = isHead  ? HudShotgunPellet::Result::Head
-                                                                               : isHit ? HudShotgunPellet::Result::Body
-                                                                                       : HudShotgunPellet::Result::Miss;
+                shotgunPelletAccum_.pellets[static_cast<std::size_t>(shotgunPelletAccumCount_)].result =
+                    isHead  ? HudShotgunPellet::Result::Head
+                    : isHit ? HudShotgunPellet::Result::Body
+                            : HudShotgunPellet::Result::Miss;
                 ++shotgunPelletAccumCount_;
                 shotgunPelletLastTimeSec_ = nowSec;
                 if (shotgunPelletAccumCount_ == static_cast<int>(shotgunPelletAccum_.pellets.size())) {
@@ -1408,13 +1409,13 @@ bool Game::init(AppContext& ctx)
             spawnExplosionFlashLight(evt.pos1, WeaponType::Molotov, evt.param);
             break;
         case ParticleEffectType::PowerupPickup:
-            if (sfxSystem.isInitialized()) {
+            if (sfxSystem->isInitialized()) {
                 const audio::AudioObjectId object = audio::objectId("event.powerup.pickup");
-                sfxSystem.setAudioObjectTransform(object, evt.pos1);
+                sfxSystem->setAudioObjectTransform(object, evt.pos1);
                 if (evt.source == localPlayer)
-                    sfxSystem.postLocalAudioEvent("powerup.pickup", object, 1.0f);
+                    sfxSystem->postLocalAudioEvent("powerup.pickup", object, 1.0f);
                 else
-                    sfxSystem.postAudioEvent("powerup.pickup", object, 1.0f);
+                    sfxSystem->postAudioEvent("powerup.pickup", object, 1.0f);
             }
             break;
         }
