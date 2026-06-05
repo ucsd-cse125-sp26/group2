@@ -633,13 +633,15 @@ std::string_view fireAudioEventForWeapon(WeaponType type) noexcept
     case WeaponType::RailGun:
         return "weapon.railgun.fire";
     case WeaponType::EnergyGun:
-        return "weapon.energy.fire";
+        return "";
     case WeaponType::Shotgun:
-        return "weapon.shotgun.fire"; // falls back gracefully if SFX bank lacks this event.
+        return "weapon.shotgun.fire";
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
     case WeaponType::Sticky:
         return "weapon.grenade.throw";
+    case WeaponType::None:
+        return "";
     }
     return {};
 }
@@ -1420,55 +1422,6 @@ bool Game::init(AppContext& ctx)
     input_capture::acquireGameplayInputCapture(window);
     mouseCaptured = true;
     chatOpen_ = false;
-
-    // Animated first-person viewmodels, PER WEAPON (see kWeaponViewmodelAssets).
-    // Load each weapon's gun + arms rig data plus hidden static models that
-    // register their embedded textures. The renderer has a single viewmodel rig
-    // slot, so the active weapon's rig is installed on equip (installed below in
-    // iterate()). A weapon whose GLB is missing keeps weaponVmLoaded_[t]=false
-    // and uses the legacy static viewmodel fallback path.
-    {
-        const char* base = SDL_GetBasePath();
-        const std::string assetsBase = std::string(base ? base : "") + "assets/";
-        weaponVmModelIdx_.fill(-1);
-        weaponVmArmsModelIdx_.fill(-1);
-        for (std::size_t t = 0; t < kWeaponViewmodelAssets.size(); ++t) {
-            const WeaponViewmodelAssets& vma = kWeaponViewmodelAssets[t];
-            if (!vma.viewmodelGlb || vma.viewmodelGlb[0] == '\0')
-                continue;
-            if (weaponVms_[t].load(assetsBase + vma.viewmodelGlb, vma.flipUVs)) {
-                weaponVmLoaded_[t] = true;
-                // Hidden static gun model: registers the gun GLB's embedded
-                // materials/textures so the skinned viewmodel can bind them per-mesh.
-                weaponVmModelIdx_[t] = renderer->loadSceneModel(vma.viewmodelGlb, glm::vec3{0.0f}, 1.0f, vma.flipUVs);
-                if (weaponVmModelIdx_[t] >= 0)
-                    renderer->setModelScenePass(weaponVmModelIdx_[t], false);
-                // First-person arms (same baked clips) + their textures.
-                if (vma.armsGlb && vma.armsGlb[0] != '\0') {
-                    if (weaponVmArms_[t].load(assetsBase + vma.armsGlb, vma.flipUVs)) {
-                        weaponVmArmsLoaded_[t] = true;
-                        weaponVmArmsModelIdx_[t] =
-                            renderer->loadSceneModel(vma.armsGlb, glm::vec3{0.0f}, 1.0f, vma.flipUVs);
-                        if (weaponVmArmsModelIdx_[t] >= 0)
-                            renderer->setModelScenePass(weaponVmArmsModelIdx_[t], false);
-                    }
-                }
-            } else {
-                SDL_Log("[client] WARNING: viewmodel '%s' failed to load — weapon %zu uses static fallback",
-                        vma.viewmodelGlb,
-                        t);
-            }
-            SDL_Log("[viewmodel] type=%zu glb='%s' loaded=%d arms=%d",
-                    t,
-                    vma.viewmodelGlb,
-                    static_cast<int>(weaponVmLoaded_[t]),
-                    static_cast<int>(weaponVmArmsLoaded_[t]));
-        }
-        // Spent-casing prop (hidden static model; spawned + drawn via the entity list on fire).
-        shellEjectModelIdx_ = renderer->loadSceneModel("shelleject_assault_rifle.glb", glm::vec3{0.0f}, 1.0f, true);
-        if (shellEjectModelIdx_ >= 0)
-            renderer->setModelScenePass(shellEjectModelIdx_, false);
-    }
 
     // Load the shared skinned-character rig (skeleton + bind pose + weights).
     // character_rigged_new.glb supplies the visible character mesh; animation
@@ -3357,6 +3310,11 @@ SDL_AppResult Game::iterate()
     // drawFrame(), which happens later, so using it here makes muzzle-attached
     // particles visibly trail behind fast player movement.
     const CameraBasis particleCamera = buildCameraBasis(renderYaw, renderPitch, currentCameraRoll_);
+    if (currentEquippedType_ == WeaponType::EnergyGun && cachedMuzzleValid_) {
+        particleSystem.setLocalEnergyBeamOriginOverride(cachedMuzzleWorld_);
+    } else {
+        particleSystem.clearLocalEnergyBeamOriginOverride();
+    }
     particleSystem.update(
         frameTime, renderEye, particleCamera.forward, particleCamera.right, particleCamera.up, registry);
     phaseSnap(phaseStats.particlesMs);
@@ -3394,23 +3352,64 @@ SDL_AppResult Game::iterate()
             sfxSystem.postAudioEvent("weapon.railgun.charge_start");
         wasChargingRailgun_ = isChargingNow;
 
-        // Energy beam: play/stop loop sound on beam active transitions.
-        bool isBeamNow = false;
-        registry.view<LocalPlayer, BeamState>().each([&](const BeamState& beam) { isBeamNow = beam.active; });
-        if (isBeamNow && !wasBeamActive_)
-            beamLoopHandle_ = sfxSystem.postAudioEvent("weapon.energy.loop", audio::kGlobalObject, 1.0f);
-        if (isBeamNow && beamLoopHandle_ != SfxSystem::kInvalidSource)
-            sfxSystem.updateSource(beamLoopHandle_, cachedEye_, audioListener.velocity, 0.55f);
-        if (!isBeamNow && wasBeamActive_) {
-            sfxSystem.stopSource(beamLoopHandle_);
-            beamLoopHandle_ = SfxSystem::kInvalidSource;
+        // Energy beam: play the start sound once, then begin the loop after
+        // the start clip finishes while the beam remains active. BeamState is
+        // synced for every player, so this covers local and remote beams.
+        std::unordered_set<entt::entity> liveEnergyBeams;
+        bool isLocalEnergyBeamNow = false;
+        registry.view<BeamState>().each([&](entt::entity entity, const BeamState& beam) {
+            if (!beam.active || beam.type != WeaponType::EnergyGun)
+                return;
+
+            liveEnergyBeams.insert(entity);
+            BeamAudioState& state = beamAudioStates_[entity];
+
+            const bool isLocalBeam = registry.all_of<LocalPlayer>(entity);
+            isLocalEnergyBeamNow = isLocalEnergyBeamNow || isLocalBeam;
+            const glm::vec3 soundPos = isLocalBeam ? cachedEye_ : beam.origin;
+            const glm::vec3 soundVel = isLocalBeam ? audioListener.velocity
+                                                   : (registry.all_of<Velocity>(entity)
+                                                          ? registry.get<Velocity>(entity).value
+                                                          : glm::vec3{0.0f});
+            const audio::AudioObjectId object = audioObjectForEntity(entity);
+            sfxSystem.setAudioObjectTransform(object, soundPos, soundVel);
+
+            if (!state.active) {
+                if (state.loopHandle != SfxSystem::kInvalidSource) {
+                    sfxSystem.stopSource(state.loopHandle);
+                    state.loopHandle = SfxSystem::kInvalidSource;
+                }
+                if (isLocalBeam)
+                    sfxSystem.postLocalAudioEvent("weapon.energy.start", object, 1.0f);
+                else
+                    sfxSystem.postAudioEvent("weapon.energy.start", object, 1.0f);
+                state.loopDelaySeconds = std::max(0.0f, sfxSystem.clipDuration(SfxId::EnergyGunFire));
+                state.active = true;
+            } else {
+                state.loopDelaySeconds = std::max(0.0f, state.loopDelaySeconds - frameTime);
+            }
+
+            if (state.loopHandle == SfxSystem::kInvalidSource && state.loopDelaySeconds <= 0.0f) {
+                state.loopHandle = isLocalBeam ? sfxSystem.postLocalAudioEvent("weapon.energy.loop", object, 1.0f)
+                                               : sfxSystem.postAudioEvent("weapon.energy.loop", object, 1.0f);
+            }
+            if (state.loopHandle != SfxSystem::kInvalidSource)
+                sfxSystem.updateSource(state.loopHandle, soundPos, soundVel, 1.0f);
+        });
+        for (auto it = beamAudioStates_.begin(); it != beamAudioStates_.end();) {
+            if (liveEnergyBeams.contains(it->first)) {
+                ++it;
+                continue;
+            }
+            if (it->second.loopHandle != SfxSystem::kInvalidSource)
+                sfxSystem.stopSource(it->second.loopHandle);
+            it = beamAudioStates_.erase(it);
         }
-        wasBeamActive_ = isBeamNow;
 
         // Beam hitmarker: client-side raycast against player hitboxes while firing.
         // Note: Player component is not synced to clients, so we raycast against
         // HitboxInstance directly (skipping the local player entity).
-        if (isBeamNow) {
+        if (isLocalEnergyBeamNow) {
             registry.view<LocalPlayer, BeamState, InputSnapshot, Position, CollisionShape, PlayerVisState>().each(
                 [&](entt::entity localE,
                     const BeamState&,
@@ -4083,11 +4082,11 @@ SDL_AppResult Game::iterate()
                 instance.worldTransform = c.worldTransform;
                 instance.paletteBase = static_cast<uint32_t>(bonePalette.size());
                 instance.tint = c.tint;
-                // Flag for the red chams pass: the killcam killer, or — while the
-                // local player's wallhack is active — every other player.
+                // Flag red skinned passes: killcam highlights the killer's whole
+                // body, while wallhack keeps the occluded-only chams treatment.
                 const bool chamsKiller = killcamActive_ && c.entity == killcamKillerEntity_;
                 const bool chamsWallhack = localWallhackActive && !c.isLocal;
-                instance.materialId = (chamsKiller || chamsWallhack) ? 1u : 0u;
+                instance.materialId = chamsKiller ? 1u : chamsWallhack ? 2u : 0u;
 
                 bonePalette.insert(bonePalette.end(), skinMatrices.begin(), skinMatrices.end());
                 skinnedInstances.push_back(instance);
@@ -4638,25 +4637,6 @@ SDL_AppResult Game::iterate()
         //     });
         // });
 
-        // Spent-casing physics + render (casings are spawned on fire in the viewmodel step below).
-        if (shellEjectModelIdx_ >= 0 && !casings_.empty()) {
-            const glm::vec3 gravity{0.0f, -650.0f, 0.0f};
-            for (auto& cs : casings_) {
-                cs.vel += gravity * frameTime;
-                cs.pos += cs.vel * frameTime;
-                cs.angle += cs.spin * frameTime;
-                cs.age += frameTime;
-            }
-            casings_.erase(
-                std::remove_if(casings_.begin(), casings_.end(), [](const Casing& c) { return c.age > 1.3f; }),
-                casings_.end());
-            for (const auto& cs : casings_) {
-                const glm::mat4 m = glm::translate(glm::mat4(1.0f), cs.pos) * glm::mat4(cs.orient) *
-                                    glm::rotate(glm::mat4(1.0f), cs.angle, glm::vec3(0.0f, 0.0f, 1.0f));
-                entityCmds.push_back(EntityRenderCmd{.modelIndex = shellEjectModelIdx_, .worldTransform = m});
-            }
-        }
-
         if (collectPerf)
             phaseStats.entityRenderCmds = static_cast<std::uint32_t>(entityCmds.size());
         renderer->setEntityRenderList(std::move(entityCmds));
@@ -4864,27 +4844,6 @@ SDL_AppResult Game::iterate()
         vmRollOffset = vp.rollOffset;
         lastEquippedType_ = currentEquippedType_;
         viewmodelDefaultsApplied_ = true;
-    }
-
-    // Per-weapon animated viewmodel: install the active weapon's gun + arms rig
-    // (and its textures) into the renderer's single viewmodel slot when the
-    // equipped weapon changes. Weapons without a loaded viewmodel leave the slot
-    // alone and render via the static fallback path below.
-    if (currentWeaponRenderable) {
-        const std::size_t t = static_cast<std::size_t>(currentEquippedType_);
-        if (weaponVmLoaded_[t] && static_cast<int>(t) != activeViewmodelType_) {
-            renderer->setViewmodelRig(weaponVms_[t].buildRigSources(), weaponVms_[t].numJoints());
-            renderer->setViewmodelTexture(weaponVmModelIdx_[t]);
-            if (weaponVmArmsLoaded_[t]) {
-                renderer->setViewmodelArmsRig(weaponVmArms_[t].buildRigSources(), weaponVmArms_[t].numJoints());
-                if (weaponVmArmsModelIdx_[t] >= 0)
-                    renderer->setViewmodelArmsTexture(weaponVmArmsModelIdx_[t]);
-            }
-            activeViewmodelType_ = static_cast<int>(t);
-            weaponVmEquipped_ = false; // replay the draw clip for the newly-equipped weapon
-            weaponVmReloadActive_ = false;
-            weaponVmPrevMagAmmo_ = -1;
-        }
     }
 
     const int currentWeaponModelIdx =
@@ -5157,10 +5116,6 @@ SDL_AppResult Game::iterate()
                     }
                 });
 
-                // Animated-viewmodel weapons play a real reload clip, so suppress
-                // the legacy "weapon-down" drop for any weapon whose viewmodel loaded.
-                if (currentWeaponRenderable && weaponVmLoaded_[static_cast<std::size_t>(currentEquippedType_)])
-                    reloadOffset = 0.0f;
                 reloadDownwardOffset_ = reloadOffset;
             }
 
@@ -5344,112 +5299,6 @@ SDL_AppResult Game::iterate()
                 cachedMuzzleWorld_ = glm::vec3(weaponWorld * glm::vec4(currentWeaponModel->muzzleLocalPos, 1.0f));
                 cachedMuzzleValid_ = true;
             }
-        }
-        // --- Animated R-301 first-person viewmodel (skinned, replaces the
-        // static gun model + the weapon-down reload with the real Apex clips) ---
-        const std::size_t vmType = currentWeaponRenderable ? static_cast<std::size_t>(currentEquippedType_) : 0;
-        if (currentWeaponRenderable && weaponVmLoaded_[vmType] && vm.visible) {
-            WeaponViewmodelAnim& vmGun = weaponVms_[vmType];
-            WeaponViewmodelAnim& vmArms = weaponVmArms_[vmType];
-            const bool hasArms = weaponVmArmsLoaded_[vmType];
-            bool reloading = false;
-            float reloadTotal = 0.0f;
-            int magAmmo = -1;
-            registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
-                const GunInstance& gun = getEquippedGun(ws);
-                const WeaponConfig& cfg = getWeaponConfig(gun.type);
-                reloading = gun.isReloading;
-                reloadTotal = cfg.reloadTime;
-                magAmmo = gun.currentMagAmmo;
-            });
-            // A shot drops mag ammo this frame (reload raises it, so no false trigger) -> kick bolt + eject casing.
-            if (weaponVmPrevMagAmmo_ >= 0 && magAmmo >= 0 && magAmmo < weaponVmPrevMagAmmo_) {
-                vmGun.triggerFire();
-                // Casing eject requires the chamber bone; weapons without def_c_bolt
-                // (boneModelPos returns ~origin) skip it gracefully.
-                const glm::vec3 boltLocal = vmGun.boneModelPos("def_c_bolt");
-                if (shellEjectModelIdx_ >= 0 && casings_.size() < 64 && glm::length(boltLocal) > 1e-5f) {
-                    const float cp = std::cos(renderPitch);
-                    const glm::vec3 fwd{std::sin(renderYaw) * cp, -std::sin(renderPitch), std::cos(renderYaw) * cp};
-                    const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3{0.0f, 1.0f, 0.0f}));
-                    const glm::vec3 upv = glm::normalize(glm::cross(rgt, fwd));
-                    const float j = float((casingSpawnCounter_++ * 2654435761u) % 1000u) / 1000.0f - 0.5f;
-                    Casing cs;
-                    // Eject from the real chamber (def_c_bolt) and orient parallel to the barrel
-                    // (def_c_bolt -> muzzle_flash), both taken from the rig and transformed to world.
-                    const glm::vec3 chamberWorld = glm::vec3(vm.transform * glm::vec4(boltLocal, 1.0f));
-                    const glm::vec3 muzzleWorld =
-                        glm::vec3(vm.transform * glm::vec4(vmGun.boneModelPos("muzzle_flash"), 1.0f));
-                    glm::vec3 barrelDir = muzzleWorld - chamberWorld;
-                    barrelDir = (glm::length(barrelDir) > 1e-4f) ? glm::normalize(barrelDir) : fwd;
-                    // Casing long axis (local X) points opposite the muzzle (it was spawning 180-degrees backwards).
-                    const glm::vec3 longAxis = -barrelDir;
-                    const glm::vec3 refUp =
-                        (std::abs(longAxis.y) < 0.99f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
-                    const glm::vec3 cz = glm::normalize(glm::cross(longAxis, refUp));
-                    const glm::vec3 cy = glm::cross(cz, longAxis);
-                    cs.orient = glm::mat3(longAxis, cy, cz); // local X -> -barrel (correct facing)
-                    cs.pos = chamberWorld + rgt * 1.5f;      // ejection port: just right of the chamber
-                    cs.vel = rgt * (150.0f + j * 40.0f) + upv * (120.0f + j * 30.0f) + fwd * (j * 40.0f);
-                    cs.spin = 20.0f + j * 8.0f;
-                    casings_.push_back(cs);
-                }
-            }
-            weaponVmPrevMagAmmo_ = magAmmo;
-
-            // On equip, play the draw clip — it ENDS at the "ready" pose, which
-            // is the pose-space all the other clips (reload/etc.) live in.  This
-            // is the idle base; holding draw's last frame == ready.  (Do NOT use
-            // the skeleton bind pose as idle — it is ~13u off from the animated
-            // poses and makes reload appear to jump/vanish out of frame.)
-            if (!weaponVmEquipped_) {
-                vmGun.playClip("draw", /*loop=*/false, 1.0f);
-                if (hasArms)
-                    vmArms.playClip("draw", /*loop=*/false, 1.0f);
-                weaponVmEquipped_ = true;
-                weaponVmReloadActive_ = false;
-            }
-            if (reloading && !weaponVmReloadActive_) {
-                const float clipDur = vmGun.clipDuration("reload");
-                const float speed = (reloadTotal > 0.05f && clipDur > 0.05f) ? (clipDur / reloadTotal) : 1.0f;
-                vmGun.playClip("reload", /*loop=*/false, speed);
-                if (hasArms)
-                    vmArms.playClip("reload", /*loop=*/false, speed);
-                weaponVmReloadActive_ = true;
-            } else if (!reloading && weaponVmReloadActive_) {
-                // Reload ends back at the ready pose, so just hold its last frame.
-                weaponVmReloadActive_ = false;
-            }
-            vmGun.update(frameTime);
-
-            // Drive the muzzle origin (tracers/bullets/beams read cachedMuzzleWorld_)
-            // from the rig's muzzle_flash bone. Weapons lacking it leave the muzzle
-            // invalid so the shooter code falls back to the camera-forward origin.
-            const glm::vec3 muzLocal = vmGun.boneModelPos("muzzle_flash");
-            if (glm::length(muzLocal) > 1e-5f) {
-                cachedMuzzleWorld_ = glm::vec3(vm.transform * glm::vec4(muzLocal, 1.0f));
-                cachedMuzzleValid_ = true;
-            }
-
-            SkinnedInstance inst;
-            inst.worldTransform = vm.transform;
-            inst.paletteBase = 0;
-            renderer->setViewmodelFrame(vmGun.skinMatrices(), {inst});
-
-            // Hands ride the same clip + the same viewmodel transform as the gun.
-            if (hasArms) {
-                vmArms.update(frameTime);
-                renderer->setViewmodelArmsFrame(vmArms.skinMatrices(), {inst});
-            }
-
-            // The animated skinned gun + hands replace the static gun + viewmodel hands.
-            vm.visible = false;
-            vm.hands.right.visible = false;
-            vm.hands.left.visible = false;
-        } else {
-            weaponVmEquipped_ = false; // re-draw next time an animated-viewmodel weapon is equipped
-            renderer->setViewmodelFrame({}, {});
-            renderer->setViewmodelArmsFrame({}, {});
         }
         renderer->setWeaponViewmodel(vm);
     }

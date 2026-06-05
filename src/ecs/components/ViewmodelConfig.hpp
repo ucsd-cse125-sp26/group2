@@ -103,16 +103,13 @@ struct RecoilParams
 inline const ViewmodelParams& getViewmodelParams(WeaponType type)
 {
     static constexpr std::array<ViewmodelParams, kRenderableWeaponTypeCount> k_params{{
-        // Rifle (Apex R-301) — animated first-person viewmodel. The apex_r301.glb
-        // rig is authored in camera space at ~1.0 native scale, so it places
-        // itself; no per-weapon offset/scale (all 0 / scale 1). The legacy static
-        // assault-rifle tuning (scale 39, forward 78, …) is superseded here.
-        {.scale = 1.0f,
-         .forward = 0.0f,
-         .right = 0.0f,
-         .down = 0.0f,
+        // Rifle — existing tuning
+        {.scale = 39.0f,
+         .forward = 60.0f,
+         .right = 30.0f,
+         .down = -11.0f,
          .yawOffset = 0.0f,
-         .pitchOffset = 0.0f,
+         .pitchOffset = -1.0f,
          .rollOffset = 0.0f},
         // Rocket — fallback to rifle tuning
         {.scale = 39.0f,
@@ -122,31 +119,28 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
-        // RailGun (Apex Nemesis) — animated first-person viewmodel authored in
-        // camera space at ~1.0 native scale (same as the R-301), so it self-places:
-        // scale 1, no offsets. (The old scale=20 marksman tuning was for the static
-        // kraber mesh and made the Apex GLB 20× too big — full-screen overdraw.)
-        {.scale = 1.0f,
-         .forward = 0.0f,
-         .right = 0.0f,
-         .down = 0.0f,
+        // RailGun — marksman
+        {.scale = 20.0f,
+         .forward = 45.0f,
+         .right = 27.0f,
+         .down = 27.0f,
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
-        // EnergyGun (Apex Havoc) — camera-space viewmodel, self-places (scale 1).
-        {.scale = 1.0f,
-         .forward = 0.0f,
-         .right = 0.0f,
-         .down = 0.0f,
+        // EnergyGun
+        {.scale = 20.0f,
+         .forward = 65.0f,
+         .right = 35.0f,
+         .down = 24.0f,
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
-        // Shotgun (Apex Mastiff) — camera-space viewmodel, self-places (scale 1).
-        {.scale = 1.0f,
-         .forward = 0.0f,
-         .right = 0.0f,
-         .down = 0.0f,
-         .yawOffset = 0.0f,
+        // Shotgun
+        {.scale = 75.0f,
+         .forward = 54.5f,
+         .right = 38.5f,
+         .down = 24.0f,
+         .yawOffset = 180.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
     }};
@@ -362,7 +356,7 @@ inline WeaponModelInfo getWeaponModelInfo(WeaponType type)
         {.filename = "rocket_launcher.glb", .flipUVs = true},
         {.filename = "rail_gun.glb", .flipUVs = true},
         {.filename = "energy_gun.glb", .flipUVs = true},
-        {.filename = "energy_gun.glb", .flipUVs = true}, // Shotgun — reuses energy gun model
+        {.filename = "shotgun.glb", .flipUVs = true},
     }};
     return k_infos[static_cast<std::size_t>(type)];
 }
