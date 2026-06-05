@@ -77,7 +77,10 @@ void drawSidebar(const LobbyUIConfig& config, BuildResult& result, bool localRea
         if (config.hostAddressesVisible) {
             ImGui::SetWindowFontScale(smallScale);
             if (!config.hostLanIp.empty()) {
-                ImGui::Text("Address: %.*s", static_cast<int>(config.hostLanIp.size()), config.hostLanIp.data());
+                ImGui::Text("Address: %.*s:%u",
+                            static_cast<int>(config.hostLanIp.size()),
+                            config.hostLanIp.data(),
+                            static_cast<unsigned>(config.hostPort));
             } else {
                 ImGui::TextDisabled("Address unavailable");
             }
