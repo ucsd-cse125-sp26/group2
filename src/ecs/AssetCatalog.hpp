@@ -105,7 +105,7 @@ inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAsse
      .renderScale = {20.0f, 20.0f, 20.0f},
      .renderRotationDegrees = {0.0f, 0.0f, 0.0f}},
     {.name = "weapon_shotgun",
-     .filename = "energy_gun.glb", // reuses energy gun mesh until a dedicated shotgun model is authored.
+     .filename = "shotgun.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
      .renderScale = {20.0f, 20.0f, 20.0f},

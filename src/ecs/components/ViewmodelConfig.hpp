@@ -135,12 +135,12 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
-        // Shotgun — reuses EnergyGun viewmodel tuning (same mesh).
-        {.scale = 20.0f,
-         .forward = 80.0f,
+        // Shotgun
+        {.scale = 75.0f,
+         .forward = 54.5f,
          .right = 38.5f,
          .down = 24.0f,
-         .yawOffset = 0.0f,
+         .yawOffset = 180.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
     }};
@@ -356,7 +356,7 @@ inline WeaponModelInfo getWeaponModelInfo(WeaponType type)
         {.filename = "rocket_launcher.glb", .flipUVs = true},
         {.filename = "rail_gun.glb", .flipUVs = true},
         {.filename = "energy_gun.glb", .flipUVs = true},
-        {.filename = "energy_gun.glb", .flipUVs = true}, // Shotgun — reuses energy gun model
+        {.filename = "shotgun.glb", .flipUVs = true},
     }};
     return k_infos[static_cast<std::size_t>(type)];
 }
