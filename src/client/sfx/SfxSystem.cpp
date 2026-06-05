@@ -64,6 +64,24 @@ float softClip(float value) noexcept
     return std::clamp(value / (1.0f + std::fabs(value) * 0.35f), -1.0f, 1.0f);
 }
 
+bool manifestHasCurrentWeaponGraph(const audio::AudioManifest& manifest) noexcept
+{
+    const auto eventExists = [&](std::string_view name) {
+        return manifest.resolveEvent(name).value != 0;
+    };
+    const auto clipMatches = [&](std::string_view name, SfxId sfx) {
+        const audio::AudioClipDef* clip = manifest.findClip(manifest.resolveClip(name));
+        return clip != nullptr && clip->sfx == sfx;
+    };
+
+    return eventExists("weapon.rifle.fire") && eventExists("weapon.rocket.fire") &&
+           eventExists("weapon.railgun.fire") && eventExists("weapon.shotgun.fire") &&
+           eventExists("weapon.energy.loop") && clipMatches("rifle_fire", SfxId::RifleFire) &&
+           clipMatches("rocket_fire", SfxId::RocketFire) && clipMatches("railgun_fire", SfxId::RailGunFire) &&
+           clipMatches("shotgun_fire", SfxId::ShotgunFire) && clipMatches("energy_fire", SfxId::EnergyGunFire) &&
+           clipMatches("beam_loop", SfxId::EnergyBeamLoop);
+}
+
 } // namespace
 
 bool SfxSystem::init()
@@ -85,13 +103,14 @@ bool SfxSystem::init()
     categoryVolumes_.fill(1.0f);
     cooldowns_.fill(0.0f);
 
-    loadClip(SfxId::RifleFire, "pubg-ak.wav", SfxCategory::Weapons, 0.8f, 0.10f);
-    loadClip(SfxId::RocketFire, "Voicy_Minecraft TNT Explosion.mp3", SfxCategory::Weapons, 0.7f, 0.80f);
-    loadClip(SfxId::RailGunFire, "Voicy_Charge Rifle SFX.mp3", SfxCategory::Weapons, 0.8f, 0.50f);
-    loadClip(SfxId::EnergyGunFire, "Voicy_Charge Rifle SFX.mp3", SfxCategory::Weapons, 0.5f, 0.08f);
+    loadClip(SfxId::RifleFire, "Weapons/Rifle_Shooting.wav", SfxCategory::Weapons, 0.82f, 0.10f);
+    loadClip(SfxId::RocketFire, "Weapons/Rocket_Shooting.wav", SfxCategory::Weapons, 0.9f, 0.80f);
+    loadClip(SfxId::RailGunFire, "Weapons/Railgun_Shooting.wav", SfxCategory::Weapons, 0.95f, 0.20f);
+    loadClip(SfxId::EnergyGunFire, "Weapons/Energy_Shooting_Start.wav", SfxCategory::Weapons, 0.78f, 0.0f);
+    loadClip(SfxId::ShotgunFire, "Weapons/Shotgun_Shooting.wav", SfxCategory::Weapons, 0.95f, 0.20f);
     loadClip(SfxId::ChargeRifleLoad, "charge-rifle-load.wav", SfxCategory::Weapons, 0.9f, 0.0f);
     loadClip(SfxId::ChargeRifleShoot, "charge-rifle-shoot.wav", SfxCategory::Weapons, 1.0f, 0.20f);
-    loadClip(SfxId::EnergyBeamLoop, "Voicy_Thunderstruck into.mp3", SfxCategory::Weapons, 0.6f, 0.0f);
+    loadClip(SfxId::EnergyBeamLoop, "Weapons/Energy_Shooting.wav", SfxCategory::Weapons, 0.72f, 0.0f);
 
     loadClip(SfxId::FleshHit, "Voicy_Flesh Bullet Impact SFX.mp3", SfxCategory::Impacts, 0.7f, 0.08f);
     loadClip(SfxId::Headshot, "Voicy_Headshot Rapid SFX.mp3", SfxCategory::Impacts, 0.8f, 0.08f);
@@ -157,6 +176,9 @@ bool SfxSystem::init()
         SDL_Log("[sfx] Audio manifest unavailable at '%s'; using built-in graph", manifestPath_.c_str());
         for (const std::string& error : manifestErrors)
             SDL_Log("[sfx]   manifest: %s", error.c_str());
+    } else if (!manifestHasCurrentWeaponGraph(audioRuntime_.manifest())) {
+        audioRuntime_.loadDefaultManifest();
+        SDL_Log("[sfx] Audio manifest '%s' has an outdated weapon graph; using built-in graph", manifestPath_.c_str());
     } else {
         SDL_Log("[sfx] Loaded audio manifest '%s' (%zu clips, %zu nodes, %zu events)",
                 manifestPath_.c_str(),
@@ -223,6 +245,26 @@ SfxSystem::SourceHandle
 SfxSystem::startLoop(SfxId id, bool positional, const glm::vec3& position, float gain, float priority)
 {
     return startSource(id, positional, true, position, glm::vec3{0.0f}, gain, priority, audio::kInvalidBus, 1.0f, 0, 0);
+}
+
+SfxSystem::SourceHandle SfxSystem::startIntroThenLoop(
+    SfxId introId, SfxId loopId, bool positional, const glm::vec3& position, float gain, float priority)
+{
+    return startSource(introId,
+                       positional,
+                       false,
+                       position,
+                       glm::vec3{0.0f},
+                       gain,
+                       priority,
+                       audio::kInvalidBus,
+                       1.0f,
+                       0,
+                       0,
+                       -1.0f,
+                       audio::k_fullGainDistance,
+                       audio::k_silentDistance,
+                       loopId);
 }
 
 void SfxSystem::updateSource(SourceHandle handle, const glm::vec3& position, const glm::vec3& velocity, float gain)
@@ -426,6 +468,9 @@ void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
         break;
     case WeaponType::EnergyGun:
         postFireSound("weapon.energy.fire");
+        break;
+    case WeaponType::Shotgun:
+        postFireSound("weapon.shotgun.fire");
         break;
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
@@ -847,7 +892,8 @@ SfxSystem::SourceHandle SfxSystem::startSource(SfxId id,
                                                std::uint16_t maxBusInstances,
                                                float cooldownOverrideSeconds,
                                                float fullGainDistance,
-                                               float silentDistance)
+                                               float silentDistance,
+                                               SfxId nextLoopId)
 {
     if (!mixStream_)
         return kInvalidSource;
@@ -879,6 +925,7 @@ SfxSystem::SourceHandle SfxSystem::startSource(SfxId id,
     source->loop = loop;
     source->positional = positional;
     source->playingId = id;
+    source->nextLoopId = nextLoopId;
     source->handle = handle;
     source->gain = gain;
     source->priority = priority;
@@ -1065,6 +1112,18 @@ void SfxSystem::mixIntoStream(SDL_AudioStream* stream, int additionalAmount)
                     if (i0 >= clip.frameCount) {
                         if (source.loop) {
                             source.cursor = std::fmod(source.cursor, static_cast<float>(clip.frameCount));
+                        } else if (source.nextLoopId != SfxId::_Count) {
+                            const SfxId loopId = source.nextLoopId;
+                            const SoundClip& loopClip = clips_[static_cast<size_t>(loopId)];
+                            if (!loopClip.loaded || loopClip.frameCount == 0) {
+                                source = Source{};
+                                break;
+                            }
+                            source.playingId = loopId;
+                            source.nextLoopId = SfxId::_Count;
+                            source.loop = true;
+                            source.cursor = 0.0f;
+                            continue;
                         } else {
                             source = Source{};
                             break;

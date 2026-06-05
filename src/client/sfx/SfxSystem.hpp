@@ -84,6 +84,12 @@ public:
                            const glm::vec3& position = glm::vec3{0.0f},
                            float gain = 1.0f,
                            float priority = 1.0f);
+    SourceHandle startIntroThenLoop(SfxId introId,
+                                    SfxId loopId,
+                                    bool positional = false,
+                                    const glm::vec3& position = glm::vec3{0.0f},
+                                    float gain = 1.0f,
+                                    float priority = 1.0f);
     void updateSource(SourceHandle handle,
                       const glm::vec3& position,
                       const glm::vec3& velocity = glm::vec3{0.0f},
@@ -146,6 +152,7 @@ private:
         bool positional = false;
         bool voiceStream = false;
         SfxId playingId = SfxId::_Count; ///< Which sound this voice is playing.
+        SfxId nextLoopId = SfxId::_Count;
         SourceHandle handle = kInvalidSource;
         ClientId speaker{};
         float cursor = 0.0f;
@@ -221,7 +228,8 @@ private:
                              std::uint16_t maxBusInstances,
                              float cooldownOverrideSeconds = -1.0f,
                              float fullGainDistance = audio::k_fullGainDistance,
-                             float silentDistance = audio::k_silentDistance);
+                             float silentDistance = audio::k_silentDistance,
+                             SfxId nextLoopId = SfxId::_Count);
     SourceHandle playCommand(const audio::AudioCommand& command);
 
     /// @brief master × category × clip × extraGain.

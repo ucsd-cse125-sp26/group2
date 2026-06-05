@@ -416,8 +416,7 @@ private:
 
     // Sound state tracking
     bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.
-    bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
-    SfxSystem::SourceHandle beamLoopHandle_ = SfxSystem::kInvalidSource;
+    std::unordered_map<entt::entity, SfxSystem::SourceHandle> energyBeamHandles_;
     std::unordered_map<entt::entity, std::array<float, 5>> footstepPhases_;
     std::unordered_map<entt::entity, float> footstepCooldowns_;
 

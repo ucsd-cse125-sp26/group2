@@ -1,6 +1,7 @@
 #include "client/sfx/AudioRuntime.hpp"
 
 #include <cassert>
+#include <cstdio>
 #include <fstream>
 #include <string>
 
@@ -21,6 +22,20 @@ void testDefaultManifestResolvesEvents()
     assert(commands[0].positional);
     assert(commands[0].position.x == 10.0f);
     assert(commands[0].priority > 2.0f);
+
+    const auto railgunCommands = runtime.postEvent("weapon.railgun.fire", object);
+    assert(railgunCommands.size() == 1);
+    assert(railgunCommands[0].sfx == SfxId::RailGunFire);
+
+    const auto shotgunCommands = runtime.postEvent("weapon.shotgun.fire", object);
+    assert(shotgunCommands.size() == 1);
+    assert(shotgunCommands[0].sfx == SfxId::ShotgunFire);
+
+    const auto beamLoopCommands = runtime.postEvent("weapon.energy.loop", object);
+    assert(beamLoopCommands.size() == 1);
+    assert(beamLoopCommands[0].sfx == SfxId::EnergyBeamLoop);
+    assert(beamLoopCommands[0].loop);
+    assert(beamLoopCommands[0].positional);
 }
 
 void testFootstepEventUsesConcreteRandom()
@@ -142,6 +157,8 @@ actions = [{ type = "stop", target = "node.switch" }]
     commands = runtime.postEvent("weapon.stop", object);
     assert(commands.size() >= 1);
     assert(commands[0].type == audio::AudioCommandType::StopClip);
+
+    std::remove(path.c_str());
 }
 
 } // namespace

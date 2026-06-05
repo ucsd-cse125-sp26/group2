@@ -221,7 +221,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             // The fire path in WeaponSystem.cpp checks `type == Shotgun` and loops
             // 9 raycasts in an asterisk pattern (1 center + 8 outer). Per-pellet
             // damage is `damage` below (so max body damage = 9 * damage).
-            .fireCooldown = 0.225f, // 4× firerate (was 0.9)
+            .fireCooldown = 1.0f,
             .magazineSize = 6,
             .defaultAmmoCapacity = 36,
             .damage = 10.0f,       // per-pellet; 11 pellets → 110 body max, ~165 head.
