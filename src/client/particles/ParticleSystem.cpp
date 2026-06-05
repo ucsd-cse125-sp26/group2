@@ -77,8 +77,8 @@ void ParticleSystem::update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec
     hitscan_.update(dt, camForward_);
 
     // EnergyGun: drive the Railgun-derived sustained Tesla arc. The local
-    // player's arc is offset to a hip-fire muzzle so it doesn't shoot from the
-    // camera's centre.
+    // player uses the first-person muzzle marker when the viewmodel provides
+    // one, otherwise falls back to the old hip-fire offset.
     reg.view<BeamState>().each([&](entt::entity e, const BeamState& beam) {
         if (!beam.active || beam.type != WeaponType::EnergyGun)
             return;
@@ -91,7 +91,9 @@ void ParticleSystem::update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec
                 guideLen = glm::length(beam.hitPoint - beam.origin);
             if (guideLen < 0.5f)
                 guideLen = 140.0f;
-            origin = camPos_ + camForward_ * 6.0f + camRight_ * 5.0f - camUp_ * 5.0f;
+            origin = localEnergyBeamOriginOverrideValid_
+                         ? localEnergyBeamOriginOverride_
+                         : camPos_ + camForward_ * 6.0f + camRight_ * 5.0f - camUp_ * 5.0f;
             guidePoint = origin + camForward_ * guideLen;
             if (beam.locked == 0)
                 hitPoint = guidePoint;
@@ -101,6 +103,7 @@ void ParticleSystem::update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec
         energyTesla_.drive(
             static_cast<uint32_t>(e), origin, guidePoint, hitPoint, beam.locked != 0, beam.lockStrength);
     });
+    localEnergyBeamOriginOverrideValid_ = false;
     tesla_.update(dt, camForward_);
     energyTesla_.update(dt, camForward_);
 

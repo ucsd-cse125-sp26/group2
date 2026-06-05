@@ -131,6 +131,16 @@ public:
     void update(float dt, const NewCamera& cam, Registry& reg);
     void update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec3 right, glm::vec3 up, Registry& reg);
 
+    /// @brief Override the local EnergyGun beam origin with the first-person muzzle marker.
+    void setLocalEnergyBeamOriginOverride(glm::vec3 origin)
+    {
+        localEnergyBeamOriginOverride_ = origin;
+        localEnergyBeamOriginOverrideValid_ = true;
+    }
+
+    /// @brief Clear the local EnergyGun beam origin override for this frame.
+    void clearLocalEnergyBeamOriginOverride() { localEnergyBeamOriginOverrideValid_ = false; }
+
     /// @brief Upload all particle data to GPU. Must be called BEFORE render pass.
     void uploadToGpu(SDL_GPUCommandBuffer* cmd);
 
@@ -184,6 +194,8 @@ private:
     glm::vec3 camForward_{};
     glm::vec3 camRight_{};
     glm::vec3 camUp_{};
+    glm::vec3 localEnergyBeamOriginOverride_{0.0f};
+    bool localEnergyBeamOriginOverrideValid_ = false;
     float screenW_ = 1280.f;
     float screenH_ = 720.f;
 

@@ -3310,6 +3310,11 @@ SDL_AppResult Game::iterate()
     // drawFrame(), which happens later, so using it here makes muzzle-attached
     // particles visibly trail behind fast player movement.
     const CameraBasis particleCamera = buildCameraBasis(renderYaw, renderPitch, currentCameraRoll_);
+    if (currentEquippedType_ == WeaponType::EnergyGun && cachedMuzzleValid_) {
+        particleSystem.setLocalEnergyBeamOriginOverride(cachedMuzzleWorld_);
+    } else {
+        particleSystem.clearLocalEnergyBeamOriginOverride();
+    }
     particleSystem.update(
         frameTime, renderEye, particleCamera.forward, particleCamera.right, particleCamera.up, registry);
     phaseSnap(phaseStats.particlesMs);
