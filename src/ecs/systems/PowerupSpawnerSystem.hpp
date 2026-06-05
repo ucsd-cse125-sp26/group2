@@ -6,6 +6,9 @@
 #include "ecs/components/PowerupState.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "network/MatchConfig.hpp"
+#include "network/ShotEvent.hpp"
+
+#include <vector>
 
 /// @brief Powerup spawner update system.
 namespace systems
@@ -24,6 +27,10 @@ void resetPowerupSpawnersForMatch(Registry& registry, const MatchConfig& matchCo
 /// @param registry    The ECS registry.
 /// @param dt          Fixed physics delta time in seconds.
 /// @param matchConfig Current host-managed match settings.
-void runPowerupSpawners(Registry& registry, float dt, const MatchConfig& matchConfig);
+/// @param outEvents   Server-authored replicated events emitted by pickups.
+void runPowerupSpawners(Registry& registry,
+                        float dt,
+                        const MatchConfig& matchConfig,
+                        std::vector<NetParticleEvent>& outEvents);
 
 } // namespace systems

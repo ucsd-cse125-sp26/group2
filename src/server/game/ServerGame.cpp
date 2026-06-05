@@ -823,7 +823,7 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         GROUP2_PROF_SCOPE("PowerupSpawners");
         if (matchController.getCurrentPhase() == MatchPhase::IN_PROGRESS)
-            systems::runPowerupSpawners(registry, dt, matchController.getMatchConfig());
+            systems::runPowerupSpawners(registry, dt, matchController.getMatchConfig(), particleEvents);
     }
     {
         GROUP2_PROF_SCOPE("jumpPads");

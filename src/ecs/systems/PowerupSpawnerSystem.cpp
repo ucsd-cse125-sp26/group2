@@ -80,7 +80,8 @@ inline void checkForPlayers(Registry& registry,
                             Position spawnerPos,
                             CollisionShape spawnerShape,
                             PowerupSpawner& spawner,
-                            const MatchConfig& matchConfig)
+                            const MatchConfig& matchConfig,
+                            std::vector<NetParticleEvent>& outEvents)
 {
     auto view = registry.view<Player, Position, CollisionShape, PowerupState>();
     view.each([&](entt::entity player, const Position& pos, const CollisionShape& shape, PowerupState& powerups) {
@@ -92,6 +93,12 @@ inline void checkForPlayers(Registry& registry,
             spawner.hasPowerup = false;
             spawner.spawnCooldown = matchConfig.powerupRespawnCooldownSeconds;
 
+            outEvents.push_back(NetParticleEvent{
+                .source = player,
+                .effectType = ParticleEffectType::PowerupPickup,
+                .pos1 = spawnerPos.value,
+            });
+
             if (spawner.type == PowerupType::Shield) {
                 Health& healthComp = registry.get<Health>(player);
                 healthComp.overShield = overShieldMax;
@@ -100,11 +107,14 @@ inline void checkForPlayers(Registry& registry,
     });
 }
 
-void runPowerupSpawners(Registry& registry, float dt, const MatchConfig& matchConfig)
+void runPowerupSpawners(Registry& registry,
+                        float dt,
+                        const MatchConfig& matchConfig,
+                        std::vector<NetParticleEvent>& outEvents)
 {
     auto view = registry.view<PowerupSpawner, Position, CollisionShape>();
     view.each([&](PowerupSpawner& spawner, const Position& pos, const CollisionShape& shape) {
-        checkForPlayers(registry, pos, shape, spawner, matchConfig);
+        checkForPlayers(registry, pos, shape, spawner, matchConfig, outEvents);
         if ((spawner.spawnCooldown - dt) > 0.0f) {
             spawner.spawnCooldown -= dt;
         } else {

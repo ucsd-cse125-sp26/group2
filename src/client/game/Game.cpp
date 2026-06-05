@@ -1277,9 +1277,9 @@ bool Game::init(AppContext& ctx)
         //     always get the correct surface type and normal.
         if (evt.source == localPlayer) {
             const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
-            const bool isServerAuthoritative = evt.effectType == ParticleEffectType::Explosion ||
-                                               evt.effectType == ParticleEffectType::Smoke ||
-                                               evt.effectType == ParticleEffectType::Impact;
+            const bool isServerAuthoritative =
+                evt.effectType == ParticleEffectType::Explosion || evt.effectType == ParticleEffectType::Smoke ||
+                evt.effectType == ParticleEffectType::Impact || evt.effectType == ParticleEffectType::PowerupPickup;
             if (!isChargeWeapon && !isServerAuthoritative)
                 return;
 
@@ -1383,6 +1383,16 @@ bool Game::init(AppContext& ctx)
         case ParticleEffectType::Fire:
             particleSystem.spawnExplosionVfx(evt.pos1, {0.0f, 1.0f, 0.0f}, evt.param, ExplosionVfxKind::Molotov);
             spawnExplosionFlashLight(evt.pos1, WeaponType::Molotov, evt.param);
+            break;
+        case ParticleEffectType::PowerupPickup:
+            if (sfxSystem.isInitialized()) {
+                const audio::AudioObjectId object = audio::objectId("event.powerup.pickup");
+                sfxSystem.setAudioObjectTransform(object, evt.pos1);
+                if (evt.source == localPlayer)
+                    sfxSystem.postLocalAudioEvent("powerup.pickup", object, 1.0f);
+                else
+                    sfxSystem.postAudioEvent("powerup.pickup", object, 1.0f);
+            }
             break;
         }
     });
