@@ -91,7 +91,8 @@ bool App::init()
     }
 
     // Create window
-    window = SDL_CreateWindow(k_appName, 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    window = SDL_CreateWindow(
+        k_appName, 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_FULLSCREEN);
     if (!window) {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
         cleanup();

@@ -32,7 +32,7 @@ struct ThemeSettings
     ImVec4 button{0.02f, 0.02f, 0.02f, 0.96f};
     ImVec4 buttonHover{0.13f, 0.13f, 0.12f, 1.00f};
     ImVec4 buttonActive{0.22f, 0.22f, 0.20f, 1.00f};
-    ImVec4 header{0.08f, 0.08f, 0.08f, 0.98f};
+    ImVec4 header{0.13f, 0.13f, 0.12f, 1.00f};
     ImVec4 border{0.88f, 0.88f, 0.82f, 0.72f};
     ImVec4 danger{0.36f, 0.04f, 0.04f, 1.00f};
     ImVec4 dangerHover{0.58f, 0.08f, 0.08f, 1.00f};
