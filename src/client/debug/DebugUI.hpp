@@ -195,6 +195,17 @@ public:
     bool showSpawnPointWindow = false;  ///< Show the Spawn Point Debug ImGui window.
     bool drawSpawnPointOverlay = false; ///< Draw spawn point markers (independent of window visibility).
 
+    /// @brief Draw the Killzone Debug window and (optionally) trigger-volume overlay.
+    ///
+    /// @param registry     ECS registry (reads Killzone, Position, CollisionShape).
+    /// @param viewProj     Combined view-projection matrix for the current camera.
+    /// @param screenWidth  Viewport width in pixels.
+    /// @param screenHeight Viewport height in pixels.
+    void buildKillzoneUI(const Registry& registry, const glm::mat4& viewProj, float screenWidth, float screenHeight);
+
+    bool showKillzoneWindow = false;  ///< Show the Killzone Debug ImGui window.
+    bool drawKillzoneOverlay = false; ///< Draw killzone trigger boxes (independent of window visibility).
+
     // ── PR-20: Shot-debug visualizer (CSGO sv_showimpacts-style) ─────
     //
     // Holds a ring buffer of paired (client-side fire-time snapshot,

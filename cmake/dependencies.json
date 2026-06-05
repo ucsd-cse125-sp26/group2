@@ -42,6 +42,10 @@
     "repository": "https://github.com/nothings/stb.git",
     "tag": "master"
   },
+  "tinyexr": {
+    "repository": "https://github.com/syoyo/tinyexr",
+    "tag": "v1.0.9"
+  },
   "lunasvg": {
     "repository": "https://github.com/sammycage/lunasvg.git",
     "tag": "v3.5.0"

@@ -42,6 +42,7 @@ struct Vertex
     glm::vec3 normal;
     glm::vec2 texUV;
     glm::vec4 tangent;
+    glm::vec2 lightMapUV;
 };
 
 enum class PointLightType : std::uint8_t
@@ -390,6 +391,7 @@ private:
     // ─── Existing internal helpers ───────────────────────────────────────────
 
     bool createGeometryPipeline();
+    bool createGeometryLightMapPipeline();
     /// @brief Create the flat static-entity chams pipeline used for occluded powerup silhouettes.
     bool createEntityChamsPipeline();
     SDL_GPUGraphicsPipeline* createDepthPipeline(const SDL_GPURasterizerState& rasterizer_state) const;
@@ -426,7 +428,8 @@ private:
 
     void onFirstFrame(SDL_GPUCommandBuffer* cmd);
 
-    void bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+    void bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool lightmap);
+    void drawStaticLightmapGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawGeometryOverlayPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawSsaoPass(SDL_GPUTexture* depth, SDL_GPUTexture* normal, SDL_GPUTexture* ao, SDL_GPUCommandBuffer* cmd);
@@ -471,6 +474,7 @@ private:
 
     static bool
     inFrustum(const Asset::AABB& modelElementAABB, const FrustumPlanes& frustumPlanes, const glm::mat4& modelMat);
+    bool loadLightMap();
 
     // ─── Member state ────────────────────────────────────────────────────────
 
@@ -479,6 +483,7 @@ private:
     SDL_GPUShaderFormat shaderFormat_ = SDL_GPU_SHADERFORMAT_INVALID;
 
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* geometryLightMapPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* entityChamsPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* fxaaPipeline_ = nullptr;
@@ -498,6 +503,7 @@ private:
     SDL_GPUTexture* ssaoBlurred_ = nullptr;
     SDL_GPUTexture* sceneWithAo_ = nullptr;
     SDL_GPUTexture* tonemappedColor_ = nullptr;
+    SDL_GPUTexture* lightMap_ = nullptr;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
     Uint32 sceneWidth_ = 0;
     Uint32 sceneHeight_ = 0;
@@ -509,6 +515,7 @@ private:
     // Default fallback texture used when a mesh has no material/texture.
     SDL_GPUTexture* texture_ = nullptr;
     SDL_GPUSampler* sampler_ = nullptr;
+    SDL_GPUSampler* nearestSampler_ = nullptr;
 
     SDL_GPUTexture* hudTexture_ = nullptr;
     SDL_GPUSampler* hudSampler_ = nullptr;
