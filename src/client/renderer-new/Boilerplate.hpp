@@ -165,6 +165,16 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 bool enableDepth = true,
                                                 bool overBlending = false);
 
+/// @brief Create a graphics pipeline with multiple color render targets.
+SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
+                                                const std::vector<SDL_GPUTextureFormat>& colorFormats,
+                                                SDL_GPUShaderFormat shaderFormat,
+                                                const ShaderInfo& vertexShaderInfo,
+                                                const ShaderInfo& fragmentShaderInfo,
+                                                const VertexInputLayout& vertexInputLayout,
+                                                bool enableDepth = true,
+                                                bool overBlending = false);
+
 SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device, PipelineDescription pipelineDesc);
 /// @brief Allocate a GPU buffer of the given size and usage.
 /// @param device The GPU device.

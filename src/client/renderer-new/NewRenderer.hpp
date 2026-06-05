@@ -306,7 +306,6 @@ public:
     ///
     /// DATA SOURCE: debug UI hotkey / console command.
     void requestScreenshot(const std::string& path);
-
     /// @brief Queue a vertex-buffer re-upload for one mesh of a loaded model.
     /// @param modelIndex  Renderer-side model handle.
     /// @param meshIndex   Mesh index within that model.
@@ -359,6 +358,27 @@ public:
     RenderToggles toggles{};                     ///< Per-pass on/off toggles (see RenderToggles in RendererTypes.hpp).
     float hdrExposure = 1.0f;                    ///< Debug exposure multiplier used by the tonemap pass.
     float hdrWhitePoint = 4.0f;                  ///< Debug white point for Extended Reinhard tonemapping.
+    float ssaoRadius = 24.0f;                    ///< World-space AO sampling radius.
+    float ssaoBias = 1.5f;                       ///< World-space self-occlusion bias.
+    float ssaoPixelRadiusScale = 0.35f;          ///< Converts AO radius to screen-space sample spacing.
+    float ssaoDepthThreshold = 0.01f;            ///< Max depth-buffer delta accepted for contact AO samples.
+    float ssaoNormalDiffMin = 0.12f;             ///< Normal-difference start for crease/contact weighting.
+    float ssaoNormalDiffMax = 0.55f;             ///< Normal-difference full weight for crease/contact weighting.
+    float ssaoHemisphereMin = 0.05f;             ///< Minimum normal-facing direction for AO samples.
+    float ssaoContactWeight = 1.0f;              ///< Tight contact AO band weight.
+    float ssaoMediumRadius = 48.0f;              ///< Medium-radius crease/corner AO band.
+    float ssaoMediumWeight = 0.25f;              ///< Medium AO band weight.
+    float ssaoIntensity = 1.0f;                  ///< Raw AO occlusion multiplier.
+    float ssaoMinAo = 0.45f;                     ///< Darkest raw AO value.
+    float ssaoMaxAo = 1.0f;                      ///< Brightest raw AO value.
+    bool ssaoBlurEnabled = true;                 ///< Use the depth/normal-aware AO blur.
+    float ssaoBlurRadius = 1.0f;                 ///< Multiplier for the fixed 5x5 AO blur offsets.
+    float ssaoBlurDepthThreshold = 0.3f;         ///< Blur world-distance rejection as a fraction of AO radius.
+    float ssaoBlurNormalThreshold = 0.6f;        ///< Minimum normal dot for AO blur samples.
+    float ssaoBlurStrength = 1.0f;               ///< Blend amount from raw AO to blurred AO.
+    float ssaoCompositeStrength = 1.0f;          ///< AO application strength before tonemapping.
+    float ssaoCompositePower = 2.0f;             ///< AO exponent before composition.
+    int ssaoDebugView = 0;                       ///< 0 final scene, 1 raw AO.
     std::vector<std::string> availableHDRFiles;  ///< Filled by `scanHDRFiles()`; consumed by debug UI.
     std::string currentHDRName = "(procedural)"; ///< Display name of the currently-loaded HDR.
     bool useHDRSkybox = false;                   ///< True after a successful `loadHDRSkybox()`.
@@ -374,6 +394,9 @@ private:
     bool createHudPipeline();
     bool createFxaaPipeline();
     bool createTonemapPipeline();
+    bool createSsaoPipeline();
+    bool createSsaoBlurPipeline();
+    bool createSsaoCompositePipeline();
     bool ensureDepthTextureSize(Uint32 width, Uint32 height);
     bool ensureSceneTextureSize(Uint32 width, Uint32 height);
     void createMeshBuffers(MeshIdInt meshId) const;
@@ -399,6 +422,12 @@ private:
 
     void bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
     void drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
+    void drawGeometryOverlayPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
+    void drawSsaoPass(SDL_GPUTexture* depth, SDL_GPUTexture* normal, SDL_GPUTexture* ao, SDL_GPUCommandBuffer* cmd);
+    void drawSsaoBlurPass(
+        SDL_GPUTexture* ao, SDL_GPUTexture* depth, SDL_GPUTexture* normal, SDL_GPUTexture* output, SDL_GPUCommandBuffer* cmd);
+    void drawSsaoCompositePass(
+        SDL_GPUTexture* sceneColor, SDL_GPUTexture* rawAo, SDL_GPUTexture* blurredAo, SDL_GPUTexture* output, SDL_GPUCommandBuffer* cmd);
     void drawUIPass(SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
     void drawHudPass(SDL_GPUTexture* target, SDL_GPUCommandBuffer* cmd);
     void drawFxaaPass(SDL_GPUTexture* sceneColor, SDL_GPUTexture* swapchain, SDL_GPUCommandBuffer* cmd);
@@ -439,6 +468,9 @@ private:
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* fxaaPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* tonemapPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* ssaoPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* ssaoBlurPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* ssaoCompositePipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* skinnedPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* depthRes0Pipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* depthRes1Pipeline_ = nullptr;
@@ -446,10 +478,16 @@ private:
 
     SDL_GPUTextureFormat colorTarget_ = SDL_GPU_TEXTUREFORMAT_INVALID;
     SDL_GPUTexture* sceneColor_ = nullptr;
+    SDL_GPUTexture* sceneNormal_ = nullptr;
+    SDL_GPUTexture* ssaoColor_ = nullptr;
+    SDL_GPUTexture* ssaoBlurred_ = nullptr;
+    SDL_GPUTexture* sceneWithAo_ = nullptr;
     SDL_GPUTexture* tonemappedColor_ = nullptr;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
     Uint32 sceneWidth_ = 0;
     Uint32 sceneHeight_ = 0;
+    Uint32 ssaoWidth_ = 0;
+    Uint32 ssaoHeight_ = 0;
     Uint32 depthWidth_ = 0;
     Uint32 depthHeight_ = 0;
 
@@ -492,7 +530,6 @@ private:
     // Settings captured state ─────────────────────────────────────────────────
     bool vsyncEnabled_ = true;
     std::string pendingScreenshotPath_;
-
     // Skinned-character subsystem (see SkinnedRenderer.hpp) ──────────────────
     SkinnedRenderer skinnedRenderer_;
 

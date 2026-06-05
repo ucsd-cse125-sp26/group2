@@ -125,6 +125,21 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
+    if (!createSsaoPipeline()) {
+        SDL_Log("NewRenderer: failed to create SSAO pipeline: %s", SDL_GetError());
+        return false;
+    }
+
+    if (!createSsaoBlurPipeline()) {
+        SDL_Log("NewRenderer: failed to create SSAO blur pipeline: %s", SDL_GetError());
+        return false;
+    }
+
+    if (!createSsaoCompositePipeline()) {
+        SDL_Log("NewRenderer: failed to create SSAO composite pipeline: %s", SDL_GetError());
+        return false;
+    }
+
     sampler_ = Boilerplate::createLinearRepeatSampler(device_);
     if (!sampler_) {
         SDL_Log("NewRenderer: failed to create sampler: %s", SDL_GetError());
@@ -319,6 +334,66 @@ bool NewRenderer::createTonemapPipeline()
     return tonemapPipeline_ != nullptr;
 }
 
+bool NewRenderer::createSsaoPipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/hud.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/ssao.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = 2;
+    fragmentShader.uniformBufferCount = 1;
+
+    const Boilerplate::VertexInputLayout vertexLayout{};
+    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    ssaoPipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, hdrFormat, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, false);
+
+    return ssaoPipeline_ != nullptr;
+}
+
+bool NewRenderer::createSsaoCompositePipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/hud.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/ssao_composite.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = 3;
+    fragmentShader.uniformBufferCount = 1;
+
+    const Boilerplate::VertexInputLayout vertexLayout{};
+    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    ssaoCompositePipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, hdrFormat, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, false);
+
+    return ssaoCompositePipeline_ != nullptr;
+}
+
+bool NewRenderer::createSsaoBlurPipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/hud.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/ssao_blur.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = 3;
+    fragmentShader.uniformBufferCount = 1;
+
+    const Boilerplate::VertexInputLayout vertexLayout{};
+    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    ssaoBlurPipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, hdrFormat, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, false);
+
+    return ssaoBlurPipeline_ != nullptr;
+}
+
 bool NewRenderer::createGeometryPipeline()
 {
     Boilerplate::ShaderInfo vertexShader{};
@@ -348,9 +423,9 @@ bool NewRenderer::createGeometryPipeline()
         Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Vertex, tangent)),
     };
 
-    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    const std::vector<SDL_GPUTextureFormat> colorFormats{getHdrFormat(), getHdrFormat()};
     geometryPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, hdrFormat, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
+        device_, colorFormats, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
 
     return geometryPipeline_ != nullptr;
 }
@@ -523,8 +598,21 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
     setMainCamera(eye, yaw, pitch, roll, width, height, fov);
 
     drawGeometryPass(sceneColor_, cmd);
-    drawWeaponPass(sceneColor_, cmd);
-    drawTonemapPass(sceneColor_, tonemappedColor_, cmd);
+
+    SDL_GPUTexture* sceneForPost = sceneColor_;
+    const bool showSsaoDebug = ssaoDebugView != 0;
+    if (toggles.ssao || showSsaoDebug) {
+        drawSsaoPass(depthTarget_.texture, sceneNormal_, ssaoColor_, cmd);
+        if (ssaoBlurEnabled && !showSsaoDebug)
+            drawSsaoBlurPass(ssaoColor_, depthTarget_.texture, sceneNormal_, ssaoBlurred_, cmd);
+        drawSsaoCompositePass(sceneColor_, ssaoColor_, ssaoBlurred_, sceneWithAo_, cmd);
+        sceneForPost = sceneWithAo_;
+    }
+    if (!showSsaoDebug) {
+        drawGeometryOverlayPass(sceneForPost, cmd);
+        drawWeaponPass(sceneForPost, cmd);
+    }
+    drawTonemapPass(sceneForPost, tonemappedColor_, cmd);
     drawFxaaPass(tonemappedColor_, swapchain, cmd);
     drawHudPass(swapchain, cmd);
     drawUIPass(swapchain, cmd);
@@ -669,10 +757,12 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
     if (particleSystem_)
         particleSystem_->uploadToGpu(cmd); // Must be before render pass
 
-    SDL_GPUColorTargetInfo colorTarget =
-        Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
+    SDL_GPUColorTargetInfo colorTargets[2] = {
+        Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f}),
+        Boilerplate::makeColorTargetClear(sceneNormal_, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f}),
+    };
 
-    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, colorTargets, 2, &depthTarget_);
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
     bindLightShadowInfo(geometryPass, cmd);
@@ -684,23 +774,175 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
     drawWorldModelInstances(geometryPass, cmd, false,frustumPlanes);
     drawEntityModels(geometryPass, cmd, false,frustumPlanes);
 
+    SDL_EndGPURenderPass(geometryPass);
+}
+
+void NewRenderer::drawGeometryOverlayPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(sceneColor);
+    SDL_GPUDepthStencilTargetInfo depthInfo = depthTarget_;
+    depthInfo.load_op = SDL_GPU_LOADOP_LOAD;
+    depthInfo.store_op = SDL_GPU_STOREOP_STORE;
+
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthInfo);
+    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
     drawSkinnedModels(geometryPass, cmd);
     drawParticles(geometryPass, cmd);
-
-    // drawWeapon(geometryPass, cmd);
-
     SDL_EndGPURenderPass(geometryPass);
+}
+
+void NewRenderer::drawSsaoPass(
+    SDL_GPUTexture* depth, SDL_GPUTexture* normal, SDL_GPUTexture* ao, SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTarget =
+        Boilerplate::makeColorTargetClear(ao, SDL_FColor{.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f});
+    SDL_GPURenderPass* ssaoPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
+    SDL_BindGPUGraphicsPipeline(ssaoPass, ssaoPipeline_);
+
+    SDL_GPUTextureSamplerBinding bindings[2] = {
+        Boilerplate::makeTextureSamplerBinding(depth, fxaaSampler_),
+        Boilerplate::makeTextureSamplerBinding(normal, fxaaSampler_),
+    };
+    SDL_BindGPUFragmentSamplers(ssaoPass, 0, bindings, 2);
+
+    struct alignas(16) SsaoParams
+    {
+        glm::mat4 inverseViewProjection;
+        glm::mat4 viewProjection;
+        glm::vec2 inverseResolution;
+        float radius;
+        float bias;
+        float pixelRadiusScale;
+        float depthJumpLimit;
+        float normalDiffMin;
+        float normalDiffMax;
+        float hemisphereMin;
+        float contactWeight;
+        float mediumRadius;
+        float mediumWeight;
+        float intensity;
+        float minAo;
+        float maxAo;
+        float _pad0;
+    } params{
+        glm::inverse(camera_.getViewProjectionMatrix()),
+        camera_.getViewProjectionMatrix(),
+        glm::vec2{1.0f / static_cast<float>(sceneWidth_), 1.0f / static_cast<float>(sceneHeight_)},
+        ssaoRadius,
+        ssaoBias,
+        ssaoPixelRadiusScale,
+        ssaoDepthThreshold,
+        ssaoNormalDiffMin,
+        ssaoNormalDiffMax,
+        ssaoHemisphereMin,
+        ssaoContactWeight,
+        ssaoMediumRadius,
+        ssaoMediumWeight,
+        ssaoIntensity,
+        ssaoMinAo,
+        ssaoMaxAo,
+        0.0f,
+    };
+    SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
+
+    SDL_DrawGPUPrimitives(ssaoPass, 6, 1, 0, 0);
+    SDL_EndGPURenderPass(ssaoPass);
+}
+
+void NewRenderer::drawSsaoBlurPass(SDL_GPUTexture* ao,
+                                   SDL_GPUTexture* depth,
+                                   SDL_GPUTexture* normal,
+                                   SDL_GPUTexture* output,
+                                   SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTarget =
+        Boilerplate::makeColorTargetClear(output, SDL_FColor{.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f});
+    SDL_GPURenderPass* blurPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
+    SDL_BindGPUGraphicsPipeline(blurPass, ssaoBlurPipeline_);
+
+    SDL_GPUTextureSamplerBinding bindings[3] = {
+        Boilerplate::makeTextureSamplerBinding(ao, fxaaSampler_),
+        Boilerplate::makeTextureSamplerBinding(depth, fxaaSampler_),
+        Boilerplate::makeTextureSamplerBinding(normal, fxaaSampler_),
+    };
+    SDL_BindGPUFragmentSamplers(blurPass, 0, bindings, 3);
+
+    struct alignas(16) BlurParams
+    {
+        glm::mat4 inverseViewProjection;
+        glm::vec2 inverseResolution;
+        float radius;
+        float blurRadius;
+        float depthThreshold;
+        float normalThreshold;
+        float strength;
+        float _pad0;
+    } params{
+        glm::inverse(camera_.getViewProjectionMatrix()),
+        glm::vec2{1.0f / static_cast<float>(sceneWidth_), 1.0f / static_cast<float>(sceneHeight_)},
+        ssaoRadius,
+        ssaoBlurRadius,
+        ssaoBlurDepthThreshold,
+        ssaoBlurNormalThreshold,
+        ssaoBlurStrength,
+        0.0f,
+    };
+    SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
+
+    SDL_DrawGPUPrimitives(blurPass, 6, 1, 0, 0);
+    SDL_EndGPURenderPass(blurPass);
+}
+
+void NewRenderer::drawSsaoCompositePass(
+    SDL_GPUTexture* sceneColor,
+    SDL_GPUTexture* rawAo,
+    SDL_GPUTexture* blurredAo,
+    SDL_GPUTexture* output,
+    SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTarget =
+        Boilerplate::makeColorTargetClear(output, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f});
+    SDL_GPURenderPass* compositePass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
+    SDL_BindGPUGraphicsPipeline(compositePass, ssaoCompositePipeline_);
+
+    SDL_GPUTextureSamplerBinding bindings[3] = {
+        Boilerplate::makeTextureSamplerBinding(sceneColor, fxaaSampler_),
+        Boilerplate::makeTextureSamplerBinding(rawAo, fxaaSampler_),
+        Boilerplate::makeTextureSamplerBinding(blurredAo, fxaaSampler_),
+    };
+    SDL_BindGPUFragmentSamplers(compositePass, 0, bindings, 3);
+
+    struct alignas(16) CompositeParams
+    {
+        float strength;
+        float power;
+        Uint32 blurEnabled;
+        int debugView;
+    } params{
+        ssaoCompositeStrength,
+        ssaoCompositePower,
+        ssaoBlurEnabled ? 1u : 0u,
+        std::clamp(ssaoDebugView, 0, 1),
+    };
+    SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
+
+    SDL_DrawGPUPrimitives(compositePass, 6, 1, 0, 0);
+    SDL_EndGPURenderPass(compositePass);
 }
 
 void NewRenderer::drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(sceneColor);
+    SDL_GPUColorTargetInfo colorTargets[2] = {
+        Boilerplate::makeColorTargetLoad(sceneColor),
+        Boilerplate::makeColorTargetLoad(sceneNormal_),
+    };
 
     SDL_GPUDepthStencilTargetInfo depthInfo = depthTarget_; // copy
     depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;               // override to clear
     depthInfo.clear_depth = 1.0f;
 
-    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthInfo);
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, colorTargets, 2, &depthInfo);
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
@@ -984,7 +1226,7 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
         depthTarget_.texture = nullptr;
     }
 
-    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, false);
+    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, true);
 
     if (!depthTarget_.texture)
         return false;
@@ -1003,18 +1245,42 @@ bool NewRenderer::ensureSceneTextureSize(Uint32 width, Uint32 height)
         SDL_ReleaseGPUTexture(device_, sceneColor_);
         sceneColor_ = nullptr;
     }
+    if (sceneNormal_) {
+        SDL_ReleaseGPUTexture(device_, sceneNormal_);
+        sceneNormal_ = nullptr;
+    }
+    if (ssaoColor_) {
+        SDL_ReleaseGPUTexture(device_, ssaoColor_);
+        ssaoColor_ = nullptr;
+    }
+    if (ssaoBlurred_) {
+        SDL_ReleaseGPUTexture(device_, ssaoBlurred_);
+        ssaoBlurred_ = nullptr;
+    }
+    if (sceneWithAo_) {
+        SDL_ReleaseGPUTexture(device_, sceneWithAo_);
+        sceneWithAo_ = nullptr;
+    }
     if (tonemappedColor_) {
         SDL_ReleaseGPUTexture(device_, tonemappedColor_);
         tonemappedColor_ = nullptr;
     }
 
     sceneColor_ = Boilerplate::createSampledColorTarget(device_, width, height, getHdrFormat());
+    sceneNormal_ = Boilerplate::createSampledColorTarget(device_, width, height, getHdrFormat());
+    const Uint32 ssaoWidth = std::max<Uint32>(1, (width + 1) / 2);
+    const Uint32 ssaoHeight = std::max<Uint32>(1, (height + 1) / 2);
+    ssaoColor_ = Boilerplate::createSampledColorTarget(device_, ssaoWidth, ssaoHeight, getHdrFormat());
+    ssaoBlurred_ = Boilerplate::createSampledColorTarget(device_, ssaoWidth, ssaoHeight, getHdrFormat());
+    sceneWithAo_ = Boilerplate::createSampledColorTarget(device_, width, height, getHdrFormat());
     tonemappedColor_ = Boilerplate::createSampledColorTarget(device_, width, height, colorTarget_);
-    if (!sceneColor_ || !tonemappedColor_)
+    if (!sceneColor_ || !sceneNormal_ || !ssaoColor_ || !ssaoBlurred_ || !sceneWithAo_ || !tonemappedColor_)
         return false;
 
     sceneWidth_ = width;
     sceneHeight_ = height;
+    ssaoWidth_ = ssaoWidth;
+    ssaoHeight_ = ssaoHeight;
     return true;
 }
 
@@ -1070,6 +1336,14 @@ void NewRenderer::quit()
             SDL_ReleaseGPUTexture(device_, depthTarget_.texture);
         if (sceneColor_)
             SDL_ReleaseGPUTexture(device_, sceneColor_);
+        if (sceneNormal_)
+            SDL_ReleaseGPUTexture(device_, sceneNormal_);
+        if (ssaoColor_)
+            SDL_ReleaseGPUTexture(device_, ssaoColor_);
+        if (ssaoBlurred_)
+            SDL_ReleaseGPUTexture(device_, ssaoBlurred_);
+        if (sceneWithAo_)
+            SDL_ReleaseGPUTexture(device_, sceneWithAo_);
         if (tonemappedColor_)
             SDL_ReleaseGPUTexture(device_, tonemappedColor_);
 
@@ -1095,6 +1369,12 @@ void NewRenderer::quit()
             SDL_ReleaseGPUGraphicsPipeline(device_, fxaaPipeline_);
         if (tonemapPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, tonemapPipeline_);
+        if (ssaoPipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(device_, ssaoPipeline_);
+        if (ssaoBlurPipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(device_, ssaoBlurPipeline_);
+        if (ssaoCompositePipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(device_, ssaoCompositePipeline_);
         if (sampler_)
             SDL_ReleaseGPUSampler(device_, sampler_);
         if (hudSampler_)
@@ -1123,8 +1403,15 @@ void NewRenderer::quit()
     hudPipeline_ = nullptr;
     fxaaPipeline_ = nullptr;
     tonemapPipeline_ = nullptr;
+    ssaoPipeline_ = nullptr;
+    ssaoBlurPipeline_ = nullptr;
+    ssaoCompositePipeline_ = nullptr;
     depthTarget_.texture = nullptr;
     sceneColor_ = nullptr;
+    sceneNormal_ = nullptr;
+    ssaoColor_ = nullptr;
+    ssaoBlurred_ = nullptr;
+    sceneWithAo_ = nullptr;
     tonemappedColor_ = nullptr;
     texture_ = nullptr;
     sampler_ = nullptr;
@@ -1133,6 +1420,8 @@ void NewRenderer::quit()
     fxaaSampler_ = nullptr;
     sceneWidth_ = 0;
     sceneHeight_ = 0;
+    ssaoWidth_ = 0;
+    ssaoHeight_ = 0;
     depthWidth_ = 0;
     depthHeight_ = 0;
 }
@@ -1170,19 +1459,19 @@ int NewRenderer::loadSceneModel(
 
     Asset::modelInstances_.push_back(sceneInstance);
 
-    if (!model.pointLights.empty()) {
-        std::vector<PointLight> pointLights;
-        pointLights.reserve(model.pointLights.size());
-        for (const Asset::PointLight& light : model.pointLights) {
-            PointLight pointLight{};
-            pointLight.position = glm::vec3(modelTransform * glm::vec4(light.position, 1.0f));
-            pointLight.intensity = light.intensity;
-            pointLight.color = light.color;
-            pointLight.range = light.range * scale;
-            pointLights.push_back(pointLight);
-        }
-        setStaticPointLights(std::move(pointLights));
-    }
+    // if (!model.pointLights.empty()) {
+    //     std::vector<PointLight> pointLights;
+    //     pointLights.reserve(model.pointLights.size());
+    //     for (const Asset::PointLight& light : model.pointLights) {
+    //         PointLight pointLight{};
+    //         pointLight.position = glm::vec3(modelTransform * glm::vec4(light.position, 1.0f));
+    //         pointLight.intensity = light.intensity;
+    //         pointLight.color = light.color;
+    //         pointLight.range = light.range * scale;
+    //         pointLights.push_back(pointLight);
+    //     }
+    //     setStaticPointLights(std::move(pointLights));
+    // }
 
     std::vector<Boilerplate::BufferUpload> uploads;
     auto uploadTexture = [&](TexIdInt texId, SDL_GPUTextureFormat format) {

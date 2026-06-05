@@ -64,6 +64,7 @@ layout(set = 3, binding = 2) uniform lightBlock{
 } lightInfo;
 
 layout(location = 0) out vec4 color;
+layout(location = 1) out vec4 normalColor;
 
 // Just a single directional light for now...
 //const vec3 light_direction = normalize(-vec3(1.0f,1.0f,1.0f));
@@ -74,7 +75,7 @@ const vec3 ambient_color = 0.125f * vec3(0.08f, 0.08f,0.12f); // dark-blue
 
 void main()
 {
-    vec3 normal = gl_FrontFacing ? frag_normal : -frag_normal;
+    vec3 normal = normalize(gl_FrontFacing ? frag_normal : -frag_normal);
     if (materialFlags.useNormalTexture != 0) {
         vec3 tangent = normalize(frag_tangent.xyz - normal * dot(normal, frag_tangent.xyz));
         vec3 bitangent = normalize(cross(normal, tangent) * frag_tangent.w);
@@ -139,8 +140,8 @@ void main()
 
     }
 
-    albedo.rgb *= (normal * 0.5f) + 0.5f;
     vec3 diffuse = albedo.rgb * (1.0 - metallic) * irradiance;
     vec3 metal = albedo.rgb * metallic * irradiance * (1.0 - 0.5 * roughness);
     color = vec4(diffuse + metal, albedo.a);
+    normalColor = vec4(normal * 0.5 + 0.5, 1.0);
 }

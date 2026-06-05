@@ -215,6 +215,25 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 bool enableDepth,
                                                 bool overBlending)
 {
+    return createGraphicsPipeline(device,
+                                  std::vector<SDL_GPUTextureFormat>{colorFormat},
+                                  shaderFormat,
+                                  vertexShaderInfo,
+                                  fragmentShaderInfo,
+                                  vertexInputLayout,
+                                  enableDepth,
+                                  overBlending);
+}
+
+SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
+                                                const std::vector<SDL_GPUTextureFormat>& colorFormats,
+                                                SDL_GPUShaderFormat shaderFormat,
+                                                const ShaderInfo& vertexShaderInfo,
+                                                const ShaderInfo& fragmentShaderInfo,
+                                                const VertexInputLayout& vertexInputLayout,
+                                                bool enableDepth,
+                                                bool overBlending)
+{
     SDL_GPUShader* vertexShader = loadShader(device, vertexShaderInfo, shaderFormat);
     SDL_GPUShader* fragmentShader = loadShader(device, fragmentShaderInfo, shaderFormat);
 
@@ -230,8 +249,10 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
     vertexInputState.num_vertex_attributes = static_cast<Uint32>(vertexInputLayout.attributes.size());
     vertexInputState.vertex_attributes = vertexInputLayout.attributes.data();
 
-    SDL_GPUColorTargetDescription colorTarget{};
-    colorTarget.format = colorFormat;
+    std::vector<SDL_GPUColorTargetDescription> colorTargets(colorFormats.size());
+    for (size_t i = 0; i < colorFormats.size(); ++i)
+        colorTargets[i].format = colorFormats[i];
+
     if (overBlending) {
         SDL_GPUColorTargetBlendState overBlendState{};
         overBlendState.enable_blend = true;
@@ -246,7 +267,7 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
 
         overBlendState.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
 
-        colorTarget.blend_state = overBlendState;
+        colorTargets.front().blend_state = overBlendState;
     }
 
     SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
@@ -254,8 +275,8 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
     pipelineInfo.fragment_shader = fragmentShader;
     pipelineInfo.vertex_input_state = vertexInputState;
     pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    pipelineInfo.target_info.color_target_descriptions = &colorTarget;
-    pipelineInfo.target_info.num_color_targets = 1;
+    pipelineInfo.target_info.color_target_descriptions = colorTargets.data();
+    pipelineInfo.target_info.num_color_targets = static_cast<Uint32>(colorTargets.size());
     pipelineInfo.target_info.has_depth_stencil_target = enableDepth;
     pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
 
@@ -491,7 +512,7 @@ SDL_GPUTexture* createDepthTexture(SDL_GPUDevice* device, Uint32 width, Uint32 h
     info.layer_count_or_depth = 1;
     info.num_levels = 1;
     info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
     SDL_GPUTexture* texture = SDL_CreateGPUTexture(device, &info);
     if (!texture)

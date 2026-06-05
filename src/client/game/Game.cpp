@@ -6253,8 +6253,12 @@ SDL_AppResult Game::iterate()
     }
     if (showHdrDebugUI_) {
         ImGui::SetNextWindowPos({300.f, 400.f}, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize({260.f, 120.f}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize({260.f, 150.f}, ImGuiCond_FirstUseEver);
         if (ImGui::Begin("HDR Debug", &showHdrDebugUI_)) {
+            ImGui::SeparatorText("SSAO");
+            ImGui::Checkbox("SSAO Enabled", &renderer->toggles.ssao);
+
+            ImGui::SeparatorText("HDR");
             ImGui::SliderFloat("Exposure", &renderer->hdrExposure, 0.0f, 5.0f, "%.2f");
             ImGui::SliderFloat("White Point", &renderer->hdrWhitePoint, 0.1f, 20.0f, "%.2f");
         }
