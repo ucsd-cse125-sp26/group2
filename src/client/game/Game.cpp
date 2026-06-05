@@ -1342,7 +1342,7 @@ bool Game::init(AppContext& ctx)
             // Local player: 10 units ahead of the right palm along the view dir
             // (muzzleFlashOrigin). Remote players: the shot's muzzle origin.
             const glm::vec3 flashPos = (evt.source == localPlayer) ? muzzleFlashOrigin(evtOrigin) : evtOrigin;
-            spawnMuzzleFlashLight(flashPos);
+            spawnMuzzleFlashLight(flashPos, evt.weaponType);
         }
 
         switch (evt.effectType) {
@@ -2230,7 +2230,7 @@ void Game::adoptGamepad(SDL_JoystickID id)
     }
 }
 
-void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
+void Game::spawnMuzzleFlashLight(const glm::vec3& pos, WeaponType weaponType)
 {
     // Respect the "Muzzle Flash" setting — skip spawning when disabled. Lights
     // already in flight keep fading out naturally.
@@ -2239,10 +2239,10 @@ void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
 
     TransientVfxLight flash;
     flash.position = pos;
-    // Warm orange-white muzzle flash. Intensity is in the same scale as the
-    // scene's static point lights (shader attenuation is pure 1/r²), so it
-    // needs to be large to noticeably light nearby surfaces.
-    flash.color = glm::vec3(1.0f, 0.65f, 0.30f);
+    // Warm orange-white for ballistic/rocket weapons, cool blue for energy-style shots.
+    flash.color = (weaponType == WeaponType::RailGun || weaponType == WeaponType::EnergyGun)
+                      ? glm::vec3(0.25f, 0.65f, 1.0f)
+                      : glm::vec3(1.0f, 0.65f, 0.30f);
     flash.intensity = 4500.0f;
     flash.age = 0.0f;
     // ~200 ms total: a ~20 ms ease-in to full brightness then a gradual ~180 ms
@@ -3265,7 +3265,7 @@ SDL_AppResult Game::iterate()
                 // echo of our own non-charge fire is skipped for instant local
                 // feedback — see the early return in onRawParticleEvent. Origin
                 // is 10 units ahead of the right palm along the view direction.
-                spawnMuzzleFlashLight(muzzleFlashOrigin(hip));
+                spawnMuzzleFlashLight(muzzleFlashOrigin(hip), currentEquippedType_);
 
                 // Visual recoil kick (viewmodel-only).
                 // Third-person recoil happens via the WeaponFiredEvent
