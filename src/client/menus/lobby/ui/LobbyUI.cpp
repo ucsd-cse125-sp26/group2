@@ -77,7 +77,10 @@ void drawSidebar(const LobbyUIConfig& config, BuildResult& result, bool localRea
         if (config.hostAddressesVisible) {
             ImGui::SetWindowFontScale(smallScale);
             if (!config.hostLanIp.empty()) {
-                ImGui::Text("Address: %.*s", static_cast<int>(config.hostLanIp.size()), config.hostLanIp.data());
+                ImGui::Text("Address: %.*s:%u",
+                            static_cast<int>(config.hostLanIp.size()),
+                            config.hostLanIp.data(),
+                            static_cast<unsigned>(config.hostPort));
             } else {
                 ImGui::TextDisabled("Address unavailable");
             }
@@ -166,8 +169,11 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         }
     }
 
-    if (menu_theme::beginPanel(
-            "Lobby", menu_theme::k_frontendPanelBaseWidth, menu_theme::k_frontendPanelBaseHeight, true))
+    if (menu_theme::beginPanel("Lobby",
+                               menu_theme::k_frontendPanelBaseWidth,
+                               menu_theme::k_frontendPanelBaseHeight,
+                               true,
+                               ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
     {
         menu_theme::terminalStatusLine(config.startCountdownActive ? "MATCH COUNTDOWN ACTIVE" : "WAITING FOR READY",
                                        config.isHost ? "HOST" : "CLIENT");

@@ -3110,6 +3110,16 @@ SDL_AppResult Game::iterate()
                 });
             }
 
+            // Dead players don't fire — server stops processing fire input on
+            // death, so the local prediction must mirror that or VFX/SFX/recoil
+            // continue client-side while the corpse "shoots".
+            bool localDead = false;
+            registry.view<LocalPlayer, PlayerVisState>().each(
+                [&](const PlayerVisState& pvs) { localDead = pvs.isDead; });
+            if (localDead) {
+                shooting = false;
+            }
+
             // Grenade throw locks out fire VFX for its wind-up, exactly like reload.
             bool grenadeThrowActive = false;
             registry.view<LocalPlayer, GrenadeState>().each([&](const GrenadeState& grenades) {
