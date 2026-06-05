@@ -186,17 +186,17 @@ inline const WeaponHoldPose& getWeaponHoldPose(WeaponType type)
     // foregrip). (pitch, yaw, roll) degrees; layout matches GripPose::index.
     static const std::array<glm::vec3, kGripPoseJointCount> k_rightFingers{{
         {30.0f, 20.0f, 0.0f}, {35.0f, 0.0f, 0.0f}, {25.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, // thumb
-        {25.0f, 0.0f, 0.0f}, {40.0f, 0.0f, 0.0f}, {35.0f, 0.0f, 0.0f}, {15.0f, 0.0f, 0.0f},  // index
-        {55.0f, 0.0f, 0.0f}, {75.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // middle
-        {60.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // ring
-        {60.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},  // pinky
+        {25.0f, 0.0f, 0.0f},  {40.0f, 0.0f, 0.0f}, {35.0f, 0.0f, 0.0f}, {15.0f, 0.0f, 0.0f}, // index
+        {55.0f, 0.0f, 0.0f},  {75.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, // middle
+        {60.0f, 0.0f, 0.0f},  {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, // ring
+        {60.0f, 0.0f, 0.0f},  {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, // pinky
     }};
     static const std::array<glm::vec3, kGripPoseJointCount> k_leftFingers{{
         {35.0f, -20.0f, 0.0f}, {40.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, // thumb
-        {65.0f, 0.0f, 0.0f}, {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // index
-        {70.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // middle
-        {70.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // ring
-        {65.0f, 0.0f, 0.0f}, {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f},   // pinky
+        {65.0f, 0.0f, 0.0f},   {80.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, // index
+        {70.0f, 0.0f, 0.0f},   {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, // middle
+        {70.0f, 0.0f, 0.0f},   {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, // ring
+        {65.0f, 0.0f, 0.0f},   {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, // pinky
     }};
 
     auto make = [&](glm::vec3 offset, float scale, BoneAngles right, BoneAngles left) {
@@ -213,23 +213,28 @@ inline const WeaponHoldPose& getWeaponHoldPose(WeaponType type)
 
     static const std::array<WeaponHoldPose, kRenderableWeaponTypeCount> k_params{{
         // Rifle
-        make({-21.0f, 23.5f, 66.25f}, 39.4f,
+        make({-21.0f, 23.5f, 66.25f},
+             39.4f,
              {{{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 44.0f}, {-107.0f, -7.0f, 13.0f}, {-1.0f, 24.0f, -41.0f}}},
              {{{24.0f, 0.0f, 0.0f}, {36.0f, 0.0f, 48.0f}, {71.0f, -3.0f, 6.0f}, {-11.0f, -46.0f, -23.0f}}}),
         // Rocket launcher
-        make({-21.0f, -28.25f, 28.75f}, 39.4f,
+        make({-21.0f, -28.25f, 28.75f},
+             39.4f,
              {{{0.0f, 0.0f, 0.0f}, {0.0f, 42.0f, 18.0f}, {-155.0f, 4.0f, 9.0f}, {6.0f, 106.0f, -62.0f}}},
              {{{24.0f, 0.0f, 0.0f}, {40.0f, -16.0f, 46.0f}, {103.0f, -3.0f, 5.0f}, {-6.0f, -57.0f, -41.0f}}}),
         // RailGun / charge rifle
-        make({-21.0f, -18.0f, 66.25f}, 39.4f,
+        make({-21.0f, -18.0f, 66.25f},
+             39.4f,
              {{{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 44.0f}, {-107.0f, -7.0f, 13.0f}, {-1.0f, 24.0f, -41.0f}}},
              {{{24.0f, 0.0f, 0.0f}, {36.0f, 0.0f, 48.0f}, {71.0f, -3.0f, 6.0f}, {-11.0f, -46.0f, -23.0f}}}),
         // EnergyGun
-        make({-21.0f, 3.25f, 80.0f}, 22.9f,
+        make({-21.0f, 3.25f, 80.0f},
+             22.9f,
              {{{0.0f, -14.0f, 0.0f}, {0.0f, 0.0f, 35.0f}, {-120.0f, 5.0f, 7.0f}, {13.0f, 53.0f, -27.0f}}},
              {{{24.0f, 0.0f, 0.0f}, {36.0f, 0.0f, 48.0f}, {71.0f, -3.0f, 6.0f}, {-11.0f, -123.0f, -21.0f}}}),
         // Shotgun — reuses the EnergyGun model + pose.
-        make({-21.0f, 3.25f, 80.0f}, 22.9f,
+        make({-21.0f, 3.25f, 80.0f},
+             22.9f,
              {{{0.0f, -14.0f, 0.0f}, {0.0f, 0.0f, 35.0f}, {-120.0f, 5.0f, 7.0f}, {13.0f, 53.0f, -27.0f}}},
              {{{24.0f, 0.0f, 0.0f}, {36.0f, 0.0f, 48.0f}, {71.0f, -3.0f, 6.0f}, {-11.0f, -123.0f, -21.0f}}}),
     }};
@@ -365,15 +370,15 @@ inline WeaponModelInfo getWeaponModelInfo(WeaponType type)
 inline const RecoilParams& getRecoilParams(WeaponType type)
 {
     static constexpr std::array<RecoilParams, kRenderableWeaponTypeCount> k_params{{
-        // Rifle (R-301) — full-auto, low per-shot, fast recovery
-        {.pitchKick = 2.0f, .pushBack = 1.5f, .rollKick = 0.5f, .recoverySpeed = 14.0f},
-        // Rocket — big boom
-        {.pitchKick = 8.0f, .pushBack = 5.0f, .rollKick = 2.0f, .recoverySpeed = 6.0f},
-        // RailGun (Triple Take) — medium
-        {.pitchKick = 5.0f, .pushBack = 3.0f, .rollKick = 1.0f, .recoverySpeed = 8.0f},
-        // EnergyGun (Wingman) — hand cannon
+        // Rifle
+        {.pitchKick = -2.0f, .pushBack = 6.0f, .rollKick = 0.5f, .recoverySpeed = 14.0f},
+        // Rocket
+        {.pitchKick = -3.0f, .pushBack = 16.5f, .rollKick = 2.0f, .recoverySpeed = 6.0f},
+        // RailGun
+        {.pitchKick = -6.0f, .pushBack = 11.0f, .rollKick = 1.0f, .recoverySpeed = 6.0f},
+        // EnergyGun
         {.pitchKick = 6.0f, .pushBack = 4.0f, .rollKick = 1.5f, .recoverySpeed = 7.0f},
-        // Shotgun (Peacekeeper) — heavy single thump
+        // Shotgun
         {.pitchKick = 9.0f, .pushBack = 6.0f, .rollKick = 1.0f, .recoverySpeed = 5.0f},
     }};
 
