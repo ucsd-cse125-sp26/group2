@@ -101,7 +101,6 @@ struct ModelElement
     MaterialIdInt materialId_ = 0;
     glm::mat4 cachedTransform_;
     AABB cachedAabb_;
-;
 };
 
 struct ModelNode

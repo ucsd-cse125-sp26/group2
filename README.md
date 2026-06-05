@@ -384,3 +384,4 @@ CC Attribution licenses
 - Powerups
   - Armor (shield): https://sketchfab.com/3d-models/low-poly-chest-plate-mesh-e145fb781fd847afa70591ed4909c9cb by leoxx300
   - Lightning (damage): https://sketchfab.com/3d-models/lightning-bolt-icons-48bb0ec8cdf445da91624c23bba28b5a by leesokleng
+  - Shotgun: https://sketchfab.com/3d-models/low-poly-sci-fi-shotgun-4a6fc75d0e0f474fb85533e0e4b69400 by Keralt

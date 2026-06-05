@@ -38,6 +38,8 @@ struct UserSettings
     float aimAssistStrength{1.0f}; ///< Aim assist strength in [0, 1], where 0 is no assist and 1 is full assist.
     bool gamepadSwapSticks{false}; ///< If true, swap the left and right sticks for look and move input.
     bool muzzleFlashEnabled{true}; ///< If false, suppress the dynamic muzzle-flash point light on weapon fire.
+    float musicVolume{0.7f};       ///< Music volume in [0, 1].
+    float sfxVolume{1.0f};         ///< Sound-effect volume in [0, 1].
 };
 
 /// @brief User-settings persistence helpers.

@@ -145,7 +145,7 @@ struct SkinnedInstance
 {
     glm::mat4 worldTransform{1.0f}; ///< Rig-local → world.  Composed CPU-side as T * R * S.
     uint32_t paletteBase = 0;       ///< First joint slot in the palette = instanceIndex * numJoints.
-    uint32_t materialId = 0;        ///< Reserved; ignore for now (will index a material table later).
+    uint32_t materialId = 0;        ///< 0=normal, 1=killcam highlight, 2=wallhack chams.
     uint32_t _pad0 = 0;
     uint32_t _pad1 = 0;
     glm::vec4 tint{1.0f, 1.0f, 1.0f, 0.0f}; ///< rgb = per-player color, a = blend factor (0 = no tint).

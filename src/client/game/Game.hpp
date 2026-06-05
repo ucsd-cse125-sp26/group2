@@ -227,13 +227,13 @@ private:
     NewRenderer* renderer = nullptr;                               ///< Borrowed renderer owned by App.
     Registry registry;                                             ///< The shared ECS registry.
     Client* client = nullptr;                                      ///< Borrowed UDP network client owned by App.
+    SfxSystem* sfxSystem = nullptr;                                ///< Borrowed audio system owned by App.
     UserSettings* userSettings = nullptr;                          ///< Borrowed user settings owned by App.
     std::string_view userSettingsPath_;                            ///< Borrowed save path for user settings.
     std::optional<registry_serialization::Loader> snapshotLoader_; ///< Incremental loader; created on first snapshot.
     std::optional<entt::entity>
         mappedLocalPlayerEntity_;  ///< Local-registry entity for this client's player, once assigned.
     ParticleSystem particleSystem; ///< Client-side VFX particle system.
-    SfxSystem sfxSystem;           ///< Client-side sound effects system.
     VoiceChatSystem voiceChat_;    ///< Push-to-talk Opus proximity voice chat.
     Hud hud_;                      ///< In-game HUD overlay system.
     entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
@@ -418,8 +418,13 @@ private:
 
     // Sound state tracking
     bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.
-    bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
-    SfxSystem::SourceHandle beamLoopHandle_ = SfxSystem::kInvalidSource;
+    struct BeamAudioState
+    {
+        bool active = false;
+        float loopDelaySeconds = 0.0f;
+        SfxSystem::SourceHandle loopHandle = SfxSystem::kInvalidSource;
+    };
+    std::unordered_map<entt::entity, BeamAudioState> beamAudioStates_;
     std::unordered_map<entt::entity, std::array<float, 5>> footstepPhases_;
     std::unordered_map<entt::entity, float> footstepCooldowns_;
 
@@ -666,39 +671,10 @@ private:
     std::unordered_map<entt::entity, GripSwapState> gripSwapState_{};
     float aimAssistParityAccumSec_ = 0.0f; ///< Seconds since the last aim-assist parity check log line (Phase F).
     AnimationLibrary animLibrary_;         ///< Collection of ozz clips on the shared rig.
-    // Per-weapon animated first-person viewmodel (gun rig + arms + baked clips),
-    // indexed by WeaponType (see kWeaponViewmodelAssets). The renderer has a
-    // single viewmodel rig slot, so the active weapon's rig is (re)installed on
-    // equip; `activeViewmodelType_` tracks which is installed. A weapon whose GLB
-    // failed to load keeps weaponVmLoaded_[t]=false and falls back to the legacy
-    // static weapon model + procedural hands.
-    std::array<WeaponViewmodelAnim, kRenderableWeaponTypeCount> weaponVms_;    ///< Skinned gun rig per weapon.
-    std::array<WeaponViewmodelAnim, kRenderableWeaponTypeCount> weaponVmArms_; ///< First-person arms rig per weapon.
-    std::array<bool, kRenderableWeaponTypeCount> weaponVmLoaded_{};
-    std::array<bool, kRenderableWeaponTypeCount> weaponVmArmsLoaded_{};
-    std::array<int, kRenderableWeaponTypeCount> weaponVmModelIdx_{}; ///< Hidden static gun model per weapon (textures).
-    std::array<int, kRenderableWeaponTypeCount>
-        weaponVmArmsModelIdx_{};        ///< Hidden static arms model per weapon (textures).
-    int activeViewmodelType_ = -1;      ///< WeaponType whose rig is installed in the renderer (-1 = none).
-    bool weaponVmReloadActive_ = false; ///< Edge-trigger so the reload clip plays once per reload (active weapon).
-    bool weaponVmEquipped_ = false;     ///< Edge-trigger so the draw clip plays once on equip (active weapon).
-    int weaponVmPrevMagAmmo_ = -1;      ///< Tracks mag ammo to detect a shot fired this frame.
-    int shellEjectModelIdx_ = -1;       ///< Spent-casing prop (hidden static; drawn via entity list).
-    struct Casing
-    {
-        glm::vec3 pos{0.0f};
-        glm::vec3 vel{0.0f};
-        glm::mat3 orient{1.0f}; ///< Base orientation: casing long axis (local X) aligned to the barrel at spawn.
-        float angle = 0.0f;     ///< Tumble angle (about the casing's local Z).
-        float spin = 0.0f;      ///< Tumble rate.
-        float age = 0.0f;
-    };
-    std::vector<Casing> casings_;       ///< Live ejected casings (world space, gravity + spin + lifetime).
-    uint32_t casingSpawnCounter_ = 0;   ///< Cheap deterministic jitter source for ejection.
-    CpuLbsSkinningBackend skinBackend_; ///< Phase-1 CPU linear-blend-skinning backend.
-    AnimationTesterState animUI_;       ///< Persistent state for the Animation Tester panel.
-    HitboxRig clientHitboxRig_;         ///< Hitbox definitions for client-side debug visualization.
-    float kRigScale_ = 1.0f;            ///< Per-renderable scale for animated characters (auto-calculated, tunable).
+    CpuLbsSkinningBackend skinBackend_;    ///< Phase-1 CPU linear-blend-skinning backend.
+    AnimationTesterState animUI_;          ///< Persistent state for the Animation Tester panel.
+    HitboxRig clientHitboxRig_;            ///< Hitbox definitions for client-side debug visualization.
+    float kRigScale_ = 1.0f;               ///< Per-renderable scale for animated characters (auto-calculated, tunable).
     float kRigVerticalOffset_ =
         -90.0f;                ///< Per-renderable Y translation for animated characters (auto-calculated, tunable).
     float rigMeshMinY_ = 0.0f; ///< Minimum Y of the bind-pose mesh vertices (model space).
@@ -796,16 +772,19 @@ private:
     bool cachedMuzzleValid_ = false;
 
     // Local player's right-palm world position, cached from the viewmodel pass
-    // each frame. Used as the muzzle-flash origin (see muzzleFlashOrigin).
+    // each frame. Used as a muzzle-flash fallback when the weapon has no muzzle marker.
     glm::vec3 cachedRightPalmWorld_{0.0f};
     bool cachedRightPalmValid_ = false;
 
-    /// @brief World position to spawn the local player's muzzle flash: 10 units
-    /// in front of the right palm along the current view direction, falling back
-    /// to @p fallback (the weapon muzzle) when the palm position isn't available.
+    /// @brief World position to spawn local weapon particles.
+    ///
+    /// Prefer the weapon model's tagged muzzle marker (`is_muzzle` / socket_muzzle)
+    /// when available; fall back to the old palm-derived point for untagged guns.
     [[nodiscard]] glm::vec3 muzzleFlashOrigin(const glm::vec3& fallback) const
     {
         constexpr float k_muzzleFlashForward = 10.0f;
+        if (cachedMuzzleValid_)
+            return cachedMuzzleWorld_;
         return cachedRightPalmValid_ ? cachedRightPalmWorld_ + cachedCamFwd_ * k_muzzleFlashForward : fallback;
     }
 

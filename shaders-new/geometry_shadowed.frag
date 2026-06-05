@@ -239,28 +239,29 @@ layout(location = 1) out vec4 normalColor;
 // Just a single directional light for now...
 //const vec3 light_direction = normalize(-vec3(1.0f,1.0f,1.0f));
 //const vec4 light_color = vec4(1.0f,1.0f,1.0f,1.0f);
-const vec3 ambient_color = 0.125f * vec3(0.08f, 0.08f,0.12f); // dark-blue
+const vec3 ambient_color = 0.5f * vec3(0.08f, 0.08f,0.12f); // dark-blue
 //const vec3 ambient_color = normalize(vec3(0.08f, 0.08f,0.12f)); // dark-blue
 //const vec3 ambient_color = vec3(0.0f, 0.0f,0.0f); // dark-black
 
 void main()
 {
+    vec2 frag_vt_flipped = vec2(frag_vt.x,-frag_vt.y);
     vec3 normal = normalize(gl_FrontFacing ? frag_normal : -frag_normal);
     if (materialFlags.useNormalTexture != 0) {
         vec3 tangent = normalize(frag_tangent.xyz - normal * dot(normal, frag_tangent.xyz));
         vec3 bitangent = normalize(cross(normal, tangent) * frag_tangent.w);
         mat3 tbn = mat3(tangent, bitangent, normal);
-        vec3 tangentNormal = texture(normalTex, frag_vt).xyz * 2.0 - 1.0;
+        vec3 tangentNormal = texture(normalTex, frag_vt_flipped).xyz * 2.0 - 1.0;
         normal = normalize(tbn * tangentNormal);
     }
 
-    vec4 albedo = materialFlags.useTexture != 0 ? texture(tex, frag_vt) : material.diffuse;
+    vec4 albedo = materialFlags.useTexture != 0 ? texture(tex, frag_vt_flipped) : material.diffuse;
     albedo.rgb = pow(albedo.rgb,vec3(2.2f));
     if (materialFlags.useTint != 0) {
         albedo.rgb = mix(albedo.rgb, pow(material.diffuse.rgb, vec3(2.2f)), material.diffuse.a);
     }
     vec2 mr = materialFlags.useMetallicRoughnessTexture != 0
-        ? texture(metallicRoughnessTex, frag_vt).gb
+        ? texture(metallicRoughnessTex, frag_vt_flipped).gb
         : vec2(1.0, 0.0);
     float roughness = mr.x;
     float metallic = mr.y;

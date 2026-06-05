@@ -340,7 +340,8 @@ void EnergyTeslaArcEffect::appendEnergyBall(const Beam& beam,
                                             float fade,
                                             glm::vec3 camForward)
 {
-    const float radius = std::clamp(len * 0.009f, 1.5f, 2.75f);
+    constexpr float k_unlockedBallScale = 8.0f;
+    const float radius = std::clamp(len * 0.009f, 1.5f, 2.75f) * k_unlockedBallScale;
     const glm::vec3 center = beam.origin + axisN * (radius * 0.18f);
     const uint32_t frame = static_cast<uint32_t>(std::floor(beam.time * 28.0f));
     const uint32_t baseSeed = static_cast<uint32_t>(beam.seed * 4096.0f) ^ (frame * 2654435761u);
@@ -363,8 +364,10 @@ void EnergyTeslaArcEffect::appendEnergyBall(const Beam& beam,
             p += axisN * (std::sin(a * 2.0f + beam.time * 5.5f) * radius * 0.055f);
             pts.push_back(p);
         }
-        appendArcStrip(detailArcVerts_, pts, 0.48f, {0.22f, 0.78f, 1.00f, 0.16f * fade}, camForward);
-        appendArcStrip(mainArcVerts_, pts, 0.21f, {0.84f, 0.97f, 1.00f, 0.58f * fade}, camForward);
+        appendArcStrip(detailArcVerts_, pts, 0.48f * k_unlockedBallScale, {0.22f, 0.78f, 1.00f, 0.16f * fade},
+                       camForward);
+        appendArcStrip(mainArcVerts_, pts, 0.21f * k_unlockedBallScale, {0.84f, 0.97f, 1.00f, 0.58f * fade},
+                       camForward);
     }
 
     std::vector<glm::vec3> core;
@@ -374,7 +377,8 @@ void EnergyTeslaArcEffect::appendEnergyBall(const Beam& beam,
     core.push_back(center + perp * radius * 0.30f);
     core.push_back(center + perp2 * radius * 0.22f);
     core.push_back(center - perp * radius * 0.30f);
-    appendArcStrip(mainArcVerts_, core, 0.35f, {0.96f, 0.99f, 1.00f, 0.70f * fade}, camForward);
+    appendArcStrip(mainArcVerts_, core, 0.35f * k_unlockedBallScale, {0.96f, 0.99f, 1.00f, 0.70f * fade},
+                   camForward);
 }
 
 void EnergyTeslaArcEffect::update(float dt, glm::vec3 camForward)
