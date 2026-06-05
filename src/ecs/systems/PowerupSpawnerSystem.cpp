@@ -15,6 +15,8 @@
 #include "ecs/registry/Registry.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
 
+#include <algorithm>
+
 namespace systems
 {
 
@@ -46,13 +48,39 @@ void removePowerup(PowerupState& state, PowerupType type)
     std::erase_if(state.active, [type](const ActivePowerup& powerup) { return powerup.type == type; });
 }
 
+void applyPowerupSpawnerConfig(Registry& registry, const MatchConfig& matchConfig)
+{
+    auto view = registry.view<PowerupSpawner>();
+    view.each([&](PowerupSpawner& spawner) {
+        if (spawner.hasPowerup)
+            return;
+
+        const float maxCooldown = spawner.hasSpawnedOnce ? matchConfig.powerupRespawnCooldownSeconds
+                                                         : matchConfig.powerupInitialSpawnDelaySeconds;
+        spawner.spawnCooldown = std::min(spawner.spawnCooldown, maxCooldown);
+    });
+}
+
+void resetPowerupSpawnersForMatch(Registry& registry, const MatchConfig& matchConfig)
+{
+    auto view = registry.view<PowerupSpawner>();
+    view.each([&](PowerupSpawner& spawner) {
+        spawner.hasPowerup = false;
+        spawner.hasSpawnedOnce = false;
+        spawner.spawnCooldown = matchConfig.powerupInitialSpawnDelaySeconds;
+    });
+}
+
 /// @brief Check if any player overlaps the spawner and transfer the powerup on collision.
 /// @param registry      The ECS registry.
 /// @param spawnerPos    Position of the spawner entity.
 /// @param spawnerShape  Collision shape of the spawner.
 /// @param spawner       Spawner component.
-inline void
-checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerShape, PowerupSpawner& spawner)
+inline void checkForPlayers(Registry& registry,
+                            Position spawnerPos,
+                            CollisionShape spawnerShape,
+                            PowerupSpawner& spawner,
+                            const MatchConfig& matchConfig)
 {
     auto view = registry.view<Player, Position, CollisionShape, PowerupState>();
     view.each([&](entt::entity player, const Position& pos, const CollisionShape& shape, PowerupState& powerups) {
@@ -62,7 +90,7 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
             const PowerupConfig config = getPowerupConfig(spawner.type);
             addOrRefreshPowerup(powerups, spawner.type, config.duration);
             spawner.hasPowerup = false;
-            spawner.spawnCooldown = config.spawnCooldown;
+            spawner.spawnCooldown = matchConfig.powerupRespawnCooldownSeconds;
 
             if (spawner.type == PowerupType::Shield) {
                 Health& healthComp = registry.get<Health>(player);
@@ -72,16 +100,17 @@ checkForPlayers(Registry& registry, Position spawnerPos, CollisionShape spawnerS
     });
 }
 
-void runPowerupSpawners(Registry& registry, float dt)
+void runPowerupSpawners(Registry& registry, float dt, const MatchConfig& matchConfig)
 {
     auto view = registry.view<PowerupSpawner, Position, CollisionShape>();
     view.each([&](PowerupSpawner& spawner, const Position& pos, const CollisionShape& shape) {
-        checkForPlayers(registry, pos, shape, spawner);
+        checkForPlayers(registry, pos, shape, spawner, matchConfig);
         if ((spawner.spawnCooldown - dt) > 0.0f) {
             spawner.spawnCooldown -= dt;
         } else {
             spawner.spawnCooldown = 0;
             spawner.hasPowerup = true;
+            spawner.hasSpawnedOnce = true;
         }
     });
 }

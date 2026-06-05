@@ -143,6 +143,13 @@ bool MatchController::validateMaxPlayers(int maxPlayers)
     return maxPlayers >= 2 && maxPlayers <= 128;
 }
 
+bool MatchController::validatePowerupTiming(float initialSpawnDelaySeconds, float respawnCooldownSeconds)
+{
+    return std::isfinite(initialSpawnDelaySeconds) && std::isfinite(respawnCooldownSeconds) &&
+           initialSpawnDelaySeconds >= 0.0f && initialSpawnDelaySeconds <= 600.0f && respawnCooldownSeconds >= 1.0f &&
+           respawnCooldownSeconds <= 300.0f;
+}
+
 void MatchController::broadcastMatchConfig(Server& server)
 {
     server.broadcastMatchConfig(config);
@@ -150,7 +157,8 @@ void MatchController::broadcastMatchConfig(Server& server)
 
 bool MatchController::setMatchConfig(const MatchConfig& cfg)
 {
-    if (!validateKillsToWin(cfg.killsToWin) || !validateMaxPlayers(cfg.maxPlayers))
+    if (!validateKillsToWin(cfg.killsToWin) || !validateMaxPlayers(cfg.maxPlayers) ||
+        !validatePowerupTiming(cfg.powerupInitialSpawnDelaySeconds, cfg.powerupRespawnCooldownSeconds))
         return false;
 
     this->config = cfg;

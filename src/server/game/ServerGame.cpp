@@ -237,12 +237,13 @@ void ServerGame::run()
         PowerupConfig config = getPowerupConfig(powerupType);
 
         const entt::entity spawner = registry.create();
-        registry.emplace<PowerupSpawner>(spawner,
-                                         PowerupSpawner{
-                                             .type = config.type,
-                                             .spawnCooldown = k_powerupInitialSpawnDelaySeconds,
-                                             .hasPowerup = false,
-                                         });
+        registry.emplace<PowerupSpawner>(
+            spawner,
+            PowerupSpawner{
+                .type = config.type,
+                .spawnCooldown = matchController.getMatchConfig().powerupInitialSpawnDelaySeconds,
+                .hasPowerup = false,
+            });
         CollisionShape shape{.halfExtents = k_powerupPickupHalfExtents};
         glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
 
@@ -545,6 +546,7 @@ void ServerGame::eventHandler(const Event& event)
         if (isHost(event.clientId) && matchController.setMatchConfig(event.matchConfig)) {
             const MatchConfig config = matchController.getMatchConfig();
             server->setMaxPlayers(config.maxPlayers);
+            systems::applyPowerupSpawnerConfig(registry, config);
             if (matchConfigUpdatedFn_)
                 matchConfigUpdatedFn_(config);
             server->broadcastMatchConfig(config);
@@ -820,7 +822,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     }
     {
         GROUP2_PROF_SCOPE("PowerupSpawners");
-        systems::runPowerupSpawners(registry, dt);
+        if (matchController.getCurrentPhase() == MatchPhase::IN_PROGRESS)
+            systems::runPowerupSpawners(registry, dt, matchController.getMatchConfig());
     }
     {
         GROUP2_PROF_SCOPE("jumpPads");
@@ -866,6 +869,16 @@ void ServerGame::tick(float dt, Uint64 nextTick)
                 selectMatchAbilityPool();
                 server->resetAppliedInputTicks();
                 resetPlayersForCountdown();
+            }
+            if (previousPhase != MatchPhase::IN_PROGRESS &&
+                matchController.getCurrentPhase() == MatchPhase::IN_PROGRESS)
+            {
+                systems::resetPowerupSpawnersForMatch(registry, matchController.getMatchConfig());
+            }
+            if (previousPhase == MatchPhase::IN_PROGRESS &&
+                matchController.getCurrentPhase() != MatchPhase::IN_PROGRESS)
+            {
+                systems::resetPowerupSpawnersForMatch(registry, matchController.getMatchConfig());
             }
             if (previousPhase != MatchPhase::LOBBY && matchController.getCurrentPhase() == MatchPhase::LOBBY)
                 lobbyManager.resetReadyStatuses();
@@ -1443,6 +1456,7 @@ bool ServerGame::setMatchConfig(const MatchConfig& config)
 
     if (server)
         server->setMaxPlayers(matchController.getMatchConfig().maxPlayers);
+    systems::applyPowerupSpawnerConfig(registry, matchController.getMatchConfig());
     if (matchConfigUpdatedFn_)
         matchConfigUpdatedFn_(matchController.getMatchConfig());
     return true;

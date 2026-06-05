@@ -82,6 +82,8 @@ private:
         .serverName = "Server",
         .killsToWin = 25,
         .maxPlayers = 8,
+        .powerupInitialSpawnDelaySeconds = 240.0f,
+        .powerupRespawnCooldownSeconds = 30.0f,
     }; ///< Persistent host screen draft state.
 
     Screen current = Screen::TitleScreen;               ///< Which screen is currently active.
