@@ -4082,11 +4082,11 @@ SDL_AppResult Game::iterate()
                 instance.worldTransform = c.worldTransform;
                 instance.paletteBase = static_cast<uint32_t>(bonePalette.size());
                 instance.tint = c.tint;
-                // Flag for the red chams pass: the killcam killer, or — while the
-                // local player's wallhack is active — every other player.
+                // Flag red skinned passes: killcam highlights the killer's whole
+                // body, while wallhack keeps the occluded-only chams treatment.
                 const bool chamsKiller = killcamActive_ && c.entity == killcamKillerEntity_;
                 const bool chamsWallhack = localWallhackActive && !c.isLocal;
-                instance.materialId = (chamsKiller || chamsWallhack) ? 1u : 0u;
+                instance.materialId = chamsKiller ? 1u : chamsWallhack ? 2u : 0u;
 
                 bonePalette.insert(bonePalette.end(), skinMatrices.begin(), skinMatrices.end());
                 skinnedInstances.push_back(instance);

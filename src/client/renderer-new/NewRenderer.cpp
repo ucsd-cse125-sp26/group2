@@ -1144,13 +1144,12 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
 
 void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    // Killcam chams pass runs BEFORE the normal skinned draw, so the depth
-    // buffer holds only the world + static entities (not the characters). The
-    // chams pipeline uses a GREATER depth test, so the killer is drawn flat-red
-    // only where it sits BEHIND world geometry (i.e. occluded by walls); its
-    // visible parts fail the test here and render normally in the pass below.
+    // Wallhack chams run before the normal skinned draw so the depth buffer
+    // still holds world-only geometry. Killcam highlight runs after normal
+    // bodies so the killer is visibly red, not just red where occluded.
     skinnedRenderer_.drawChams(renderPass, cmd);
     skinnedRenderer_.draw(renderPass, cmd);
+    skinnedRenderer_.drawKillcamHighlight(renderPass, cmd);
 }
 
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth, const FrustumPlanes& frustumPlanes)
@@ -1308,7 +1307,11 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
         depthTarget_.texture = nullptr;
     }
 
-    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, false, false);
+    // Later passes load this depth texture for skinned players, particles,
+    // SSAO, and the first-person weapon. It must be stored after the geometry
+    // pass; STOREOP_DONT_CARE makes those later depth tests read undefined
+    // data, which can draw players through walls or cull them up close.
+    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, true, false);
 
     if (!depthTarget_.texture)
         return false;
@@ -1756,9 +1759,10 @@ bool NewRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJoints
 
 void NewRenderer::setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
 {
-    // The renderer owns frustum culling for skinned characters: Game.cpp hands
-    // us every character and SkinnedRenderer keeps only the ones whose bounding
-    // sphere is on screen, using this frame's camera frustum planes.
+    // Game.cpp hands us every character. SkinnedRenderer currently keeps all
+    // submitted colour instances visible because this call happens before
+    // drawFrame() refreshes the renderer camera; culling against camera_ here
+    // would use the previous frame's frustum and can make players flicker.
     skinnedRenderer_.setFrame(palette, instances, camera_.getViewProjectionFrustumPlane());
 }
 
