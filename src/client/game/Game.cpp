@@ -110,9 +110,6 @@
 namespace
 {
 constexpr float kMinFootstepIntervalSeconds = 0.14f;
-constexpr std::array<const char*, 2> kOptionalTestModelFilenames{{"test_model.glb", "test model.glb"}};
-constexpr glm::vec3 kOptionalTestModelRifleSpawnerOffset{0.0f, 50.0f, 0.0f};
-constexpr float kOptionalTestModelLoadScale = 10.0f;
 constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponNames{
     "Rifle", "Rocket", "RailGun", "EnergyGun", "Shotgun"};
 constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponDisplayNames{
@@ -165,34 +162,6 @@ int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
 {
     return assets.add(
         def.name, def.filename, def.role, def.renderScale, def.renderTranslation, def.renderRotationDegrees);
-}
-
-std::filesystem::path assetPathFor(const char* filename)
-{
-    const char* const base = SDL_GetBasePath();
-    std::filesystem::path path = base ? base : "";
-    path /= ASSETS_DIR;
-    path /= filename;
-    return path;
-}
-
-const char* findExistingOptionalTestModelFilename()
-{
-    for (const char* filename : kOptionalTestModelFilenames) {
-        std::error_code ec;
-        if (std::filesystem::exists(assetPathFor(filename), ec))
-            return filename;
-    }
-    return nullptr;
-}
-
-std::optional<glm::vec3> findOptionalTestModelPosition()
-{
-    for (const gamemap::WeaponSpawner& spawner : gamemap::weaponSpawner_) {
-        if (spawner.type == WeaponType::Rifle)
-            return spawner.pos + kOptionalTestModelRifleSpawnerOffset;
-    }
-    return std::nullopt;
 }
 
 WeaponSpawnerModelParams defaultSpawnerModelParams(WeaponType type)
@@ -998,29 +967,6 @@ bool Game::init(AppContext& ctx)
             SDL_Log("[client] map visual loaded (model index %d, exclude='%s')", mapModelIdx, visualExclude.c_str());
         } else {
             SDL_Log("[client] WARNING: map visual load failed — map will be invisible");
-        }
-    }
-
-    // Optional art-check GLB. Drop assets/test_model.glb into the copied assets
-    // directory to see it 50 units above the authored rifle spawner.
-    if (const char* testModelFilename = findExistingOptionalTestModelFilename(); testModelFilename != nullptr) {
-        if (const std::optional<glm::vec3> testModelPos = findOptionalTestModelPosition(); testModelPos.has_value()) {
-            const int id = assets_.add("test_model", testModelFilename, AssetRole::Prop);
-            const int modelIdx =
-                renderer->loadSceneModel(testModelFilename, *testModelPos, kOptionalTestModelLoadScale, false);
-            assets_.setModelIndex(id, modelIdx);
-            if (modelIdx >= 0) {
-                renderer->setModelScenePass(modelIdx, true);
-                SDL_Log("[client] test model '%s' loaded at (%.1f, %.1f, %.1f)",
-                        testModelFilename,
-                        static_cast<double>(testModelPos->x),
-                        static_cast<double>(testModelPos->y),
-                        static_cast<double>(testModelPos->z));
-            } else {
-                SDL_Log("[client] WARNING: test model '%s' failed to load", testModelFilename);
-            }
-        } else {
-            SDL_Log("[client] test model '%s' present, but no rifle spawner was loaded", testModelFilename);
         }
     }
 
