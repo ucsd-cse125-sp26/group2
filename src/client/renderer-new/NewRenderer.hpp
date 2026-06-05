@@ -349,7 +349,7 @@ public:
     bool setViewmodelRig(const std::vector<RigMeshSource>& meshes, int numJoints);
 
     /// @brief Per-frame palette + instance for the animated weapon viewmodel.
-    /// Drawn on top of the scene (like the static weapon viewmodel).
+    /// Drawn in the weapon pass after scene depth is cleared, like the static weapon viewmodel.
     void setViewmodelFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances);
 
     /// @brief Bind the per-mesh diffuse textures of a loaded model instance to the

@@ -1049,6 +1049,8 @@ void NewRenderer::drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffe
     bindLightShadowInfo(geometryPass, cmd);
 
     drawWeapon(geometryPass, cmd,camera_.getViewProjectionFrustumPlane());
+    viewmodelSkinned_.draw(geometryPass, cmd);
+    viewmodelArmsSkinned_.draw(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
 }
@@ -1167,11 +1169,6 @@ void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUComman
     // visible parts fail the test here and render normally in the pass below.
     skinnedRenderer_.drawChams(renderPass, cmd);
     skinnedRenderer_.draw(renderPass, cmd);
-
-    // Animated first-person weapon viewmodel + arms share the skinned pipeline
-    // and the geometry pass's camera view-projection (pushed at vertex UBO slot 0).
-    viewmodelSkinned_.draw(renderPass, cmd);
-    viewmodelArmsSkinned_.draw(renderPass, cmd);
 }
 
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth, const FrustumPlanes& frustumPlanes)
