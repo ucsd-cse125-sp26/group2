@@ -53,7 +53,9 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs, bool 
         ImGui::TableSetColumnIndex(1);
         ImGui::BeginDisabled(inputs.serverRunning);
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-        ImGui::InputText("##ServerName", &draft.serverName);
+        if (ImGui::InputText("##ServerName", &draft.serverName)) {
+            menu_theme::playUiSound(UiSoundAction::SliderStep);
+        }
         draft.serverName = server_name::clampUtf8Bytes(draft.serverName);
         ImGui::EndDisabled();
 
@@ -62,21 +64,27 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs, bool 
         ImGui::TextUnformatted("Kill Threshold to Win");
         ImGui::TableSetColumnIndex(1);
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-        ImGui::SliderInt("##KillsToWin", &draft.killsToWin, 1, 100);
+        if (ImGui::SliderInt("##KillsToWin", &draft.killsToWin, 1, 100)) {
+            menu_theme::playUiSound(UiSoundAction::SliderStep);
+        }
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         ImGui::TextUnformatted("Max Players");
         ImGui::TableSetColumnIndex(1);
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-        ImGui::SliderInt("##MaxPlayers", &draft.maxPlayers, 2, 128);
+        if (ImGui::SliderInt("##MaxPlayers", &draft.maxPlayers, 2, 128)) {
+            menu_theme::playUiSound(UiSoundAction::SliderStep);
+        }
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         ImGui::TextUnformatted("Keep Server Running");
         ImGui::TableSetColumnIndex(1);
         ImGui::BeginDisabled(inputs.serverRunning);
-        ImGui::Checkbox("##PersistentServer", &draft.persistAfterClientExit);
+        if (ImGui::Checkbox("##PersistentServer", &draft.persistAfterClientExit)) {
+            menu_theme::playUiSound(UiSoundAction::Toggle);
+        }
         ImGui::EndDisabled();
 
         ImGui::EndTable();
@@ -92,11 +100,15 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs, bool 
         ImGui::TextUnformatted("Specific Port");
         ImGui::TableSetColumnIndex(1);
         ImGui::BeginDisabled(inputs.serverRunning);
-        ImGui::Checkbox("##UseSpecificPort", &draft.useSpecificPort);
+        if (ImGui::Checkbox("##UseSpecificPort", &draft.useSpecificPort)) {
+            menu_theme::playUiSound(UiSoundAction::Toggle);
+        }
         if (draft.useSpecificPort) {
             ImGui::SameLine();
             ImGui::SetNextItemWidth(120.0f);
-            ImGui::InputInt("##HostPort", &draft.port);
+            if (ImGui::InputInt("##HostPort", &draft.port)) {
+                menu_theme::playUiSound(UiSoundAction::SliderStep);
+            }
         } else {
             ImGui::SameLine();
             ImGui::TextDisabled("auto");
@@ -108,7 +120,9 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs, bool 
         ImGui::TextUnformatted("Transport");
         ImGui::TableSetColumnIndex(1);
         ImGui::BeginDisabled(inputs.serverRunning);
-        ImGui::Checkbox("Legacy TCP", &draft.useLegacyTcp);
+        if (ImGui::Checkbox("Legacy TCP", &draft.useLegacyTcp)) {
+            menu_theme::playUiSound(UiSoundAction::Toggle);
+        }
         ImGui::EndDisabled();
         if (draft.useLegacyTcp && !draft.useSpecificPort) {
             ImGui::SameLine();
@@ -120,7 +134,9 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs, bool 
         ImGui::TextUnformatted("Advertise on LAN");
         ImGui::TableSetColumnIndex(1);
         ImGui::BeginDisabled(inputs.serverRunning && !inputs.canManageServer);
-        ImGui::Checkbox("##AdvertiseLan", &draft.advertiseLan);
+        if (ImGui::Checkbox("##AdvertiseLan", &draft.advertiseLan)) {
+            menu_theme::playUiSound(UiSoundAction::Toggle);
+        }
         ImGui::EndDisabled();
 
         ImGui::TableNextRow();
@@ -128,7 +144,9 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs, bool 
         ImGui::TextUnformatted("Advertise on Internet");
         ImGui::TableSetColumnIndex(1);
         ImGui::BeginDisabled(inputs.serverRunning && !inputs.canManageServer);
-        ImGui::Checkbox("##AdvertiseGlobal", &draft.advertiseGlobal);
+        if (ImGui::Checkbox("##AdvertiseGlobal", &draft.advertiseGlobal)) {
+            menu_theme::playUiSound(UiSoundAction::Toggle);
+        }
         ImGui::EndDisabled();
 
         ImGui::TableNextRow();

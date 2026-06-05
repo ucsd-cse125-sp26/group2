@@ -75,6 +75,7 @@ constexpr std::array<SfxId, 1> kUiModalVariants{SfxId::UiModal01};
 constexpr std::array<SfxId, 1> kUiSuccessVariants{SfxId::UiSuccess01};
 constexpr std::array<SfxId, 2> kUiErrorVariants{SfxId::UiError01, SfxId::UiError02};
 constexpr std::array<SfxId, 1> kUiDisabledVariants{SfxId::UiDisabled01};
+constexpr std::array<SfxId, 1> kUiDangerVariants{SfxId::UiDanger01};
 
 UiSoundActionConfig uiSoundActionConfig(UiSoundAction action) noexcept
 {
@@ -98,6 +99,8 @@ UiSoundActionConfig uiSoundActionConfig(UiSoundAction action) noexcept
         return {kUiErrorVariants, 0.08f};
     case UiSoundAction::Disabled:
         return {kUiDisabledVariants, 0.08f};
+    case UiSoundAction::Danger:
+        return {kUiDangerVariants, 0.08f};
     default:
         return {};
     }
@@ -305,6 +308,7 @@ bool SfxSystem::init()
     loadClip(SfxId::UiError01, "MenuSFX/Access_Denied_High_DDM16.wav", SfxCategory::UI, 0.36f, 0.02f);
     loadClip(SfxId::UiError02, "MenuSFX/Deny Access Signal Lo-fi 12.wav", SfxCategory::UI, 0.36f, 0.02f);
     loadClip(SfxId::UiDisabled01, "MenuSFX/Deny Access Signal Lo-fi 12.wav", SfxCategory::UI, 0.24f, 0.02f);
+    loadClip(SfxId::UiDanger01, "MenuSFX/Access_Denied_High_DDM16.wav", SfxCategory::UI, 0.44f, 0.02f);
 
     convertClipsToMixer();
 

@@ -111,6 +111,7 @@ enum class SfxId : uint8_t
     UiError01,
     UiError02,
     UiDisabled01,
+    UiDanger01,
 
     _Count
 };
@@ -128,6 +129,7 @@ enum class UiSoundAction : uint8_t
     Success,
     Error,
     Disabled,
+    Danger,
     _Count
 };
 
@@ -325,6 +327,8 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "UiError02";
     case SfxId::UiDisabled01:
         return "UiDisabled01";
+    case SfxId::UiDanger01:
+        return "UiDanger01";
     default:
         return "Unknown";
     }

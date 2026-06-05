@@ -144,12 +144,14 @@ bool tryLoadBackground(SDL_GPUDevice* device)
 
 UiSoundAction clickActionForLabel(std::string_view label, bool danger) noexcept
 {
+    if (danger)
+        return UiSoundAction::Danger;
     if (label.find("BACK") != std::string_view::npos || label.find("Back") != std::string_view::npos ||
         label.find("CANCEL") != std::string_view::npos || label.find("Cancel") != std::string_view::npos)
     {
         return UiSoundAction::Back;
     }
-    return danger ? UiSoundAction::Confirm : UiSoundAction::Confirm;
+    return UiSoundAction::Confirm;
 }
 
 void playWidgetFeedback(std::string_view label, bool pressed, bool danger = false)
