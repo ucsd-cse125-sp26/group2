@@ -4,6 +4,7 @@
 #include "EquippedWeaponsWidget.hpp"
 
 #include "hud/HudContext.hpp"
+#include "hud/VoidfallStyle.hpp"
 
 #include <algorithm>
 
@@ -62,7 +63,8 @@ void drawWeaponSlot(HudContext& ctx,
                     float iconW,
                     float iconH,
                     float uiScale,
-                    int weaponId)
+                    int weaponId,
+                    bool active)
 {
     const Rect frame = tunedRect(baseX, baseY, frameW, frameH, tuning.frame, uiScale);
     const float iconBaseX = baseX + (frameW - iconW) * 0.5f;
@@ -70,7 +72,11 @@ void drawWeaponSlot(HudContext& ctx,
     const Rect icon = tunedRect(iconBaseX, iconBaseY, iconW, iconH, tuning.icon, uiScale);
 
     ctx.svg(HudIcon::WeaponFrame, frame.x, frame.y, frame.w, frame.h);
-    ctx.svg(weaponIconForId(weaponId), icon.x, icon.y, icon.w, icon.h);
+    const HudIcon weaponIcon = weaponIconForId(weaponId);
+    if (active && weaponIcon != HudIcon::NoIcon)
+        ctx.svgMask(weaponIcon, icon.x, icon.y, icon.w, icon.h, voidfall::k_cyan);
+    else
+        ctx.svgMask(weaponIcon, icon.x, icon.y, icon.w, icon.h, voidfall::k_textDim);
 }
 } // namespace
 
@@ -88,6 +94,7 @@ void EquippedWeaponsWidget::update(float /*dt*/, const HudGameState& state, HudT
     visible = state.isAlive;
     primaryWeaponId_ = state.primaryWeaponId;
     secondaryWeaponId_ = state.secondarySlotWeaponId;
+    activeWeaponSlot_ = state.activeWeaponSlot;
 }
 
 void EquippedWeaponsWidget::draw(HudContext& ctx, float anchorX, float anchorY)
@@ -105,6 +112,7 @@ void EquippedWeaponsWidget::draw(HudContext& ctx, float anchorX, float anchorY)
     width = frameWidth;
     height = frameHeight * 2.f + frameGap;
 
-    drawWeaponSlot(ctx, slots[0], x, y, frameW, frameH, iconW, iconH, s, primaryWeaponId_);
-    drawWeaponSlot(ctx, slots[1], x, y + frameH + gap, frameW, frameH, iconW, iconH, s, secondaryWeaponId_);
+    drawWeaponSlot(ctx, slots[0], x, y, frameW, frameH, iconW, iconH, s, primaryWeaponId_, activeWeaponSlot_ == 0);
+    drawWeaponSlot(
+        ctx, slots[1], x, y + frameH + gap, frameW, frameH, iconW, iconH, s, secondaryWeaponId_, activeWeaponSlot_ == 1);
 }

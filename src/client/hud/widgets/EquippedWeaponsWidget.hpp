@@ -39,4 +39,5 @@ struct EquippedWeaponsWidget : HudWidget
 private:
     int primaryWeaponId_ = 0;
     int secondaryWeaponId_ = 2;
+    int activeWeaponSlot_ = 0;
 };

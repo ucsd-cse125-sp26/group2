@@ -77,6 +77,7 @@ public:
               bool outlined = false);
     void knockoutText(const char* str, float x, float y, float size, HudAlign align = HudAlign::Left);
     float measureText(const char* str, float size) const;
+    void measureTextVerticalBounds(const char* str, float size, float& outTop, float& outBottom) const;
 
     // ── Icons ───────────────────────────────────────────────────────────
 

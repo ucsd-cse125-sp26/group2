@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 void HudContext::init(const SdfAtlas* atlas, HudSvgAtlas* svgAtlas)
 {
@@ -391,6 +392,36 @@ float HudContext::measureText(const char* str, float size) const
             width += gi->advance * scale;
     }
     return width;
+}
+
+void HudContext::measureTextVerticalBounds(const char* str, float size, float& outTop, float& outBottom) const
+{
+    outTop = 0.f;
+    outBottom = size;
+    if (!sdfAtlas_ || !str || !*str)
+        return;
+
+    const float scale = size / static_cast<float>(SdfAtlas::k_renderPx);
+    float top = std::numeric_limits<float>::max();
+    float bottom = std::numeric_limits<float>::lowest();
+    bool foundGlyph = false;
+
+    for (const char* p = str; *p; ++p) {
+        const GlyphInfo* gi = sdfAtlas_->glyph(static_cast<uint8_t>(*p));
+        if (!gi || gi->width <= 0.f || gi->height <= 0.f)
+            continue;
+
+        const float glyphTop = size - gi->bearing.y * scale;
+        const float glyphBottom = glyphTop + gi->height * scale;
+        top = std::min(top, glyphTop);
+        bottom = std::max(bottom, glyphBottom);
+        foundGlyph = true;
+    }
+
+    if (foundGlyph) {
+        outTop = top;
+        outBottom = bottom;
+    }
 }
 
 // ── Icons ───────────────────────────────────────────────────────────────────

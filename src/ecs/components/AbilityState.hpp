@@ -28,18 +28,17 @@ enum class AbilityType : uint8_t
 inline constexpr std::size_t kAbilityChoicesPerTier = 2;
 
 // Per-match candidate pools. `ServerGame::selectMatchAbilityPool()` draws
-// `kAbilityChoicesPerTier` (2) from each pool to offer at level-up. With a pool
-// of exactly 2, both are always offered. To test Levitate/Wallhack they're
-// slotted in here alongside one familiar option each; widen a pool past 2 to
-// have the match randomly pick which two are offered.
-inline constexpr std::array<AbilityType, kAbilityChoicesPerTier> primaryAbilityTypes = {
-    AbilityType::Levitate,
+// `kAbilityChoicesPerTier` (2) from each pool to offer at level-up.
+inline constexpr std::array<AbilityType, 3> primaryAbilityTypes = {
     AbilityType::Dash,
+    AbilityType::Grapple,
+    AbilityType::Levitate,
 };
 
-inline constexpr std::array<AbilityType, kAbilityChoicesPerTier> secondaryAbilityTypes = {
-    AbilityType::Wallhack,
+inline constexpr std::array<AbilityType, 3> secondaryAbilityTypes = {
     AbilityType::Gravity,
+    AbilityType::Recall,
+    AbilityType::Wallhack,
 };
 
 inline constexpr const char* abilityName(AbilityType type)
@@ -91,8 +90,8 @@ struct AbilityState
     bool pendingLevel1 = false;
     bool pendingLevel2 = false;
 
-    std::array<AbilityType, kAbilityChoicesPerTier> primaryChoices = primaryAbilityTypes;
-    std::array<AbilityType, kAbilityChoicesPerTier> secondaryChoices = secondaryAbilityTypes;
+    std::array<AbilityType, kAbilityChoicesPerTier> primaryChoices = {primaryAbilityTypes[0], primaryAbilityTypes[1]};
+    std::array<AbilityType, kAbilityChoicesPerTier> secondaryChoices = {secondaryAbilityTypes[0], secondaryAbilityTypes[1]};
 
     AbilityType primary = AbilityType::None;
     AbilityType secondary = AbilityType::None;

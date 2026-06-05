@@ -7,11 +7,11 @@
 
 struct Minimap : HudWidget
 {
-    float mapSize = 180.f; ///< Pixel size of the Radar.svg quad.
-    float dotSize = 12.f;
-    float dotZoneRadius = 76.f;     ///< Radius of the enemy-dot projection circle, in unscaled HUD pixels.
-    float dotZoneOffsetX = -0.5f;   ///< X offset of the dot projection circle from the SVG center.
-    float dotZoneOffsetY = 3.f;     ///< Y offset of the dot projection circle from the SVG center.
+    float mapSize = 275.f; ///< Pixel size of the Radar.svg quad.
+    float dotSize = 12.25f;
+    float dotZoneRadius = 109.5f; ///< Radius of the enemy-dot projection circle, in unscaled HUD pixels.
+    float dotZoneOffsetX = -1.f;  ///< X offset of the dot projection circle from the SVG center.
+    float dotZoneOffsetY = 4.f;   ///< Y offset of the dot projection circle from the SVG center.
     bool showDotZoneDebug = false;
 
     Minimap();
