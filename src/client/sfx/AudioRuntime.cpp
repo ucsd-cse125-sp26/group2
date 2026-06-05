@@ -326,7 +326,7 @@ void AudioManifest::buildDefault()
         makeClip("explosion_rocket", SfxId::RocketExplosion, "Impacts", 1.0f, 3.0f, 0.20f, true, false, 4),
         makeClip("explosion_molotov", SfxId::MolotovExplosion, "Impacts", 1.0f, 2.6f, 0.20f, true, false, 4),
         makeClip("explosion_he", SfxId::HEExplosion, "Impacts", 1.0f, 2.8f, 0.20f, true, false, 4),
-        makeClip("damage_taken", SfxId::DamageTaken, "Player", 0.9f, 3.0f, 0.30f, false, false, 2),
+        makeClip("damage_taken", SfxId::DamageTaken, "Player", 0.9f, 3.0f, 0.85f, false, false, 2),
         makeClip("armor_break", SfxId::ArmorBreak, "Player", 1.0f, 3.2f, 1.0f, false, false, 2),
         makeClip("death", SfxId::Death, "Player", 1.0f, 3.0f, 2.0f, false, false, 1),
         makeClip("kill_confirm", SfxId::KillConfirm, "Player", 0.9f, 3.0f, 0.30f, false, false, 3),

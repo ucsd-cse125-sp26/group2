@@ -163,7 +163,7 @@ bool SfxSystem::init()
     loadClip(SfxId::MolotovExplosion, "Weapons/Grenade/Explosion_Molotov.wav", SfxCategory::Impacts, 1.0f, 0.20f);
     loadClip(SfxId::HEExplosion, "Weapons/Grenade/Explosion_HE.wav", SfxCategory::Impacts, 1.0f, 0.20f);
 
-    loadClip(SfxId::DamageTaken, "damage.mp3", SfxCategory::Player, 0.8f, 0.30f);
+    loadClip(SfxId::DamageTaken, "damage.mp3", SfxCategory::Player, 0.8f, 0.85f);
     loadClip(SfxId::ArmorBreak, "Voicy_Fortnite Shield Break.mp3", SfxCategory::Player, 0.9f, 1.00f);
     loadClip(SfxId::Death, "Death.wav", SfxCategory::Player, 1.0f, 2.00f);
     loadClip(SfxId::KillConfirm, "Voicy_Pilot Killed Indicator SFX.mp3", SfxCategory::Player, 0.9f, 0.30f);
