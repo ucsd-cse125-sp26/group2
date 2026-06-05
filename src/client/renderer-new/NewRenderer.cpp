@@ -698,11 +698,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         firstFrame_ = false;
     }
 
-    // Set the main camera BEFORE the shadow passes so they can frustum-cull
-    // shadow-casting lights against the current view (camera_.getViewProjectionFrustumPlane()).
-    float fov = 60.0f;
-    setMainCamera(eye, yaw, pitch, roll, width, height, fov);
-
     drawToShadowMap(cmd, dynamicShadowMaps_, 1, false, true, true, STATIC);
 
     Uint8 movingRes = 1;

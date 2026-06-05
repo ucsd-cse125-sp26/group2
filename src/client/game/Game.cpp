@@ -7132,7 +7132,14 @@ void Game::refreshRemoteRespawnRenderables()
                 }
                 rend.modelIndex = grenadeIdx;
                 const WeaponSpawnerModelParams& params = defaultSpawnerModelParams(spawner.type);
-                rend.scale = params.scale;
+                if (spawner.type == WeaponType::HEGrenade)
+                    rend.scale = kHEGrenadeModel.renderScale;
+                else if (spawner.type == WeaponType::Sticky)
+                    rend.scale = kStickyGrenadeModel.renderScale;
+                else if (spawner.type == WeaponType::Molotov)
+                    rend.scale = kMolotovModel.renderScale;
+                else
+                    rend.scale = kGrenadeModel.renderScale;
 
                 const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
