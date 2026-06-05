@@ -812,7 +812,8 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
         particleSystem_->uploadToGpu(cmd); // Must be before render pass
 
     SDL_GPUColorTargetInfo colorTargets[2] = {
-        Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f}),
+        Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}),
+        //Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f}),
         Boilerplate::makeColorTargetClear(sceneNormal_, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f}),
     };
 
