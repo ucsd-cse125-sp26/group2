@@ -8,6 +8,8 @@
 #include <SDL3/SDL_audio.h>
 
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <vector>
 
 class VoiceCapture
@@ -20,8 +22,9 @@ public:
         std::vector<std::uint8_t> opus;
     };
 
-    bool init();
+    bool init(std::string_view recordingDeviceName = {});
     void quit();
+    void setRecordingDeviceName(std::string_view name);
     void setPushToTalk(bool active);
     [[nodiscard]] bool ready() const noexcept { return captureStream_ != nullptr && encoder_.ready(); }
     [[nodiscard]] bool transmitting() const noexcept { return transmitting_; }
@@ -35,6 +38,7 @@ private:
 
     SDL_AudioStream* captureStream_ = nullptr;
     VoiceEncoder encoder_;
+    std::string recordingDeviceName_;
     std::vector<float> capturePcm_;
     std::size_t captureReadOffset_ = 0;
     std::uint16_t nextSequence_ = 0;

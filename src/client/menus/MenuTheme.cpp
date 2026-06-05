@@ -4,6 +4,7 @@
 #include "MenuTheme.hpp"
 
 #include "renderer-new/Boilerplate.hpp"
+#include "sfx/SfxSystem.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
@@ -13,7 +14,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <imgui_internal.h>
 #include <string>
+#include <string_view>
 
 namespace
 {
@@ -34,7 +37,7 @@ menu_theme::ThemeSettings makeGameplaySettings()
     t.frameActive = ImVec4{0.20f, 0.28f, 0.35f, 1.00f};
     t.button = ImVec4{0.14f, 0.19f, 0.25f, 1.00f};
     t.buttonHover = ImVec4{0.20f, 0.42f, 0.50f, 1.00f};
-    t.buttonActive = ImVec4{0.12f, 0.30f, 0.37f, 1.00f};
+    t.buttonActive = ImVec4{0.16f, 0.40f, 0.49f, 1.00f};
     t.header = ImVec4{0.16f, 0.30f, 0.38f, 1.00f};
     t.border = ImVec4{0.22f, 0.34f, 0.42f, 0.55f};
     t.danger = ImVec4{0.62f, 0.16f, 0.16f, 1.00f};
@@ -75,6 +78,11 @@ menu_theme::ThemeSettings makeGameplaySettings()
 const menu_theme::ThemeSettings k_terminalSettings{};
 const menu_theme::ThemeSettings k_gameplaySettings = makeGameplaySettings();
 menu_theme::ThemeSettings g_settings = k_terminalSettings;
+SfxSystem* g_sfxSystem = nullptr;
+std::string g_lastHoveredWidget;
+int g_uiSoundFrame = -1;
+int g_hoverScanFrame = -1;
+bool g_hoveredWidgetThisFrame = false;
 
 struct BgResources
 {
@@ -133,6 +141,42 @@ bool tryLoadBackground(SDL_GPUDevice* device)
     }
     bgState.binding = Boilerplate::makeTextureSamplerBinding(bgState.tex, bgState.sampler);
     return true;
+}
+
+UiSoundAction clickActionForLabel(std::string_view label, bool danger) noexcept
+{
+    if (danger)
+        return UiSoundAction::Danger;
+    if (label.find("BACK") != std::string_view::npos || label.find("Back") != std::string_view::npos ||
+        label.find("CANCEL") != std::string_view::npos || label.find("Cancel") != std::string_view::npos)
+    {
+        return UiSoundAction::Back;
+    }
+    return UiSoundAction::Confirm;
+}
+
+void playWidgetFeedback(std::string_view label, bool pressed, bool danger = false)
+{
+    const int frame = ImGui::GetFrameCount();
+    if (g_hoverScanFrame != frame) {
+        if (!g_hoveredWidgetThisFrame)
+            g_lastHoveredWidget.clear();
+        g_hoverScanFrame = frame;
+        g_hoveredWidgetThisFrame = false;
+    }
+
+    if (pressed) {
+        menu_theme::playUiSound(clickActionForLabel(label, danger));
+        g_lastHoveredWidget.assign(label);
+        g_hoveredWidgetThisFrame = true;
+        return;
+    }
+    const bool hovered = ImGui::IsItemHovered();
+    g_hoveredWidgetThisFrame = g_hoveredWidgetThisFrame || hovered;
+    if (hovered && g_lastHoveredWidget != label) {
+        menu_theme::playUiSound(UiSoundAction::Hover);
+        g_lastHoveredWidget.assign(label);
+    }
 }
 } // namespace
 
@@ -225,6 +269,20 @@ void applyStyle()
     c[ImGuiCol_TabUnfocusedActive] = ImVec4(0.46f, 0.46f, 0.42f, 1.0f);
     c[ImGuiCol_NavHighlight] = t.accent;
     c[ImGuiCol_TextSelectedBg] = ImVec4(t.accent.x, t.accent.y, t.accent.z, t.textSelectedAlpha);
+}
+
+void setSfxSystem(SfxSystem* system)
+{
+    g_sfxSystem = system;
+}
+
+void playUiSound(UiSoundAction action, float gain)
+{
+    const int frame = ImGui::GetFrameCount();
+    if (g_uiSoundFrame == frame)
+        return;
+    if (g_sfxSystem && g_sfxSystem->isInitialized())
+        g_uiSoundFrame = g_sfxSystem->playUi(action, gain) != SfxSystem::kInvalidSource ? frame : g_uiSoundFrame;
 }
 
 ScopedTheme::ScopedTheme(const ThemeSettings& theme) : previous(g_settings)
@@ -391,38 +449,70 @@ void terminalSection(const char* text)
 bool terminalActionRow(const char* command, const char* description, const ImVec2& size, bool danger)
 {
     const ThemeSettings& t = g_settings;
-    char label[512];
-    if (description && description[0] != '\0') {
-        std::snprintf(label, sizeof(label), "> %-18s  %s", command, description);
-    } else {
-        std::snprintf(label, sizeof(label), "> %s", command);
-    }
+    char id[512];
+    std::snprintf(id, sizeof(id), "##terminalActionRow_%s_%s", command, description ? description : "");
 
-    ImGui::PushStyleColor(ImGuiCol_Button, danger ? t.danger : t.header);
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, danger ? t.dangerHover : t.buttonHover);
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, danger ? t.dangerActive : t.buttonActive);
-    ImGui::PushStyleColor(ImGuiCol_Text, danger ? ImVec4{1.0f, 0.82f, 0.78f, 1.0f} : t.text);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.35f));
     ImVec2 rowSize = size;
     if (rowSize.x <= 0.0f)
         rowSize.x = ImGui::GetContentRegionAvail().x;
     // Ensure the button is tall enough for the (possibly scaled) font so text
     // is not clipped/anchored to the bottom on larger panels.
     const float minRowHeight = ImGui::GetFontSize() + 16.0f;
-    if (rowSize.y > 0.0f && rowSize.y < minRowHeight)
+    if (rowSize.y <= 0.0f || rowSize.y < minRowHeight)
         rowSize.y = minRowHeight;
-    const bool pressed = ImGui::Button(label, rowSize);
-    ImGui::PopStyleVar();
-    ImGui::PopStyleVar();
-    ImGui::PopStyleColor(4);
 
-    if (ImGui::IsItemFocused()) {
-        const ImVec2 min = ImGui::GetItemRectMin();
-        const ImVec2 max = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddRect(min, max, ImGui::GetColorU32(t.accent), 0.0f, 0, 1.0f);
+    const bool rawPressed = ImGui::InvisibleButton(id, rowSize);
+    const bool disabled = (ImGui::GetItemFlags() & ImGuiItemFlags_Disabled) != 0;
+    const bool pressed = rawPressed && !disabled;
+    const bool hovered = !disabled && ImGui::IsItemHovered();
+    const bool focused = !disabled && ImGui::IsItemFocused();
+    const bool active = !disabled && ImGui::IsItemActive();
+
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    ImVec4 bg = danger ? t.danger : ImVec4{0.10f, 0.10f, 0.095f, 1.0f};
+    if (active) {
+        bg = danger ? t.dangerActive : t.buttonActive;
+    } else if (hovered || focused) {
+        bg = danger ? t.dangerHover : ImVec4{0.24f, 0.24f, 0.22f, 1.0f};
+    }
+    dl->AddRectFilled(min, max, ImGui::GetColorU32(bg), t.frameRounding);
+    ImVec4 idleMark = t.border;
+    idleMark.w = std::min(1.0f, std::max(0.24f, idleMark.w * 0.45f));
+    if (!active) {
+        dl->AddRectFilled(min, ImVec2(min.x + 2.0f, max.y), ImGui::GetColorU32(idleMark), t.frameRounding);
+        dl->AddRect(min, max, ImGui::GetColorU32(idleMark), t.frameRounding, 0, hovered || focused ? 1.5f : 1.0f);
+    }
+    if (active) {
+        const ImVec4 mark = danger ? t.dangerActive : t.accent;
+        dl->AddRectFilled(
+            min, ImVec2(min.x + std::max(3.0f, rowSize.y * 0.10f), max.y), ImGui::GetColorU32(mark), t.frameRounding);
+        dl->AddRect(min, max, ImGui::GetColorU32(mark), t.frameRounding, 0, 2.0f);
     }
 
+    char label[512];
+    const bool selected = hovered || focused || active;
+    const char* prompt = selected ? "> " : "  ";
+    if (description && description[0] != '\0') {
+        std::snprintf(label, sizeof(label), "%s%-18s  %s", prompt, command, description);
+    } else {
+        std::snprintf(label, sizeof(label), "%s%s", prompt, command);
+    }
+
+    const ImVec4 textColor = disabled ? t.textDim : (danger ? ImVec4{1.0f, 0.82f, 0.78f, 1.0f} : t.text);
+    const float textX = min.x + 10.0f;
+    const float textY = min.y + std::max(0.0f, (rowSize.y - ImGui::GetFontSize()) * 0.35f);
+    dl->PushClipRect(min, max, true);
+    dl->AddText(ImVec2(textX, textY), ImGui::GetColorU32(textColor), label);
+    dl->PopClipRect();
+
+    if (focused)
+        dl->AddRect(min, max, ImGui::GetColorU32(t.accent), 0.0f, 0, 1.0f);
+
+    if (!disabled)
+        playWidgetFeedback(command ? command : "", pressed, danger);
     return pressed;
 }
 
@@ -460,6 +550,7 @@ bool accentButton(const char* label, const ImVec2& size)
     if (sz.y > 0.0f && sz.y < minH)
         sz.y = minH;
     const bool pressed = ImGui::Button(label, sz);
+    playWidgetFeedback(label ? label : "", pressed);
     ImGui::PopStyleVar();
     ImGui::PopStyleColor(4);
     return pressed;
@@ -477,6 +568,7 @@ bool dangerButton(const char* label, const ImVec2& size)
     if (sz.y > 0.0f && sz.y < minH)
         sz.y = minH;
     const bool pressed = ImGui::Button(label, sz);
+    playWidgetFeedback(label ? label : "", pressed, true);
     ImGui::PopStyleVar();
     ImGui::PopStyleColor(3);
     return pressed;

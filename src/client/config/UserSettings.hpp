@@ -12,8 +12,7 @@ inline constexpr float kReferenceMouseDpi = 800.0f;
 inline constexpr float kDefaultMouseCmPer360 = 30.0f;
 inline constexpr float kPi = 3.14159265358979323846f;
 /// @brief Mouse-look sensitivity in radians per SDL relative mouse unit.
-inline constexpr float kDefaultMouseSensitivity =
-    (2.0f * kPi) / ((kDefaultMouseCmPer360 / 2.54f) * kReferenceMouseDpi);
+inline constexpr float kDefaultMouseSensitivity = (2.0f * kPi) / ((kDefaultMouseCmPer360 / 2.54f) * kReferenceMouseDpi);
 /// @brief Settings-slider minimum. The maximum is mirrored so default sits centered.
 inline constexpr float kMinMouseSensitivity = 0.0001f;
 inline constexpr float kMaxMouseSensitivity = 2.0f * kDefaultMouseSensitivity - kMinMouseSensitivity;
@@ -26,20 +25,23 @@ struct UserSettings
 {
     InputBindings inputBindings{InputBindings::defaults()}; ///< Configurable keyboard/mouse and controller bindings.
     float mouseSensitivity{user_settings::kDefaultMouseSensitivity}; ///< Mouse-look sensitivity in radians per pixel.
-    float horizontalFovDegrees{110.0f};                      ///< Player-facing horizontal camera FOV in degrees.
-    bool showControllerBindings{false};                     ///< Settings page shows controller bindings when true.
+    float horizontalFovDegrees{110.0f}; ///< Player-facing horizontal camera FOV in degrees.
+    bool showControllerBindings{false}; ///< Settings page shows controller bindings when true.
 
-    float gamepadYawSensitivity{4.2f};                      ///< radians/sec (30% below the old 6.0 base; look acceleration ramps it up on sustained turns)
+    float gamepadYawSensitivity{
+        4.2f}; ///< radians/sec (30% below the old 6.0 base; look acceleration ramps it up on sustained turns)
     float gamepadPitchSensitivity{4.2f};
     float gamepadLookDeadzone{0.12f}; ///< Gamepad look deadzone radius in [0, 1]. Ignores stick drift out of the box.
     float gamepadMoveDeadzone{
         0.18f}; ///< Gamepad move deadzone radius in [0, 1]. Higher than look — drift-walking is worse than drift-aim.
     bool aimAssistEnabled{true};
-    float aimAssistStrength{1.0f}; ///< Aim assist strength in [0, 1], where 0 is no assist and 1 is full assist.
-    bool gamepadSwapSticks{false}; ///< If true, swap the left and right sticks for look and move input.
-    bool muzzleFlashEnabled{true}; ///< If false, suppress the dynamic muzzle-flash point light on weapon fire.
-    float musicVolume{0.7f};       ///< Music volume in [0, 1].
-    float sfxVolume{1.0f};         ///< Sound-effect volume in [0, 1].
+    float aimAssistStrength{1.0f};     ///< Aim assist strength in [0, 1], where 0 is no assist and 1 is full assist.
+    bool gamepadSwapSticks{false};     ///< If true, swap the left and right sticks for look and move input.
+    bool muzzleFlashEnabled{true};     ///< If false, suppress the dynamic muzzle-flash point light on weapon fire.
+    float musicVolume{0.7f};           ///< Music volume in [0, 1].
+    float sfxVolume{1.0f};             ///< Sound-effect volume in [0, 1].
+    std::string audioOutputDeviceName; ///< SDL playback device name; empty selects the system default.
+    std::string audioInputDeviceName;  ///< SDL recording device name; empty selects the system default.
 };
 
 /// @brief User-settings persistence helpers.

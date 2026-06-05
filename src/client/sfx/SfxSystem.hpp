@@ -18,6 +18,7 @@
 #include <SDL3/SDL.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <span>
@@ -77,6 +78,7 @@ public:
     /// @param gain  Extra volume multiplier (stacks on top of master × category × clip gain).
     void play(SfxId id, float gain = 1.0f);
     SourceHandle play2D(SfxId id, float gain = 1.0f, float priority = 1.0f);
+    SourceHandle playUi(UiSoundAction action, float gain = 1.0f);
     SourceHandle play3D(SfxId id,
                         const glm::vec3& position,
                         const glm::vec3& velocity = glm::vec3{0.0f},
@@ -121,6 +123,7 @@ public:
     // --- Volume control ---
     void setMasterVolume(float v) { masterVolume_ = v; }
     void setCategoryVolume(SfxCategory cat, float v);
+    void setPlaybackDeviceName(std::string_view name);
     float masterVolume() const { return masterVolume_; }
     float categoryVolume(SfxCategory cat) const;
 
@@ -187,6 +190,7 @@ private:
     audio::AudioRuntime audioRuntime_;
     SfxRuntimeStats sfxStats_{};
     std::string manifestPath_;
+    std::string playbackDeviceName_;
     audio::ListenerState listener_{};
     std::array<float, 48000> reverbDelayL_{};
     std::array<float, 48000> reverbDelayR_{};
@@ -195,6 +199,8 @@ private:
 
     /// @brief Per-SfxId countdown to next allowed play (seconds remaining).
     std::array<float, static_cast<size_t>(SfxId::_Count)> cooldowns_{};
+    std::array<float, static_cast<size_t>(UiSoundAction::_Count)> uiActionCooldowns_{};
+    std::array<std::size_t, static_cast<size_t>(UiSoundAction::_Count)> uiActionVariantCursors_{};
 
     // --- Client-side state tracking for event detection ---
     float prevHealth_ = 100.0f;

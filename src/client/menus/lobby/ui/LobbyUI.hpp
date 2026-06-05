@@ -15,6 +15,7 @@ struct BuildResult
     std::optional<bool>
         readyChange;                ///< Desired ready state change: true = ready, false = unready, nullopt = unchanged.
     bool startMatchClicked = false; ///< True if the host pressed "Start Match" this frame.
+    bool cancelStartMatchClicked = false;   ///< True if the host pressed "Cancel" during countdown.
     bool returnToMenuClicked = false;       ///< True if the user pressed "Return to Main Menu" this frame.
     bool returnToHostConfigClicked = false; ///< True if the host wants to return to HostConfig without disconnecting.
     bool hostAddressesVisibilityToggled = false; ///< True if the host toggled address visibility this frame.
@@ -32,8 +33,8 @@ struct LobbyUIConfig
     std::optional<MatchConfig> matchConfig;  ///< Current match settings, if received from the server.
     std::string_view serverName;             ///< Display name for the connected server.
     bool isHosting;                          ///< True if this client owns a local hosted server process.
-    std::string_view hostLanIp;              ///< LAN IPv4 shown to other local players.
-    uint16_t hostPort;                       ///< Port shown to other players when hosting locally.
+    std::string_view hostLanIp;              ///< Address shown to other players while this client is lobby host.
+    uint16_t hostPort;                       ///< Port shown to other players while this client is lobby host.
     bool hostAddressesVisible;               ///< True if the host address strip is currently visible.
 };
 

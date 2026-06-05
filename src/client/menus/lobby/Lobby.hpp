@@ -76,8 +76,8 @@ private:
     bool serverShutdownNotice = false;               ///< Set when the server connection closed while in the lobby.
     bool isHosting = false;                          ///< True if App owns a running hosted server.
     std::string serverName;                          ///< Display name for the connected server.
-    std::string hostLanIp = "127.0.0.1";             ///< LAN IPv4 shown in the hosting banner.
-    uint16_t hostPort = 0;                           ///< Hosted server port shown in the hosting banner.
+    std::string hostLanIp = "127.0.0.1";             ///< Address shown in the hosting banner.
+    uint16_t hostPort = 0;                           ///< Server port shown in the hosting banner.
     bool exitRequested = false;                      ///< Set when the user confirms "Exit to Desktop".
     bool hostAddressesVisible = false;               ///< Local UI flag: show listen/local addresses while hosting.
 };

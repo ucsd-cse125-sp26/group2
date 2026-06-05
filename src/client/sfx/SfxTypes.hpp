@@ -28,12 +28,12 @@ enum class SfxId : uint8_t
     RailGunCharge, ///< Weapons/Railgun/Railgun_Charge.wav
 
     // Impacts / hitmarkers
-    FleshHit,          ///< Voicy_Flesh Bullet Impact SFX.mp3
-    Headshot,          ///< Voicy_Headshot Rapid SFX.mp3
-    Explosion,         ///< Generic explosion fallback.
-    RocketExplosion,   ///< Weapons/Rocket/Explosion_Rocket.wav
-    MolotovExplosion,  ///< Weapons/Grenade/Explosion_Molotov.wav
-    HEExplosion,       ///< Weapons/Grenade/Explosion_HE.wav
+    FleshHit,         ///< Voicy_Flesh Bullet Impact SFX.mp3
+    Headshot,         ///< Voicy_Headshot Rapid SFX.mp3
+    Explosion,        ///< Generic explosion fallback.
+    RocketExplosion,  ///< Weapons/Rocket/Explosion_Rocket.wav
+    MolotovExplosion, ///< Weapons/Grenade/Explosion_Molotov.wav
+    HEExplosion,      ///< Weapons/Grenade/Explosion_HE.wav
 
     // Player feedback
     DamageTaken, ///< damage.mp3
@@ -100,6 +100,38 @@ enum class SfxId : uint8_t
     GameMusic, ///< Music/Gamesong2.wav
     GameMusicLoop, ///< Music/Gamesong2_Main2.wav
 
+    // Menu UI feedback. Files live flat under assets/sounds/MenuSFX/.
+    UiHover01,
+    UiHover02,
+    UiConfirm01,
+    UiConfirm02,
+    UiBack01,
+    UiToggle01,
+    UiSliderStep01,
+    UiModal01,
+    UiSuccess01,
+    UiError01,
+    UiError02,
+    UiDisabled01,
+    UiDanger01,
+
+    _Count
+};
+
+/// @brief Semantic menu/UI sound actions.
+enum class UiSoundAction : uint8_t
+{
+    Hover,
+    Confirm,
+    Back,
+    Toggle,
+    SliderStep,
+    ModalOpen,
+    ModalClose,
+    Success,
+    Error,
+    Disabled,
+    Danger,
     _Count
 };
 
@@ -275,6 +307,32 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "MenuMusic";
     case SfxId::GameMusic:
         return "GameMusic";
+    case SfxId::UiHover01:
+        return "UiHover01";
+    case SfxId::UiHover02:
+        return "UiHover02";
+    case SfxId::UiConfirm01:
+        return "UiConfirm01";
+    case SfxId::UiConfirm02:
+        return "UiConfirm02";
+    case SfxId::UiBack01:
+        return "UiBack01";
+    case SfxId::UiToggle01:
+        return "UiToggle01";
+    case SfxId::UiSliderStep01:
+        return "UiSliderStep01";
+    case SfxId::UiModal01:
+        return "UiModal01";
+    case SfxId::UiSuccess01:
+        return "UiSuccess01";
+    case SfxId::UiError01:
+        return "UiError01";
+    case SfxId::UiError02:
+        return "UiError02";
+    case SfxId::UiDisabled01:
+        return "UiDisabled01";
+    case SfxId::UiDanger01:
+        return "UiDanger01";
     case SfxId::GameMusicLoop:
         return "GameMusicLoop";
     default:

@@ -105,6 +105,8 @@ bool testSettingsPersistence()
     settings.mouseSensitivity = 0.0015f;
     settings.horizontalFovDegrees = 103.0f;
     settings.showControllerBindings = true;
+    settings.audioOutputDeviceName = "Test Output";
+    settings.audioInputDeviceName = "Test Input";
     settings.inputBindings.rebind(
         Action::Ability2, Binding::bindKeyboard(SDL_SCANCODE_Q), BindingDevice::KeyboardMouse, 1);
     settings.inputBindings.rebind(
@@ -115,6 +117,9 @@ bool testSettingsPersistence()
     ok &= expect(loaded.mouseSensitivity == settings.mouseSensitivity, "mouse sensitivity should round-trip");
     ok &= expect(loaded.horizontalFovDegrees == settings.horizontalFovDegrees, "horizontal fov should round-trip");
     ok &= expect(loaded.showControllerBindings, "controller binding view flag should round-trip");
+    ok &=
+        expect(loaded.audioOutputDeviceName == settings.audioOutputDeviceName, "audio output device should round-trip");
+    ok &= expect(loaded.audioInputDeviceName == settings.audioInputDeviceName, "audio input device should round-trip");
     ok &= expect(loaded.inputBindings.get(Action::Ability2, BindingDevice::KeyboardMouse, 1).key == SDL_SCANCODE_Q,
                  "keyboard alternate binding should round-trip");
     ok &= expect(loaded.inputBindings.get(Action::Scope, BindingDevice::Controller, 1).gamepadButton ==

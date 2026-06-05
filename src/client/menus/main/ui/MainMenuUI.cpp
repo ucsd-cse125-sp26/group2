@@ -156,6 +156,7 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                              const HostConfigUIInputs& hostInputs)
 {
     JoinMenuResult result{};
+    const ServerBrowserTab previousTab = state.activeTab;
 
     if (menu_theme::beginPanel("Server Browser",
                                menu_theme::k_frontendPanelBaseWidth,
@@ -165,6 +166,7 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
     {
         menu_theme::terminalStatusLine("NETSCAN READY", "SELECT TAB OR TYPE ADDRESS");
         if (ImGui::BeginTabBar("ServerBrowserTabs")) {
+            const bool applyingInitialTabSelection = state.applyInitialTabSelection;
             ImGuiTabItemFlags localFlags = ImGuiTabItemFlags_None;
             ImGuiTabItemFlags globalFlags = ImGuiTabItemFlags_None;
             ImGuiTabItemFlags directFlags = ImGuiTabItemFlags_None;
@@ -235,6 +237,8 @@ JoinMenuResult buildJoinMenu(JoinMenuState& state,
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
+            if (!applyingInitialTabSelection && state.activeTab != previousTab)
+                menu_theme::playUiSound(UiSoundAction::Toggle);
         }
 
         menu_theme::terminalStatusLine("BROWSER ONLINE", "ESC: SYSTEM MENU");
