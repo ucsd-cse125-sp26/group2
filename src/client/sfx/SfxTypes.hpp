@@ -38,7 +38,7 @@ enum class SfxId : uint8_t
     // Player feedback
     DamageTaken, ///< damage.mp3
     ArmorBreak,  ///< Voicy_Fortnite Shield Break.mp3
-    Death,       ///< Voicy_Minecraft Death Sound.mp3
+    Death,       ///< Death.wav
     Respawn,     ///< Voicy_totem of undying sfx .mp3
     KillConfirm, ///< Voicy_Pilot Killed Indicator SFX.mp3
 
