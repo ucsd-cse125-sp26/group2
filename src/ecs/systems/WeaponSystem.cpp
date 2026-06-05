@@ -1119,9 +1119,26 @@ void runWeapon(Registry& registry,
                   WeaponState& weapon,
                   GrenadeState& grenades,
                   const PlayerVisState& vis) {
-        // Dead players cannot fire or interact with weapons.
-        if (registry.all_of<RespawnTimer>(shooter))
+        // Dead players cannot fire or interact with weapons. Check both
+        // RespawnTimer (server-authoritative) and PlayerVisState.isDead
+        // (replicated to clients) so client-side prediction matches —
+        // otherwise the client keeps predicting fire/beam state for the
+        // corpse until the server snapshot overwrites it.
+        if (registry.all_of<RespawnTimer>(shooter) || vis.isDead) {
+            // Force-clear any active beam so the visuals stop the tick we die.
+            if (auto* beam = registry.try_get<BeamState>(shooter)) {
+                beam->active = false;
+                beam->locked = 0;
+                beam->lockStrength = 0.0f;
+                beam->guidePoint = beam->hitPoint;
+            }
+            if (auto* lockState = registry.try_get<BeamLockState>(shooter)) {
+                lockState->target = entt::null;
+                lockState->duration = 0.0f;
+                lockState->graceTimer = 0.0f;
+            }
             return;
+        }
 
         handleSwitch(input, weapon);
         handleCooldown(weapon, dt);
