@@ -770,16 +770,19 @@ private:
     bool cachedMuzzleValid_ = false;
 
     // Local player's right-palm world position, cached from the viewmodel pass
-    // each frame. Used as the muzzle-flash origin (see muzzleFlashOrigin).
+    // each frame. Used as a muzzle-flash fallback when the weapon has no muzzle marker.
     glm::vec3 cachedRightPalmWorld_{0.0f};
     bool cachedRightPalmValid_ = false;
 
-    /// @brief World position to spawn the local player's muzzle flash: 10 units
-    /// in front of the right palm along the current view direction, falling back
-    /// to @p fallback (the weapon muzzle) when the palm position isn't available.
+    /// @brief World position to spawn local weapon particles.
+    ///
+    /// Prefer the weapon model's tagged muzzle marker (`is_muzzle` / socket_muzzle)
+    /// when available; fall back to the old palm-derived point for untagged guns.
     [[nodiscard]] glm::vec3 muzzleFlashOrigin(const glm::vec3& fallback) const
     {
         constexpr float k_muzzleFlashForward = 10.0f;
+        if (cachedMuzzleValid_)
+            return cachedMuzzleWorld_;
         return cachedRightPalmValid_ ? cachedRightPalmWorld_ + cachedCamFwd_ * k_muzzleFlashForward : fallback;
     }
 
