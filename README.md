@@ -378,3 +378,4 @@ To update a dependency, change `GIT_TAG` in `CMakeLists.txt` and delete `build/`
   - HE: https://sketchfab.com/3d-models/sci-fi-grenade-f14321b41c5d4a308218dd4c28bf5d3e by Hunter Wiltse
   - Molotov: https://sketchfab.com/3d-models/ng50-napalm-grenade-27ea60123e9645ab907547c71b116099 by epavlenko
   - Sticky: https://sketchfab.com/3d-models/powerball-e7c119ce590c4a919ebc6405cfd12a4c by Alex Sanches
+  - Shotgun: https://sketchfab.com/3d-models/low-poly-sci-fi-shotgun-4a6fc75d0e0f474fb85533e0e4b69400 by Keralt

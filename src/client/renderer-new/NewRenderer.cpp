@@ -179,23 +179,9 @@ bool NewRenderer::init(SDL_Window* window)
 
     camera_ = NewCamera();
 
-    // Neutral fallback diffuse for untextured viewmodel meshes (prevents the
-    // previous weapon's texture bleeding onto an untextured part on switch).
-    {
-        const unsigned char neutral[4] = {160, 160, 162, 255};
-        viewmodelFallbackTex_ = Boilerplate::createTextureRGBA8(device_, 1, 1, neutral);
-    }
-
     SDL_GPUTextureFormat hdrFormat = getHdrFormat();
     // Player character rig stays untextured (debug shader + chams/killcam path).
     skinnedRenderer_.init(device_, hdrFormat, shaderFormat_);
-    // Animated first-person weapon viewmodel + arms render textured (own diffuse).
-    // They are camera-parented, so disable frustum culling (the bind-pose sphere
-    // test would wrongly drop the animated pose most frames — caused flicker).
-    viewmodelSkinned_.init(device_, hdrFormat, shaderFormat_, /*textured=*/true);
-    viewmodelSkinned_.setFrustumCullEnabled(false);
-    viewmodelArmsSkinned_.init(device_, hdrFormat, shaderFormat_, /*textured=*/true);
-    viewmodelArmsSkinned_.setFrustumCullEnabled(false);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
     if (!dynamicShadowMaps_) {
@@ -614,8 +600,6 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(cmd);
         if (copyPass) {
             skinnedRenderer_.uploadFrame(cmd, copyPass);
-            viewmodelSkinned_.uploadFrame(cmd, copyPass);
-            viewmodelArmsSkinned_.uploadFrame(cmd, copyPass);
             SDL_EndGPUCopyPass(copyPass);
         }
     }
@@ -828,7 +812,8 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
         particleSystem_->uploadToGpu(cmd); // Must be before render pass
 
     SDL_GPUColorTargetInfo colorTargets[2] = {
-        Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f}),
+        Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}),
+        //Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f}),
         Boilerplate::makeColorTargetClear(sceneNormal_, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f}),
     };
 
@@ -1049,8 +1034,6 @@ void NewRenderer::drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffe
     bindLightShadowInfo(geometryPass, cmd);
 
     drawWeapon(geometryPass, cmd,camera_.getViewProjectionFrustumPlane());
-    viewmodelSkinned_.draw(geometryPass, cmd);
-    viewmodelArmsSkinned_.draw(geometryPass, cmd);
 
     SDL_EndGPURenderPass(geometryPass);
 }
@@ -1162,13 +1145,12 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
 
 void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    // Killcam chams pass runs BEFORE the normal skinned draw, so the depth
-    // buffer holds only the world + static entities (not the characters). The
-    // chams pipeline uses a GREATER depth test, so the killer is drawn flat-red
-    // only where it sits BEHIND world geometry (i.e. occluded by walls); its
-    // visible parts fail the test here and render normally in the pass below.
+    // Wallhack chams run before the normal skinned draw so the depth buffer
+    // still holds world-only geometry. Killcam highlight runs after normal
+    // bodies so the killer is visibly red, not just red where occluded.
     skinnedRenderer_.drawChams(renderPass, cmd);
     skinnedRenderer_.draw(renderPass, cmd);
+    skinnedRenderer_.drawKillcamHighlight(renderPass, cmd);
 }
 
 void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth, const FrustumPlanes& frustumPlanes)
@@ -1326,7 +1308,11 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
         depthTarget_.texture = nullptr;
     }
 
-    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, false, false);
+    // Later passes load this depth texture for skinned players, particles,
+    // SSAO, and the first-person weapon. It must be stored after the geometry
+    // pass; STOREOP_DONT_CARE makes those later depth tests read undefined
+    // data, which can draw players through walls or cull them up close.
+    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, true, false);
 
     if (!depthTarget_.texture)
         return false;
@@ -1460,12 +1446,6 @@ void NewRenderer::quit()
         }
 
         skinnedRenderer_.shutdown();
-        viewmodelSkinned_.shutdown();
-        viewmodelArmsSkinned_.shutdown();
-        if (viewmodelFallbackTex_) {
-            SDL_ReleaseGPUTexture(device_, viewmodelFallbackTex_);
-            viewmodelFallbackTex_ = nullptr;
-        }
 
         if (geometryPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, geometryPipeline_);
@@ -1780,101 +1760,12 @@ bool NewRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJoints
 
 void NewRenderer::setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
 {
-    // The renderer owns frustum culling for skinned characters: Game.cpp hands
-    // us every character and SkinnedRenderer keeps only the ones whose bounding
-    // sphere is on screen, using this frame's camera frustum planes.
+    // Game.cpp hands us every character. SkinnedRenderer currently keeps all
+    // submitted colour instances visible because this call happens before
+    // drawFrame() refreshes the renderer camera; culling against camera_ here
+    // would use the previous frame's frustum and can make players flicker.
     skinnedRenderer_.setFrame(palette, instances, camera_.getViewProjectionFrustumPlane());
 }
-
-bool NewRenderer::setViewmodelRig(const std::vector<RigMeshSource>& meshes, int numJoints)
-{
-    return viewmodelSkinned_.setRig(meshes, numJoints);
-}
-
-void NewRenderer::setViewmodelFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
-{
-    // The viewmodel sits in front of the camera, so it survives the frustum cull;
-    // pass the same camera frustum the player path uses.
-    viewmodelSkinned_.setFrame(palette, instances, camera_.getViewProjectionFrustumPlane());
-}
-
-namespace
-{
-/// Resolve the diffuse GPU texture for a model's source material *index*.
-/// Returns nullptr if the index/material/texture isn't present.
-SDL_GPUTexture* diffuseTexForMaterialIndex(const Asset::Model& model, uint32_t materialIndex)
-{
-    if (materialIndex >= model.materialsByIndex_.size())
-        return nullptr;
-    const MaterialIdInt matId = model.materialsByIndex_[materialIndex];
-    if (!Asset::materials_.contains(matId))
-        return nullptr;
-    const Asset::Material& mat = Asset::materials_.at(matId);
-    if (Asset::textures_.contains(mat.diffuseTexture))
-        return Asset::textures_.at(mat.diffuseTexture).tex;
-    return nullptr;
-}
-} // namespace
-
-void NewRenderer::setViewmodelTexture(int modelInstanceIndex)
-{
-    if (modelInstanceIndex >= 0 && static_cast<size_t>(modelInstanceIndex) < Asset::modelInstances_.size()) {
-        const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
-        const std::vector<uint32_t>& matIdx = viewmodelSkinned_.meshMaterialIndices();
-        if (Asset::models_.contains(modelId) && !matIdx.empty()) {
-            // Per-mesh diffuse so each gun part samples its OWN material texture, in
-            // the rig's mesh order. The R-301 magazine is a flat-color material with
-            // no UVs; binding the single body atlas to it sampled the atlas's unused,
-            // fully transparent (0,0) texel and the magazine vanished in-game. The
-            // loader synthesizes a 1x1 opaque texel for such flat-color parts, so the
-            // magazine now renders its true colour.
-            const Asset::Model& model = Asset::models_.at(modelId);
-            std::vector<SDL_GPUTexture*> perMesh;
-            perMesh.reserve(matIdx.size());
-            for (uint32_t mi : matIdx) {
-                SDL_GPUTexture* tex = diffuseTexForMaterialIndex(model, mi);
-                perMesh.push_back(tex ? tex : viewmodelFallbackTex_);
-            }
-            viewmodelSkinned_.setPerMeshDiffuse(std::move(perMesh), sampler_);
-            return;
-        }
-    }
-    // No model / rig not installed: bind the neutral fallback so the previously
-    // equipped weapon's texture doesn't persist.
-    viewmodelSkinned_.setDiffuseTexture(viewmodelFallbackTex_, sampler_);
-}
-
-bool NewRenderer::setViewmodelArmsRig(const std::vector<RigMeshSource>& meshes, int numJoints)
-{
-    return viewmodelArmsSkinned_.setRig(meshes, numJoints);
-}
-
-void NewRenderer::setViewmodelArmsFrame(const std::vector<glm::mat4>& palette,
-                                        const std::vector<SkinnedInstance>& instances)
-{
-    viewmodelArmsSkinned_.setFrame(palette, instances, camera_.getViewProjectionFrustumPlane());
-}
-
-void NewRenderer::setViewmodelArmsTexture(int modelInstanceIndex)
-{
-    if (modelInstanceIndex < 0 || static_cast<size_t>(modelInstanceIndex) >= Asset::modelInstances_.size())
-        return;
-    const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(modelInstanceIndex)).modelId_;
-    if (!Asset::models_.contains(modelId))
-        return;
-    Asset::Model& model = Asset::models_.at(modelId);
-    for (auto& element : model.modelElements_) {
-        if (!Asset::materials_.contains(element.materialId_))
-            continue;
-        const Asset::Material& mat = Asset::materials_.at(element.materialId_);
-        if (Asset::textures_.contains(mat.diffuseTexture)) {
-            viewmodelArmsSkinned_.setDiffuseTexture(Asset::textures_.at(mat.diffuseTexture).tex, sampler_);
-            return;
-        }
-    }
-}
-
-
 
 bool NewRenderer::inFrustum(const Asset::AABB &modelElementAABB,const FrustumPlanes &frustumPlanes,const glm::mat4 &modelMat)
 {

@@ -23,6 +23,7 @@
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <string_view>
+#include <unordered_map>
 
 /// @brief Top-level particle system orchestrator.
 ///
@@ -131,6 +132,16 @@ public:
     void update(float dt, const NewCamera& cam, Registry& reg);
     void update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec3 right, glm::vec3 up, Registry& reg);
 
+    /// @brief Override the local EnergyGun beam origin with the first-person muzzle marker.
+    void setLocalEnergyBeamOriginOverride(glm::vec3 origin)
+    {
+        localEnergyBeamOriginOverride_ = origin;
+        localEnergyBeamOriginOverrideValid_ = true;
+    }
+
+    /// @brief Clear the local EnergyGun beam origin override for this frame.
+    void clearLocalEnergyBeamOriginOverride() { localEnergyBeamOriginOverrideValid_ = false; }
+
     /// @brief Upload all particle data to GPU. Must be called BEFORE render pass.
     void uploadToGpu(SDL_GPUCommandBuffer* cmd);
 
@@ -166,6 +177,9 @@ public:
     [[nodiscard]] const SdfAtlas& sdfAtlas() const { return sdf_.atlas(); }
 
 private:
+    /// @brief Emit short smoke puffs behind live rocket projectile entities.
+    void driveRocketSmokeTrails(float dt, Registry& reg);
+
     ParticleRenderer renderer_;
     TracerEffect tracers_;
     RibbonTrail ribbons_;
@@ -184,10 +198,14 @@ private:
     glm::vec3 camForward_{};
     glm::vec3 camRight_{};
     glm::vec3 camUp_{};
+    glm::vec3 localEnergyBeamOriginOverride_{0.0f};
+    bool localEnergyBeamOriginOverrideValid_ = false;
     float screenW_ = 1280.f;
     float screenH_ = 720.f;
 
     float frameDt_ = 0.016f; // last dt, needed by spawn callbacks
+
+    std::unordered_map<entt::entity, float> rocketSmokeAccumulators_;
 
     // Scratch buffer: railgun + legacy tesla + energy tesla arc verts merged for a single upload.
     std::vector<ArcVertex> arcScratch_;

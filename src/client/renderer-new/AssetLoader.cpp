@@ -173,6 +173,24 @@ static bool isWeaponMountPointName(const std::string& nodeName)
            nodeName == "muzzle_flash";
 }
 
+static bool isMuzzleMarkerName(const std::string& name)
+{
+    return name == "socket_muzzle" || name == "is_muzzle" || name == "muzzle_flash";
+}
+
+static bool nodeUsesMuzzleMarkerMesh(const aiNode& node, const aiScene& scene)
+{
+    for (unsigned int i = 0; i < node.mNumMeshes; ++i) {
+        const unsigned int meshIndex = node.mMeshes[i];
+        if (meshIndex < scene.mNumMeshes && scene.mMeshes[meshIndex] != nullptr &&
+            isMuzzleMarkerName(scene.mMeshes[meshIndex]->mName.C_Str()))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool isCollisionOnlyName(const std::string& name)
 {
     return name.rfind("COL_", 0) == 0;
@@ -211,6 +229,9 @@ bool AssetLoader::loadModel(const ModelIdInt id,
     // std::cout << " Asset::Model &newModel = Asset::models_[id]; " << std::endl;
     Asset::Model& newModel = Asset::models_[id];
     newModel.pointLights.clear();
+    newModel.mountPoints.clear();
+    newModel.hasMuzzle = false;
+    newModel.muzzleLocalPos = glm::vec3{0.0f};
 
     /////////////////////////////////////////////////// LOAD AISCENE ///////////////////////////////////////////////////
     // std::cout << "loadAsset" << std::endl;
@@ -305,8 +326,9 @@ bool AssetLoader::loadModel(const ModelIdInt id,
 
         // Accept the engine's own muzzle markers AND the Apex rig convention
         // ("muzzle_flash"), so Apex-derived models expose a muzzle without re-authoring.
-        if (hasMetadataKey(currentNode, "is_muzzle") || nodeName == "socket_muzzle" || nodeName == "is_muzzle" ||
-            nodeName == "muzzle_flash") {
+        if (hasMetadataKey(currentNode, "is_muzzle") || isMuzzleMarkerName(nodeName) ||
+            nodeUsesMuzzleMarkerMesh(currentNode, sceneAi))
+        {
             newModel.hasMuzzle = true;
             newModel.muzzleLocalPos = nodeModelPos;
             SDL_Log("AssetLoader: found muzzle on node '%s' at local pos %.2f %.2f %.2f",

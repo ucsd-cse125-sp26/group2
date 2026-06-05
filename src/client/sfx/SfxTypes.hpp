@@ -15,15 +15,25 @@
 enum class SfxId : uint8_t
 {
     // Weapons
-    RifleFire,     ///< Voicy_Charge Rifle SFX.mp3
-    RocketFire,    ///< Voicy_Minecraft TNT Explosion.mp3
-    RailGunFire,   ///< Voicy_Charge Rifle SFX.mp3
-    EnergyGunFire, ///< Voicy_Charge Rifle SFX.mp3
+    RifleFire,     ///< Weapons/Rifle/Rifle_Shooting.wav
+    RocketFire,    ///< Weapons/Rocket/Rocket_Shooting.wav
+    RailGunFire,   ///< Weapons/Railgun/Railgun_Shooting.wav
+    EnergyGunFire, ///< Weapons/EnergyWeapon/Energy_Shooting_Start.wav
+    ShotgunFire,   ///< Weapons/Shotgun/Shotgun_Shooting.wav
+    RifleReload,   ///< Weapons/Rifle/Rifle_Reloading.wav
+    RocketReload,  ///< Weapons/Rocket/Rocket_Reloading.wav
+    RailGunReload, ///< Weapons/Railgun/Railgun_Reloading.wav
+    EnergyReload,  ///< Weapons/EnergyWeapon/Energy_Reloading.wav
+    ShotgunReload, ///< Weapons/Shotgun/Shotgun_Reloading.wav
+    RailGunCharge, ///< Weapons/Railgun/Railgun_Charge.wav
 
     // Impacts / hitmarkers
-    FleshHit,  ///< Voicy_Flesh Bullet Impact SFX.mp3
-    Headshot,  ///< Voicy_Headshot Rapid SFX.mp3
-    Explosion, ///< Voicy_Minecraft TNT Explosion.mp3
+    FleshHit,          ///< Voicy_Flesh Bullet Impact SFX.mp3
+    Headshot,          ///< Voicy_Headshot Rapid SFX.mp3
+    Explosion,         ///< Generic explosion fallback.
+    RocketExplosion,   ///< Weapons/Rocket/Explosion_Rocket.wav
+    MolotovExplosion,  ///< Weapons/Grenade/Explosion_Molotov.wav
+    HEExplosion,       ///< Weapons/Grenade/Explosion_HE.wav
 
     // Player feedback
     DamageTaken, ///< Voicy_roblox ooof.mp3
@@ -33,11 +43,11 @@ enum class SfxId : uint8_t
     KillConfirm, ///< Voicy_Pilot Killed Indicator SFX.mp3
 
     // Charge rifle
-    ChargeRifleLoad,  ///< charge-rifle-load.wav (play once when charge starts)
+    ChargeRifleLoad,  ///< Legacy charge cue alias.
     ChargeRifleShoot, ///< charge-rifle-shoot.wav (play on release)
 
     // Energy beam
-    EnergyBeamLoop, ///< Voicy_Thunderstruck into.mp3 (play while beam active)
+    EnergyBeamLoop, ///< Weapons/EnergyWeapon/Energy_Shooting.wav (play while beam active)
 
     // Healing / Shield
     Healing,        ///< Voicy_Syringe SFX .mp3
@@ -85,6 +95,8 @@ enum class SfxId : uint8_t
     GrenadeThrow,
     VoiceStart,
     VoiceStop,
+    MenuMusic, ///< Music/Gamesong1.wav
+    GameMusic, ///< Music/Gamesong2.wav
 
     _Count
 };
@@ -97,6 +109,7 @@ enum class SfxCategory : uint8_t
     Player,
     Footsteps,
     Voice,
+    Music,
     UI,
     _Count
 };
@@ -126,12 +139,32 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "RailGunFire";
     case SfxId::EnergyGunFire:
         return "EnergyGunFire";
+    case SfxId::ShotgunFire:
+        return "ShotgunFire";
+    case SfxId::RifleReload:
+        return "RifleReload";
+    case SfxId::RocketReload:
+        return "RocketReload";
+    case SfxId::RailGunReload:
+        return "RailGunReload";
+    case SfxId::EnergyReload:
+        return "EnergyReload";
+    case SfxId::ShotgunReload:
+        return "ShotgunReload";
+    case SfxId::RailGunCharge:
+        return "RailGunCharge";
     case SfxId::FleshHit:
         return "FleshHit";
     case SfxId::Headshot:
         return "Headshot";
     case SfxId::Explosion:
         return "Explosion";
+    case SfxId::RocketExplosion:
+        return "RocketExplosion";
+    case SfxId::MolotovExplosion:
+        return "MolotovExplosion";
+    case SfxId::HEExplosion:
+        return "HEExplosion";
     case SfxId::DamageTaken:
         return "DamageTaken";
     case SfxId::ArmorBreak:
@@ -234,6 +267,10 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "VoiceStart";
     case SfxId::VoiceStop:
         return "VoiceStop";
+    case SfxId::MenuMusic:
+        return "MenuMusic";
+    case SfxId::GameMusic:
+        return "GameMusic";
     default:
         return "Unknown";
     }
@@ -262,6 +299,8 @@ inline const char* sfxCategoryName(SfxCategory category) noexcept
         return "Footsteps";
     case SfxCategory::Voice:
         return "Voice";
+    case SfxCategory::Music:
+        return "Music";
     case SfxCategory::UI:
         return "UI";
     default:

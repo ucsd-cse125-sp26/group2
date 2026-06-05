@@ -256,6 +256,8 @@ void SettingsEditor::resetDraft(const UserSettings& settings)
     draftAimAssistStrength_ = settings.aimAssistStrength;
     draftGamepadSwapSticks_ = settings.gamepadSwapSticks;
     draftMuzzleFlashEnabled_ = settings.muzzleFlashEnabled;
+    draftMusicVolume_ = settings.musicVolume;
+    draftSfxVolume_ = settings.sfxVolume;
 }
 
 void SettingsEditor::closeEditor()
@@ -303,6 +305,8 @@ void SettingsEditor::apply(UserSettings& settings, std::string_view settingsPath
     settings.aimAssistStrength = draftAimAssistStrength_;
     settings.gamepadSwapSticks = draftGamepadSwapSticks_;
     settings.muzzleFlashEnabled = draftMuzzleFlashEnabled_;
+    settings.musicVolume = draftMusicVolume_;
+    settings.sfxVolume = draftSfxVolume_;
 
     const bool saved = user_settings::save(std::string(settingsPath), settings);
     statusMessage_ = saved ? "Settings saved." : "Settings could not be saved.";
@@ -333,6 +337,19 @@ void SettingsEditor::renderGeneralTab()
     const bool previousMuzzleFlash = draftMuzzleFlashEnabled_;
     ImGui::Checkbox("Muzzle Flash", &draftMuzzleFlashEnabled_);
     if (draftMuzzleFlashEnabled_ != previousMuzzleFlash)
+        dirty_ = true;
+
+    ImGui::Spacing();
+    const float previousMusicVolume = draftMusicVolume_;
+    ImGui::SliderFloat("Music Volume", &draftMusicVolume_, 0.0f, 1.0f, "%.2f");
+    draftMusicVolume_ = std::clamp(draftMusicVolume_, 0.0f, 1.0f);
+    if (draftMusicVolume_ != previousMusicVolume)
+        dirty_ = true;
+
+    const float previousSfxVolume = draftSfxVolume_;
+    ImGui::SliderFloat("SFX Volume", &draftSfxVolume_, 0.0f, 1.0f, "%.2f");
+    draftSfxVolume_ = std::clamp(draftSfxVolume_, 0.0f, 1.0f);
+    if (draftSfxVolume_ != previousSfxVolume)
         dirty_ = true;
 }
 
