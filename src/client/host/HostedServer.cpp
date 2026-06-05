@@ -68,6 +68,8 @@ std::vector<std::string> buildServerArgs(const std::string& serverPath, const Ho
 
     args.push_back("--killsToWin=" + std::to_string(config.killsToWin));
     args.push_back("--max-players=" + std::to_string(config.maxPlayers));
+    args.push_back("--powerup-initial-spawn-seconds=" + std::to_string(config.powerupInitialSpawnDelaySeconds));
+    args.push_back("--powerup-respawn-seconds=" + std::to_string(config.powerupRespawnCooldownSeconds));
     args.emplace_back("--idle-shutdown-minutes=5");
     return args;
 }

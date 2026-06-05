@@ -8,6 +8,7 @@
 #include "animation/AnimationTesterUI.hpp"
 #include "animation/CharacterRig.hpp"
 #include "animation/SkinningBackend.hpp"
+#include "animation/WeaponViewmodelAnim.hpp"
 #include "app/AppContext.hpp"
 #include "debug/ClientPerfRecorder.hpp"
 #include "debug/DebugUI.hpp"
@@ -387,6 +388,8 @@ private:
     int stickyGrenadeModelIdx_ = -1;
     int molotovModelIdx_ = -1;
     int medkitModelIdx_ = -1;
+    int shieldPowerupModelIdx_ = -1;
+    int damagePowerupModelIdx_ = -1;
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
@@ -594,10 +597,9 @@ private:
     int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = previous slot, consumed each frame.
 
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
-    ThirdPersonWeaponParams
-        tpWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable procedural/scale params.
-    int tpTuneWeaponIdx_ = 0;                        ///< Which weapon type the Weapon Hold tweaker is editing.
-    bool tpFreezeAnimations_ = false;                ///< Debug: freeze every animator's playback while tuning.
+    ThirdPersonWeaponParams tpWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable procedural/scale params.
+    int tpTuneWeaponIdx_ = 0;         ///< Which weapon type the Weapon Hold tweaker is editing.
+    bool tpFreezeAnimations_ = false; ///< Debug: freeze every animator's playback while tuning.
 
     // Third-person FK weapon hold poses (spine-relative gun + per-bone arm angles).
     std::array<WeaponHoldPose, kRenderableWeaponTypeCount> weaponHoldPoses_{};         ///< Runtime, live-tuned.

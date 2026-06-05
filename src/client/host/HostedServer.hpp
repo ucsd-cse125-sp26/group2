@@ -24,6 +24,8 @@ struct HostConfigState
     std::string serverName;      ///< Name advertised in LAN/global server browsers for this hosted session.
     int killsToWin;              ///< Match config: kill threshold to win, sent to the server on launch and update.
     int maxPlayers;              ///< Match config: maximum number of connected players accepted by the server.
+    float powerupInitialSpawnDelaySeconds; ///< Match config: seconds before powerups first appear.
+    float powerupRespawnCooldownSeconds;   ///< Match config: seconds before picked-up powerups reappear.
 };
 
 /// @brief Reserved metadata for an active hosted session.

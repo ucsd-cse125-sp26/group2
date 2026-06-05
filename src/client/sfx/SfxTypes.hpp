@@ -52,6 +52,7 @@ enum class SfxId : uint8_t
     // Healing / Shield
     Healing,        ///< Voicy_Syringe SFX .mp3
     ShieldRecharge, ///< Voicy_Halo Shield Recharge.mp3
+    PowerupPickup,  ///< Configurable filler pickup sound.
 
     // Movement / equipment placeholders. FootstepLight/Heavy still back simple impact fallbacks.
     FootstepLight,
@@ -185,6 +186,8 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "Healing";
     case SfxId::ShieldRecharge:
         return "ShieldRecharge";
+    case SfxId::PowerupPickup:
+        return "PowerupPickup";
     case SfxId::FootstepLight:
         return "FootstepLight";
     case SfxId::FootstepHeavy:

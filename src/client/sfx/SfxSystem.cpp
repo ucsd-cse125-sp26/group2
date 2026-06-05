@@ -168,6 +168,7 @@ bool SfxSystem::init()
     loadClip(SfxId::KillConfirm, "Voicy_Pilot Killed Indicator SFX.mp3", SfxCategory::Player, 0.9f, 0.30f);
     loadClip(SfxId::Healing, "Voicy_Syringe SFX .mp3", SfxCategory::Player, 0.5f, 1.00f);
     loadClip(SfxId::ShieldRecharge, "Voicy_Halo Shield Recharge.mp3", SfxCategory::Player, 0.5f, 1.00f);
+    loadClip(SfxId::PowerupPickup, "csgo-case-open.mp3", SfxCategory::Player, 0.75f, 0.15f);
 
     synthesizeClip(SfxId::FootstepLight, SfxCategory::Footsteps, 0.40f, 0.06f);
     synthesizeClip(SfxId::FootstepHeavy, SfxCategory::Footsteps, 0.55f, 0.06f);
