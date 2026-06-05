@@ -34,6 +34,7 @@
 #include "ecs/components/HealthPackSpawner.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/Killzone.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/Orientation.hpp"
 #include "ecs/components/PlayerColor.hpp"
@@ -983,6 +984,12 @@ bool Game::init(AppContext& ctx)
     {
         // 1) Extract collision geometry (shared with server).
         gamemap::loadConfiguredMap(mapCollision_, "client");
+        for (const gamemap::KillzoneSpawner& kz : gamemap::killzoneSpawner_) {
+            const entt::entity zone = registry.create();
+            registry.emplace<Killzone>(zone);
+            registry.emplace<Position>(zone, kz.pos);
+            registry.emplace<CollisionShape>(zone, CollisionShape{.halfExtents = kz.halfExtents});
+        }
 
         // 2) Load visual model for rendering (scene-pass so it draws as static world geometry).
         // In separated mode, exclude collision-only nodes so they aren't rendered.
@@ -5540,6 +5547,7 @@ SDL_AppResult Game::iterate()
             debugUI.buildWeaponSpawnerUI(registry, hbVP, winWf, winHf);
             debugUI.buildDroppedWeaponUI(registry, hbVP, winWf, winHf);
             debugUI.buildSpawnPointUI(registry, hbVP, winWf, winHf);
+            debugUI.buildKillzoneUI(registry, hbVP, winWf, winHf);
             // PR-20: CSGO sv_showimpacts-style shot debug.  Window
             // toggles + ring-buffer slider + per-shot summary table;
             // when `drawShotDebugOverlay` is checked we also render

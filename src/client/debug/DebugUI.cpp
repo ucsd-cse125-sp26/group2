@@ -10,6 +10,7 @@
 #include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/Killzone.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/PlayerVisState.hpp"
@@ -199,6 +200,7 @@ void DebugUI::buildDebugMenu(std::initializer_list<ExternalPanel> externalPanels
     ImGui::Checkbox("Weapon Spawners", &showWeaponSpawnerWindow);
     ImGui::Checkbox("Dropped Weapons", &showDroppedWeaponWindow);
     ImGui::Checkbox("Spawn Points", &showSpawnPointWindow);
+    ImGui::Checkbox("Killzones", &showKillzoneWindow);
     ImGui::Checkbox("Shot Debug (sv_showimpacts)", &showShotDebugWindow);
 
     // External panels (owned by Game)
@@ -2494,6 +2496,82 @@ void DebugUI::buildSpawnPointUI(const Registry& registry,
         const glm::vec3 groundPoint = {pos.value.x, 0.0f, pos.value.z};
         drawWorldLine(dl, groundPoint, pos.value, viewProj, screenWidth, screenHeight, markerColor, 1.5f);
 
+        ++idx;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// buildKillzoneUI
+// -----------------------------------------------------------------------------
+void DebugUI::buildKillzoneUI(const Registry& registry,
+                              const glm::mat4& viewProj,
+                              float screenWidth,
+                              float screenHeight)
+{
+    auto killzoneView = registry.view<Killzone, Position, CollisionShape>();
+
+    if (showKillzoneWindow) {
+        if (ImGui::Begin("Killzone Debug", &showKillzoneWindow)) {
+            ImGui::Checkbox("Draw Killzones", &drawKillzoneOverlay);
+            ImGui::Separator();
+
+            int totalKillzones = 0;
+            for ([[maybe_unused]] auto e : killzoneView)
+                ++totalKillzones;
+            ImGui::Text("Killzones: %d", totalKillzones);
+            ImGui::Separator();
+
+            int idx = 0;
+            for (auto e : killzoneView) {
+                const auto& zone = killzoneView.get<Killzone>(e);
+                const auto& pos = killzoneView.get<Position>(e);
+                const auto& shape = killzoneView.get<CollisionShape>(e);
+
+                char label[64];
+                std::snprintf(label, sizeof(label), "Killzone #%d", idx);
+                if (ImGui::TreeNode(label)) {
+                    ImGui::Text("Position: (%.0f, %.0f, %.0f)",
+                                static_cast<double>(pos.value.x),
+                                static_cast<double>(pos.value.y),
+                                static_cast<double>(pos.value.z));
+                    ImGui::Text("Box half-extents: (%.0f, %.0f, %.0f)",
+                                static_cast<double>(shape.halfExtents.x),
+                                static_cast<double>(shape.halfExtents.y),
+                                static_cast<double>(shape.halfExtents.z));
+                    ImGui::Text("Damage: %.0f", static_cast<double>(zone.damage));
+                    ImGui::TreePop();
+                }
+                ++idx;
+            }
+        }
+        ImGui::End();
+    }
+
+    if (!drawKillzoneOverlay)
+        return;
+
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const ImU32 boxColor = IM_COL32(255, 40, 90, 230);
+    const ImU32 markerColor = IM_COL32(255, 230, 80, 230);
+
+    int idx = 0;
+    for (auto e : killzoneView) {
+        const auto& pos = killzoneView.get<Position>(e);
+        const auto& shape = killzoneView.get<CollisionShape>(e);
+
+        const physics::WorldAABB box{.min = pos.value - shape.halfExtents, .max = pos.value + shape.halfExtents};
+        drawAABBWireframe(dl, box, viewProj, screenWidth, screenHeight, boxColor);
+
+        ImVec2 sp;
+        if (worldToScreen(pos.value, viewProj, screenWidth, screenHeight, sp)) {
+            constexpr float k_crossLen = 8.0f;
+            dl->AddLine({sp.x - k_crossLen, sp.y}, {sp.x + k_crossLen, sp.y}, markerColor, 1.5f);
+            dl->AddLine({sp.x, sp.y - k_crossLen}, {sp.x, sp.y + k_crossLen}, markerColor, 1.5f);
+
+            char label[32];
+            std::snprintf(label, sizeof(label), "Killzone %d", idx);
+            dl->AddText({sp.x + k_crossLen + 4.0f, sp.y - 6.0f}, boxColor, label);
+        }
         ++idx;
     }
 }
