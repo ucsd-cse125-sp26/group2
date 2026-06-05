@@ -34,11 +34,13 @@ HudIcon iconForAbility(std::string_view name, bool available)
     if (!available || name == "LOCKED")
         return HudIcon::NoIcon;
     if (name == "GRAPPLE")
-        return HudIcon::Grapple;
+        return HudIcon::GrappleAbilityIcon;
     if (name == "GRAVITY")
-        return HudIcon::Gravity;
-    if (name == "DASH" || name == "RECALL")
-        return HudIcon::Tactical;
+        return HudIcon::GravityAbilityIcon;
+    if (name == "DASH")
+        return HudIcon::DashAbilityIcon;
+    if (name == "RECALL")
+        return HudIcon::RecallAbilityIcon;
     return HudIcon::NoIcon;
 }
 

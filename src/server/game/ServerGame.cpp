@@ -83,9 +83,9 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdlib>
 #include <cstring>
 #include <glm/geometric.hpp>
+#include <random>
 
 namespace
 {
@@ -100,14 +100,10 @@ std::vector<AbilityType> chooseTwoAbilities(const std::array<AbilityType, N>& po
         return choices;
     }
 
-    std::vector<AbilityType> selected;
-    selected.reserve(kAbilityChoicesPerTier);
-    for (std::size_t i = 0; i < kAbilityChoicesPerTier; ++i) {
-        const auto idx = static_cast<std::size_t>(std::rand()) % choices.size();
-        selected.push_back(choices[idx]);
-        choices.erase(choices.begin() + static_cast<std::ptrdiff_t>(idx));
-    }
-    return selected;
+    static thread_local std::mt19937 rng{std::random_device{}()};
+    std::shuffle(choices.begin(), choices.end(), rng);
+    choices.resize(kAbilityChoicesPerTier);
+    return choices;
 }
 
 AbilityState resetAbilityProgressForMatchStart(const AbilityState& current)
