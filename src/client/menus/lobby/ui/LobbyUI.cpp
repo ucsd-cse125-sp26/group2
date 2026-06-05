@@ -169,8 +169,11 @@ BuildResult buildPlayerList(const LobbyUIConfig& config)
         }
     }
 
-    if (menu_theme::beginPanel(
-            "Lobby", menu_theme::k_frontendPanelBaseWidth, menu_theme::k_frontendPanelBaseHeight, true))
+    if (menu_theme::beginPanel("Lobby",
+                               menu_theme::k_frontendPanelBaseWidth,
+                               menu_theme::k_frontendPanelBaseHeight,
+                               true,
+                               ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
     {
         menu_theme::terminalStatusLine(config.startCountdownActive ? "MATCH COUNTDOWN ACTIVE" : "WAITING FOR READY",
                                        config.isHost ? "HOST" : "CLIENT");
