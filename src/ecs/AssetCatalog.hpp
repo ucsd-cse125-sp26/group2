@@ -81,6 +81,23 @@ inline const AssetDefinition kMedkitModel{
     .renderScale = {20.0f, 20.0f, 20.0f},
 };
 
+inline const AssetDefinition kShieldPowerupModel{
+    .name = "shield_powerup",
+    .filename = "shield_powerup.glb",
+    .role = AssetRole::Entity,
+    .loadTranslation = {2.7208f, -3.3826f, -0.2294f},
+    .flipUVs = true,
+    .renderScale = {20.0f, 20.0f, 20.0f},
+};
+
+inline const AssetDefinition kDamagePowerupModel{
+    .name = "damage_powerup",
+    .filename = "damage_powerup.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {9.0f, 9.0f, 9.0f},
+};
+
 inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAssets{{
     {.name = "weapon_rifle",
      .filename = "assault_rifle.glb",

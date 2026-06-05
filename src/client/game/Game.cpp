@@ -204,7 +204,7 @@ WeaponSpawnerModelParams defaultPowerupModelParams(PowerupType type)
 {
     if (type == PowerupType::Shield) {
         return WeaponSpawnerModelParams{
-            .scale = kMedkitModel.renderScale * 0.9f,
+            .scale = kShieldPowerupModel.renderScale,
             .translation = {0.0f, -6.0f, 0.0f},
             .yawOffset = 0.0f,
             .pitchOffset = 0.0f,
@@ -216,10 +216,10 @@ WeaponSpawnerModelParams defaultPowerupModelParams(PowerupType type)
     }
 
     return WeaponSpawnerModelParams{
-        .scale = glm::vec3(kRocketProjectile.loadScale * 0.65f),
+        .scale = kDamagePowerupModel.renderScale,
         .translation = {0.0f, -4.0f, 0.0f},
         .yawOffset = 0.0f,
-        .pitchOffset = 90.0f,
+        .pitchOffset = 0.0f,
         .rollOffset = 0.0f,
         .spinDegreesPerSecond = 60.0f,
         .bobAmplitude = 6.0f,
@@ -1152,6 +1152,28 @@ bool Game::init(AppContext& ctx)
 
             if (medkitModelIdx_ < 0)
                 SDL_Log("[client] WARNING: medkit model '%s' failed to load", kMedkitModel.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kShieldPowerupModel);
+            shieldPowerupModelIdx_ = renderer->loadSceneModel(kShieldPowerupModel.filename,
+                                                              kShieldPowerupModel.loadTranslation,
+                                                              kShieldPowerupModel.loadScale,
+                                                              kShieldPowerupModel.flipUVs);
+            assets_.setModelIndex(id, shieldPowerupModelIdx_);
+            if (shieldPowerupModelIdx_ < 0)
+                SDL_Log("[client] WARNING: shield powerup model '%s' failed to load", kShieldPowerupModel.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kDamagePowerupModel);
+            damagePowerupModelIdx_ = renderer->loadSceneModel(kDamagePowerupModel.filename,
+                                                              kDamagePowerupModel.loadTranslation,
+                                                              kDamagePowerupModel.loadScale,
+                                                              kDamagePowerupModel.flipUVs);
+            assets_.setModelIndex(id, damagePowerupModelIdx_);
+            if (damagePowerupModelIdx_ < 0)
+                SDL_Log("[client] WARNING: damage powerup model '%s' failed to load", kDamagePowerupModel.filename);
         }
 
         viewmodelLeftHandModelIdx_ = renderer->loadSceneModel("viewmodel_hand_left.glb", glm::vec3{0.0f}, 1.0f, false);
@@ -7195,12 +7217,14 @@ void Game::refreshRemotePowerupRenderables()
     registry.view<Position, PowerupSpawner, CollisionShape>().each(
         [&](entt::entity e, const Position&, const PowerupSpawner& spawner, const CollisionShape&) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-            const int powerupIndex = spawner.type == PowerupType::Shield ? medkitModelIdx_ : rocketProjectileModelIdx_;
+            const int powerupIndex =
+                spawner.type == PowerupType::Shield ? shieldPowerupModelIdx_ : damagePowerupModelIdx_;
             const WeaponSpawnerModelParams params = defaultPowerupModelParams(spawner.type);
             const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
             rend.modelIndex = powerupIndex;
-            rend.scale = params.scale;
+            rend.scale =
+                spawner.type == PowerupType::Shield ? kShieldPowerupModel.renderScale : kDamagePowerupModel.renderScale;
             rend.tint = spawner.type == PowerupType::Shield ? kShieldPowerupModelTint : glm::vec4{1.0f};
             if (spawner.hasPowerup) {
                 static constexpr float k_twoPi = 6.28318530718f;

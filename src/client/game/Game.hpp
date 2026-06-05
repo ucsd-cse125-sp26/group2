@@ -7,8 +7,8 @@
 #include "animation/AnimationLibrary.hpp"
 #include "animation/AnimationTesterUI.hpp"
 #include "animation/CharacterRig.hpp"
-#include "animation/WeaponViewmodelAnim.hpp"
 #include "animation/SkinningBackend.hpp"
+#include "animation/WeaponViewmodelAnim.hpp"
 #include "app/AppContext.hpp"
 #include "debug/ClientPerfRecorder.hpp"
 #include "debug/DebugUI.hpp"
@@ -388,6 +388,8 @@ private:
     int stickyGrenadeModelIdx_ = -1;
     int molotovModelIdx_ = -1;
     int medkitModelIdx_ = -1;
+    int shieldPowerupModelIdx_ = -1;
+    int damagePowerupModelIdx_ = -1;
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
@@ -590,10 +592,9 @@ private:
     int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = previous slot, consumed each frame.
 
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
-    ThirdPersonWeaponParams
-        tpWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable procedural/scale params.
-    int tpTuneWeaponIdx_ = 0;                        ///< Which weapon type the Weapon Hold tweaker is editing.
-    bool tpFreezeAnimations_ = false;                ///< Debug: freeze every animator's playback while tuning.
+    ThirdPersonWeaponParams tpWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable procedural/scale params.
+    int tpTuneWeaponIdx_ = 0;         ///< Which weapon type the Weapon Hold tweaker is editing.
+    bool tpFreezeAnimations_ = false; ///< Debug: freeze every animator's playback while tuning.
 
     // Third-person FK weapon hold poses (spine-relative gun + per-bone arm angles).
     std::array<WeaponHoldPose, kRenderableWeaponTypeCount> weaponHoldPoses_{};         ///< Runtime, live-tuned.
@@ -675,13 +676,14 @@ private:
     std::array<WeaponViewmodelAnim, kRenderableWeaponTypeCount> weaponVmArms_; ///< First-person arms rig per weapon.
     std::array<bool, kRenderableWeaponTypeCount> weaponVmLoaded_{};
     std::array<bool, kRenderableWeaponTypeCount> weaponVmArmsLoaded_{};
-    std::array<int, kRenderableWeaponTypeCount> weaponVmModelIdx_{};     ///< Hidden static gun model per weapon (textures).
-    std::array<int, kRenderableWeaponTypeCount> weaponVmArmsModelIdx_{}; ///< Hidden static arms model per weapon (textures).
-    int activeViewmodelType_ = -1;         ///< WeaponType whose rig is installed in the renderer (-1 = none).
-    bool weaponVmReloadActive_ = false;    ///< Edge-trigger so the reload clip plays once per reload (active weapon).
-    bool weaponVmEquipped_ = false;        ///< Edge-trigger so the draw clip plays once on equip (active weapon).
-    int weaponVmPrevMagAmmo_ = -1;         ///< Tracks mag ammo to detect a shot fired this frame.
-    int shellEjectModelIdx_ = -1;          ///< Spent-casing prop (hidden static; drawn via entity list).
+    std::array<int, kRenderableWeaponTypeCount> weaponVmModelIdx_{}; ///< Hidden static gun model per weapon (textures).
+    std::array<int, kRenderableWeaponTypeCount>
+        weaponVmArmsModelIdx_{};        ///< Hidden static arms model per weapon (textures).
+    int activeViewmodelType_ = -1;      ///< WeaponType whose rig is installed in the renderer (-1 = none).
+    bool weaponVmReloadActive_ = false; ///< Edge-trigger so the reload clip plays once per reload (active weapon).
+    bool weaponVmEquipped_ = false;     ///< Edge-trigger so the draw clip plays once on equip (active weapon).
+    int weaponVmPrevMagAmmo_ = -1;      ///< Tracks mag ammo to detect a shot fired this frame.
+    int shellEjectModelIdx_ = -1;       ///< Spent-casing prop (hidden static; drawn via entity list).
     struct Casing
     {
         glm::vec3 pos{0.0f};
@@ -691,12 +693,12 @@ private:
         float spin = 0.0f;      ///< Tumble rate.
         float age = 0.0f;
     };
-    std::vector<Casing> casings_;          ///< Live ejected casings (world space, gravity + spin + lifetime).
-    uint32_t casingSpawnCounter_ = 0;      ///< Cheap deterministic jitter source for ejection.
-    CpuLbsSkinningBackend skinBackend_;    ///< Phase-1 CPU linear-blend-skinning backend.
-    AnimationTesterState animUI_;          ///< Persistent state for the Animation Tester panel.
-    HitboxRig clientHitboxRig_;            ///< Hitbox definitions for client-side debug visualization.
-    float kRigScale_ = 1.0f;               ///< Per-renderable scale for animated characters (auto-calculated, tunable).
+    std::vector<Casing> casings_;       ///< Live ejected casings (world space, gravity + spin + lifetime).
+    uint32_t casingSpawnCounter_ = 0;   ///< Cheap deterministic jitter source for ejection.
+    CpuLbsSkinningBackend skinBackend_; ///< Phase-1 CPU linear-blend-skinning backend.
+    AnimationTesterState animUI_;       ///< Persistent state for the Animation Tester panel.
+    HitboxRig clientHitboxRig_;         ///< Hitbox definitions for client-side debug visualization.
+    float kRigScale_ = 1.0f;            ///< Per-renderable scale for animated characters (auto-calculated, tunable).
     float kRigVerticalOffset_ =
         -90.0f;                ///< Per-renderable Y translation for animated characters (auto-calculated, tunable).
     float rigMeshMinY_ = 0.0f; ///< Minimum Y of the bind-pose mesh vertices (model space).
