@@ -79,7 +79,7 @@ inline const AssetDefinition kMedkitModel{
     .filename = "medkit.glb",
     .role = AssetRole::Entity,
     .flipUVs = true,
-    .renderScale = {20.0f, 20.0f, 20.0f},
+    .renderScale = {30.0f, 30.0f, 30.0f},
 };
 
 inline const AssetDefinition kShieldPowerupModel{
