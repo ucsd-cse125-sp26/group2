@@ -15,6 +15,7 @@ struct BuildResult
     std::optional<bool>
         readyChange;                ///< Desired ready state change: true = ready, false = unready, nullopt = unchanged.
     bool startMatchClicked = false; ///< True if the host pressed "Start Match" this frame.
+    bool cancelStartMatchClicked = false;   ///< True if the host pressed "Cancel" during countdown.
     bool returnToMenuClicked = false;       ///< True if the user pressed "Return to Main Menu" this frame.
     bool returnToHostConfigClicked = false; ///< True if the host wants to return to HostConfig without disconnecting.
     bool hostAddressesVisibilityToggled = false; ///< True if the host toggled address visibility this frame.

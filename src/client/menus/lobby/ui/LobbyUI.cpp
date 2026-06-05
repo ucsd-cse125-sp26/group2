@@ -105,11 +105,13 @@ void drawSidebar(const LobbyUIConfig& config, BuildResult& result, bool localRea
     }
 
     menu_theme::terminalStatusLine("LOBBY COMMANDS", "ARROWS / ENTER");
+    ImGui::Spacing();
     if (config.startCountdownActive) {
-        ImGui::Spacing();
         ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f),
                            "MATCH STARTING in %.1fs",
                            static_cast<double>(config.startCountdownRemaining));
+    } else {
+        ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeight()));
     }
 
     ImGui::BeginDisabled(config.startCountdownActive);
@@ -135,6 +137,13 @@ void drawSidebar(const LobbyUIConfig& config, BuildResult& result, bool localRea
         ImGui::BeginDisabled(config.startCountdownActive);
         if (menu_theme::terminalActionRow("BACK TO HOST CONFIG", nullptr, ImVec2(0.0f, 32.0f))) {
             result.returnToHostConfigClicked = true;
+        }
+        ImGui::EndDisabled();
+    }
+    if (config.isHost) {
+        ImGui::BeginDisabled(!config.startCountdownActive);
+        if (menu_theme::terminalActionRow("CANCEL COUNTDOWN", nullptr, ImVec2(0.0f, 32.0f), true)) {
+            result.cancelStartMatchClicked = true;
         }
         ImGui::EndDisabled();
     }

@@ -602,6 +602,12 @@ bool Client::sendStartMatch()
     return send(&type, sizeof(type));
 }
 
+bool Client::sendCancelStartMatch()
+{
+    const auto type = static_cast<uint8_t>(PacketType::CANCEL_START_MATCH);
+    return send(&type, sizeof(type));
+}
+
 bool Client::sendMatchConfig(const MatchConfig& config)
 {
     std::uint8_t buf[sizeof(PacketType) + sizeof(MatchConfig)];

@@ -179,6 +179,9 @@ SDL_AppResult Lobby::iterate()
     if (result.startMatchClicked) {
         client->sendStartMatch();
     }
+    if (result.cancelStartMatchClicked) {
+        client->sendCancelStartMatch();
+    }
 
     if (result.returnToMenuClicked) {
         returnToMenu = true;

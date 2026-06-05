@@ -1405,6 +1405,13 @@ void Server::handleMessage(Connection& conn, const void* data, Uint32 len)
         eventQueue.enqueue(event);
         break;
     }
+    case PacketType::CANCEL_START_MATCH: {
+        Event event{};
+        event.type = EventType::CancelStartMatchRequested;
+        event.clientId = conn.clientId;
+        eventQueue.enqueue(event);
+        break;
+    }
     case PacketType::TEXT_CHAT: {
         const auto chat = net::chat::decodeClientText(
             std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(data), len));

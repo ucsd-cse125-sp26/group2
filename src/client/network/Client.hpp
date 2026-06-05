@@ -162,6 +162,9 @@ public:
     /// @brief Send a START_MATCH packet to the server (host-only).
     bool sendStartMatch();
 
+    /// @brief Send a CANCEL_START_MATCH packet to the server (host-only).
+    bool sendCancelStartMatch();
+
     /// @brief Send an updated match configuration to the server (host-only).
     bool sendMatchConfig(const MatchConfig& config);
 
