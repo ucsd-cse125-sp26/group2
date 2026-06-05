@@ -28,7 +28,7 @@ struct PowerupConfig
     float amount = 0.0f;
 };
 
-inline constexpr float k_powerupInitialSpawnDelaySeconds = 240.0f;
+inline constexpr float k_powerupInitialSpawnDelaySeconds = 60.0f;
 inline constexpr float k_powerupRespawnCooldownSeconds = 30.0f;
 inline const glm::vec3 k_powerupPickupHalfExtents{32.0f, 32.0f, 32.0f};
 
