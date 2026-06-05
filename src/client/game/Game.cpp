@@ -200,6 +200,33 @@ WeaponSpawnerModelParams defaultSpawnerModelParams(WeaponType type)
     return getWeaponSpawnerModelParams(type);
 }
 
+WeaponSpawnerModelParams defaultPowerupModelParams(PowerupType type)
+{
+    if (type == PowerupType::Shield) {
+        return WeaponSpawnerModelParams{
+            .scale = kMedkitModel.renderScale * 0.9f,
+            .translation = {0.0f, -6.0f, 0.0f},
+            .yawOffset = 0.0f,
+            .pitchOffset = 0.0f,
+            .rollOffset = 0.0f,
+            .spinDegreesPerSecond = 45.0f,
+            .bobAmplitude = 6.0f,
+            .bobHz = 0.6f,
+        };
+    }
+
+    return WeaponSpawnerModelParams{
+        .scale = glm::vec3(kRocketProjectile.loadScale * 0.65f),
+        .translation = {0.0f, -4.0f, 0.0f},
+        .yawOffset = 0.0f,
+        .pitchOffset = 90.0f,
+        .rollOffset = 0.0f,
+        .spinDegreesPerSecond = 60.0f,
+        .bobAmplitude = 6.0f,
+        .bobHz = 0.7f,
+    };
+}
+
 bool isRenderableGunType(WeaponType type)
 {
     return static_cast<std::size_t>(type) < kWeaponAssets.size();
@@ -4558,7 +4585,13 @@ SDL_AppResult Game::iterate()
                 tint = glm::vec4(proj->tint, 1.0f);
             }
 
-            entityCmds.push_back(EntityRenderCmd{.modelIndex = rend.modelIndex, .worldTransform = world, .tint = tint});
+            const auto* powerup = registry.try_get<PowerupSpawner>(e);
+            const bool occludedSilhouette = powerup != nullptr && powerup->hasPowerup;
+
+            entityCmds.push_back(EntityRenderCmd{.modelIndex = rend.modelIndex,
+                                                 .worldTransform = world,
+                                                 .tint = tint,
+                                                 .occludedSilhouette = occludedSilhouette});
         });
 
         // (Legacy third-person remote-weapon emission removed. Every player
@@ -4727,7 +4760,8 @@ SDL_AppResult Game::iterate()
             // pinned to the weapon while the player is moving.
             if (registry.all_of<LocalPlayer>(e) && beam.type != WeaponType::EnergyGun) {
                 lightStart = renderEye;
-                const auto predictedHit = physics::raycastWorld(renderEye, particleCamera.forward, physics::activeWorld());
+                const auto predictedHit =
+                    physics::raycastWorld(renderEye, particleCamera.forward, physics::activeWorld());
                 lightEnd = predictedHit.hit ? predictedHit.point : (renderEye + particleCamera.forward * 5000.0f);
             } else if (registry.all_of<LocalPlayer>(e) && beam.type == WeaponType::EnergyGun) {
                 float guideLen = glm::length(beam.guidePoint - beam.origin);
@@ -4742,8 +4776,8 @@ SDL_AppResult Game::iterate()
                     lightEnd = guideEnd;
             }
 
-            const glm::vec3 lightColor = (beam.type == WeaponType::EnergyGun) ? glm::vec3{0.16f, 0.78f, 1.0f}
-                                                                              : glm::vec3{0.3f, 1.0f, 0.2f};
+            const glm::vec3 lightColor =
+                (beam.type == WeaponType::EnergyGun) ? glm::vec3{0.16f, 0.78f, 1.0f} : glm::vec3{0.3f, 1.0f, 0.2f};
             if (beam.type == WeaponType::EnergyGun && beam.locked == 0) {
                 if (dynLights.size() < 14) {
                     dynLights.push_back(PointLight{
@@ -4761,9 +4795,8 @@ SDL_AppResult Game::iterate()
             const float len = glm::length(delta);
             if (len < 1.0f)
                 return;
-            const int numLights = (beam.type == WeaponType::EnergyGun)
-                                      ? std::max(2, static_cast<int>(len / 130.0f) + 1)
-                                      : std::max(2, static_cast<int>(len / 80.0f) + 1);
+            const int numLights = (beam.type == WeaponType::EnergyGun) ? std::max(2, static_cast<int>(len / 130.0f) + 1)
+                                                                       : std::max(2, static_cast<int>(len / 80.0f) + 1);
             for (int i = 0; i < numLights && dynLights.size() < 14; ++i) {
                 const float t = static_cast<float>(i) / static_cast<float>(numLights - 1);
                 glm::vec3 lightPos = lightStart + delta * t;
@@ -7144,11 +7177,21 @@ void Game::refreshRemotePowerupRenderables()
     registry.view<Position, PowerupSpawner, CollisionShape>().each(
         [&](entt::entity e, const Position&, const PowerupSpawner& spawner, const CollisionShape&) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-            const int powerupIndex = rocketProjectileModelIdx_;
+            const int powerupIndex = spawner.type == PowerupType::Shield ? medkitModelIdx_ : rocketProjectileModelIdx_;
+            const WeaponSpawnerModelParams params = defaultPowerupModelParams(spawner.type);
+            const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
             rend.modelIndex = powerupIndex;
-            rend.scale = glm::vec3(kRocketProjectile.loadScale);
-            rend.visible = spawner.hasPowerup;
+            rend.scale = params.scale;
+            if (spawner.hasPowerup) {
+                static constexpr float k_twoPi = 6.28318530718f;
+                rend.translation = params.translation +
+                                   glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
+            } else {
+                rend.translation = params.translation;
+            }
+            rend.orientation = spawnerModelRotation(params, t, spawner.hasPowerup);
+            rend.visible = spawner.hasPowerup && powerupIndex >= 0;
         });
 }
 

@@ -239,12 +239,11 @@ void ServerGame::run()
         const entt::entity spawner = registry.create();
         registry.emplace<PowerupSpawner>(
             spawner, PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false});
-        CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
+        CollisionShape shape{.halfExtents = k_powerupPickupHalfExtents};
         glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
 
         registry.emplace<Position>(spawner, centeredPos);
         registry.emplace<CollisionShape>(spawner, shape);
-        registry.emplace<CollisionShape>(spawner);
     }
 
     // Jump pads — invisible AABB triggers placed in Blender that launch

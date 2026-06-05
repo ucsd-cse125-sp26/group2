@@ -405,6 +405,8 @@ private:
     // ─── Existing internal helpers ───────────────────────────────────────────
 
     bool createGeometryPipeline();
+    /// @brief Create the flat static-entity chams pipeline used for occluded powerup silhouettes.
+    bool createEntityChamsPipeline();
     SDL_GPUGraphicsPipeline* createDepthPipeline(const SDL_GPURasterizerState& rasterizer_state) const;
     bool createDepthRes0Pipeline(bool reverseZ);
     bool createDepthRes1Pipeline(bool reverseZ);
@@ -453,9 +455,13 @@ private:
     void drawTonemapPass(SDL_GPUTexture* hdrSceneColor, SDL_GPUTexture* ldrColor, SDL_GPUCommandBuffer* cmd);
     void drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const;
     void drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
-    void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth, const FrustumPlanes& frustumPlanes);
+    void drawWorldModelInstances(SDL_GPURenderPass* renderPass,
+                                 SDL_GPUCommandBuffer* cmd,
+                                 bool depth,
+                                 const FrustumPlanes& frustumPlanes);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd, const FrustumPlanes& frustumPlanes);
     void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+    void drawEntityChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, const FrustumPlanes& frustumPlanes);
 
     void drawModel(ModelIdInt modelId,
                    const glm::mat4& modelTransform,
@@ -463,19 +469,22 @@ private:
                    SDL_GPUCommandBuffer* cmd,
                    const FrustumPlanes& frustumPlanes);
 
-
     void drawModelDepth(ModelIdInt modelId,
                         const glm::mat4& modelTransform,
                         SDL_GPURenderPass* renderPass,
                         SDL_GPUCommandBuffer* cmd,
                         const FrustumPlanes& frustumPlanes);
 
-    void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth,const FrustumPlanes& frustumPlanes);
+    void drawEntityModels(SDL_GPURenderPass* renderPass,
+                          SDL_GPUCommandBuffer* cmd,
+                          bool depth,
+                          const FrustumPlanes& frustumPlanes);
 
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
     void drawHud(SDL_GPURenderPass* pass);
 
-    static bool inFrustum(const Asset::AABB &modelElementAABB,const FrustumPlanes &frustumPlanes,const glm::mat4 &modelMat);
+    static bool
+    inFrustum(const Asset::AABB& modelElementAABB, const FrustumPlanes& frustumPlanes, const glm::mat4& modelMat);
 
     // ─── Member state ────────────────────────────────────────────────────────
 
@@ -484,6 +493,7 @@ private:
     SDL_GPUShaderFormat shaderFormat_ = SDL_GPU_SHADERFORMAT_INVALID;
 
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* entityChamsPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* fxaaPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* tonemapPipeline_ = nullptr;
@@ -527,7 +537,6 @@ private:
     SDL_GPUTexture* staticShadowMaps_ = nullptr;
     SDL_GPUSampler* staticDepthSampler_ = nullptr;
     SDL_GPUSampler* dynamicDepthSampler_ = nullptr;
-
 
     SDL_GPUTexture* movingLightShadowMaps_ = nullptr;
 
