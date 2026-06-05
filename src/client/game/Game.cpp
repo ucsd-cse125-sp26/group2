@@ -633,13 +633,15 @@ std::string_view fireAudioEventForWeapon(WeaponType type) noexcept
     case WeaponType::RailGun:
         return "weapon.railgun.fire";
     case WeaponType::EnergyGun:
-        return "weapon.energy.fire";
+        return "";
     case WeaponType::Shotgun:
-        return "weapon.shotgun.fire"; // falls back gracefully if SFX bank lacks this event.
+        return "weapon.shotgun.fire";
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
     case WeaponType::Sticky:
         return "weapon.grenade.throw";
+    case WeaponType::None:
+        return "";
     }
     return {};
 }
@@ -3345,23 +3347,64 @@ SDL_AppResult Game::iterate()
             sfxSystem.postAudioEvent("weapon.railgun.charge_start");
         wasChargingRailgun_ = isChargingNow;
 
-        // Energy beam: play/stop loop sound on beam active transitions.
-        bool isBeamNow = false;
-        registry.view<LocalPlayer, BeamState>().each([&](const BeamState& beam) { isBeamNow = beam.active; });
-        if (isBeamNow && !wasBeamActive_)
-            beamLoopHandle_ = sfxSystem.postAudioEvent("weapon.energy.loop", audio::kGlobalObject, 1.0f);
-        if (isBeamNow && beamLoopHandle_ != SfxSystem::kInvalidSource)
-            sfxSystem.updateSource(beamLoopHandle_, cachedEye_, audioListener.velocity, 0.55f);
-        if (!isBeamNow && wasBeamActive_) {
-            sfxSystem.stopSource(beamLoopHandle_);
-            beamLoopHandle_ = SfxSystem::kInvalidSource;
+        // Energy beam: play the start sound once, then begin the loop after
+        // the start clip finishes while the beam remains active. BeamState is
+        // synced for every player, so this covers local and remote beams.
+        std::unordered_set<entt::entity> liveEnergyBeams;
+        bool isLocalEnergyBeamNow = false;
+        registry.view<BeamState>().each([&](entt::entity entity, const BeamState& beam) {
+            if (!beam.active || beam.type != WeaponType::EnergyGun)
+                return;
+
+            liveEnergyBeams.insert(entity);
+            BeamAudioState& state = beamAudioStates_[entity];
+
+            const bool isLocalBeam = registry.all_of<LocalPlayer>(entity);
+            isLocalEnergyBeamNow = isLocalEnergyBeamNow || isLocalBeam;
+            const glm::vec3 soundPos = isLocalBeam ? cachedEye_ : beam.origin;
+            const glm::vec3 soundVel = isLocalBeam ? audioListener.velocity
+                                                   : (registry.all_of<Velocity>(entity)
+                                                          ? registry.get<Velocity>(entity).value
+                                                          : glm::vec3{0.0f});
+            const audio::AudioObjectId object = audioObjectForEntity(entity);
+            sfxSystem.setAudioObjectTransform(object, soundPos, soundVel);
+
+            if (!state.active) {
+                if (state.loopHandle != SfxSystem::kInvalidSource) {
+                    sfxSystem.stopSource(state.loopHandle);
+                    state.loopHandle = SfxSystem::kInvalidSource;
+                }
+                if (isLocalBeam)
+                    sfxSystem.postLocalAudioEvent("weapon.energy.start", object, 1.0f);
+                else
+                    sfxSystem.postAudioEvent("weapon.energy.start", object, 1.0f);
+                state.loopDelaySeconds = std::max(0.0f, sfxSystem.clipDuration(SfxId::EnergyGunFire));
+                state.active = true;
+            } else {
+                state.loopDelaySeconds = std::max(0.0f, state.loopDelaySeconds - frameTime);
+            }
+
+            if (state.loopHandle == SfxSystem::kInvalidSource && state.loopDelaySeconds <= 0.0f) {
+                state.loopHandle = isLocalBeam ? sfxSystem.postLocalAudioEvent("weapon.energy.loop", object, 1.0f)
+                                               : sfxSystem.postAudioEvent("weapon.energy.loop", object, 1.0f);
+            }
+            if (state.loopHandle != SfxSystem::kInvalidSource)
+                sfxSystem.updateSource(state.loopHandle, soundPos, soundVel, 1.0f);
+        });
+        for (auto it = beamAudioStates_.begin(); it != beamAudioStates_.end();) {
+            if (liveEnergyBeams.contains(it->first)) {
+                ++it;
+                continue;
+            }
+            if (it->second.loopHandle != SfxSystem::kInvalidSource)
+                sfxSystem.stopSource(it->second.loopHandle);
+            it = beamAudioStates_.erase(it);
         }
-        wasBeamActive_ = isBeamNow;
 
         // Beam hitmarker: client-side raycast against player hitboxes while firing.
         // Note: Player component is not synced to clients, so we raycast against
         // HitboxInstance directly (skipping the local player entity).
-        if (isBeamNow) {
+        if (isLocalEnergyBeamNow) {
             registry.view<LocalPlayer, BeamState, InputSnapshot, Position, CollisionShape, PlayerVisState>().each(
                 [&](entt::entity localE,
                     const BeamState&,

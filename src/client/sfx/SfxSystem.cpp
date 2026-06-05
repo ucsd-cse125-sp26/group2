@@ -85,13 +85,14 @@ bool SfxSystem::init()
     categoryVolumes_.fill(1.0f);
     cooldowns_.fill(0.0f);
 
-    loadClip(SfxId::RifleFire, "pubg-ak.wav", SfxCategory::Weapons, 0.8f, 0.10f);
-    loadClip(SfxId::RocketFire, "Voicy_Minecraft TNT Explosion.mp3", SfxCategory::Weapons, 0.7f, 0.80f);
-    loadClip(SfxId::RailGunFire, "Voicy_Charge Rifle SFX.mp3", SfxCategory::Weapons, 0.8f, 0.50f);
-    loadClip(SfxId::EnergyGunFire, "Voicy_Charge Rifle SFX.mp3", SfxCategory::Weapons, 0.5f, 0.08f);
+    loadClip(SfxId::RifleFire, "Weapons/Rifle_Shooting.wav", SfxCategory::Weapons, 0.8f, 0.10f);
+    loadClip(SfxId::RocketFire, "Weapons/Rocket_Shooting.wav", SfxCategory::Weapons, 0.7f, 0.80f);
+    loadClip(SfxId::RailGunFire, "Weapons/Railgun_Shooting.wav", SfxCategory::Weapons, 0.8f, 0.20f);
+    loadClip(SfxId::EnergyGunFire, "Weapons/Energy_Shooting_Start.wav", SfxCategory::Weapons, 0.7f, 0.0f);
+    loadClip(SfxId::ShotgunFire, "Weapons/Shotgun_Shooting.wav", SfxCategory::Weapons, 0.85f, 0.20f);
     loadClip(SfxId::ChargeRifleLoad, "charge-rifle-load.wav", SfxCategory::Weapons, 0.9f, 0.0f);
     loadClip(SfxId::ChargeRifleShoot, "charge-rifle-shoot.wav", SfxCategory::Weapons, 1.0f, 0.20f);
-    loadClip(SfxId::EnergyBeamLoop, "Voicy_Thunderstruck into.mp3", SfxCategory::Weapons, 0.6f, 0.0f);
+    loadClip(SfxId::EnergyBeamLoop, "Weapons/Energy_Shooting.wav", SfxCategory::Weapons, 0.6f, 0.0f);
 
     loadClip(SfxId::FleshHit, "Voicy_Flesh Bullet Impact SFX.mp3", SfxCategory::Impacts, 0.7f, 0.08f);
     loadClip(SfxId::Headshot, "Voicy_Headshot Rapid SFX.mp3", SfxCategory::Impacts, 0.8f, 0.08f);
@@ -425,11 +426,15 @@ void SfxSystem::onWeaponFired(const WeaponFiredEvent& e)
         postFireSound("weapon.railgun.fire");
         break;
     case WeaponType::EnergyGun:
-        postFireSound("weapon.energy.fire");
+        postFireSound("weapon.energy.start");
+        break;
+    case WeaponType::Shotgun:
+        postFireSound("weapon.shotgun.fire");
         break;
     case WeaponType::HEGrenade:
     case WeaponType::Molotov:
     case WeaponType::Sticky:
+    case WeaponType::None:
         break;
     }
 }
@@ -1137,4 +1142,13 @@ std::uint32_t SfxSystem::activeVoiceSourceCount() const noexcept
             ++count;
     }
     return count;
+}
+
+float SfxSystem::clipDuration(SfxId id) const noexcept
+{
+    const std::size_t idx = static_cast<std::size_t>(id);
+    if (idx >= clips_.size())
+        return 0.0f;
+    const SoundClip& clip = clips_[idx];
+    return clip.loaded ? clip.durationSeconds : 0.0f;
 }

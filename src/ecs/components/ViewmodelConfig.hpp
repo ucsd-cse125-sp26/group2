@@ -105,8 +105,8 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
     static constexpr std::array<ViewmodelParams, kRenderableWeaponTypeCount> k_params{{
         // Rifle — existing tuning
         {.scale = 39.0f,
-         .forward = 78.0f,
-         .right = 37.0f,
+         .forward = 60.0f,
+         .right = 30.0f,
          .down = -11.0f,
          .yawOffset = 0.0f,
          .pitchOffset = -1.0f,
@@ -121,16 +121,16 @@ inline const ViewmodelParams& getViewmodelParams(WeaponType type)
          .rollOffset = 0.0f},
         // RailGun — marksman
         {.scale = 20.0f,
-         .forward = 48.0f,
-         .right = 30.0f,
+         .forward = 45.0f,
+         .right = 27.0f,
          .down = 27.0f,
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
          .rollOffset = 0.0f},
         // EnergyGun
         {.scale = 20.0f,
-         .forward = 80.0f,
-         .right = 38.5f,
+         .forward = 65.0f,
+         .right = 35.0f,
          .down = 24.0f,
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,

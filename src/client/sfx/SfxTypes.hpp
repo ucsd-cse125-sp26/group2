@@ -15,10 +15,11 @@
 enum class SfxId : uint8_t
 {
     // Weapons
-    RifleFire,     ///< Voicy_Charge Rifle SFX.mp3
-    RocketFire,    ///< Voicy_Minecraft TNT Explosion.mp3
-    RailGunFire,   ///< Voicy_Charge Rifle SFX.mp3
-    EnergyGunFire, ///< Voicy_Charge Rifle SFX.mp3
+    RifleFire,     ///< Weapons/Rifle_Shooting.wav
+    RocketFire,    ///< Weapons/Rocket_Shooting.wav
+    RailGunFire,   ///< Weapons/Railgun_Shooting.wav
+    EnergyGunFire, ///< Weapons/Energy_Shooting_Start.wav
+    ShotgunFire,   ///< Weapons/Shotgun_Shooting.wav
 
     // Impacts / hitmarkers
     FleshHit,  ///< Voicy_Flesh Bullet Impact SFX.mp3
@@ -37,7 +38,7 @@ enum class SfxId : uint8_t
     ChargeRifleShoot, ///< charge-rifle-shoot.wav (play on release)
 
     // Energy beam
-    EnergyBeamLoop, ///< Voicy_Thunderstruck into.mp3 (play while beam active)
+    EnergyBeamLoop, ///< Weapons/Energy_Shooting.wav (play while beam active)
 
     // Healing / Shield
     Healing,        ///< Voicy_Syringe SFX .mp3
@@ -126,6 +127,8 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "RailGunFire";
     case SfxId::EnergyGunFire:
         return "EnergyGunFire";
+    case SfxId::ShotgunFire:
+        return "ShotgunFire";
     case SfxId::FleshHit:
         return "FleshHit";
     case SfxId::Headshot:
