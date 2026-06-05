@@ -130,7 +130,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tinyexr)
 if(TARGET tinyexr)
-    target_compile_options(tinyexr PRIVATE -Wno-poison-system-directories)
+    target_compile_options(tinyexr PRIVATE
+        $<$<CXX_COMPILER_ID:AppleClang,Clang>:-Wno-poison-system-directories>)
 endif()
 
 
