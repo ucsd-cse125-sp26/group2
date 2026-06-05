@@ -1362,7 +1362,8 @@ bool Game::init(AppContext& ctx)
             break;
         case ParticleEffectType::HitscanBeam:
             particleSystem.spawnHitscanBeam(evtOrigin, evt.pos2, evt.weaponType);
-            if (sfxSystem->isInitialized() && !(evt.source == localPlayer && getWeaponConfig(evt.weaponType).isCharge)) {
+            if (sfxSystem->isInitialized() && !(evt.source == localPlayer && getWeaponConfig(evt.weaponType).isCharge))
+            {
                 const std::string_view eventName = fireAudioEventForWeapon(evt.weaponType);
                 if (!eventName.empty()) {
                     const audio::AudioObjectId object = audioObjectForEntity(evt.source);
@@ -1380,8 +1381,8 @@ bool Game::init(AppContext& ctx)
                 const audio::AudioObjectId object = audioObjectForEntity(evt.source);
                 sfxSystem->setAudioObjectTransform(object, evt.pos1);
                 sfxSystem->postAudioEvent(evt.surfaceType == SurfaceType::Flesh ? "impact.flesh" : "impact.world",
-                                         object,
-                                         evt.surfaceType == SurfaceType::Flesh ? 0.65f : 0.32f);
+                                          object,
+                                          evt.surfaceType == SurfaceType::Flesh ? 0.65f : 0.32f);
             }
             break;
         case ParticleEffectType::Explosion:
@@ -1597,7 +1598,7 @@ bool Game::init(AppContext& ctx)
                 "rocket_launcher.hold.toml",
                 "rail_gun.hold.toml",
                 "energy_gun.hold.toml",
-                "energy_gun.hold.toml",
+                "shotgun.hold.toml",
             };
             for (std::size_t i = 0; i < k_weaponHoldFiles.size(); ++i) {
                 const std::string holdPath = weaponsDir + k_weaponHoldFiles[i];
@@ -3418,10 +3419,10 @@ SDL_AppResult Game::iterate()
             const bool isLocalBeam = registry.all_of<LocalPlayer>(entity);
             isLocalEnergyBeamNow = isLocalEnergyBeamNow || isLocalBeam;
             const glm::vec3 soundPos = isLocalBeam ? cachedEye_ : beam.origin;
-            const glm::vec3 soundVel = isLocalBeam ? audioListener.velocity
-                                                   : (registry.all_of<Velocity>(entity)
-                                                          ? registry.get<Velocity>(entity).value
-                                                          : glm::vec3{0.0f});
+            const glm::vec3 soundVel =
+                isLocalBeam
+                    ? audioListener.velocity
+                    : (registry.all_of<Velocity>(entity) ? registry.get<Velocity>(entity).value : glm::vec3{0.0f});
             const audio::AudioObjectId object = audioObjectForEntity(entity);
             sfxSystem->setAudioObjectTransform(object, soundPos, soundVel);
 
@@ -4108,8 +4109,8 @@ SDL_AppResult Game::iterate()
                             sfxSystem->setAudioObjectTransform(
                                 object, c.audioPosition + lateral * side, c.ai.velocityWorld);
                             sfxSystem->setAudioRtpc(object,
-                                                   audio::rtpcId("movement.intensity"),
-                                                   stepId == SfxId::FootstepHeavy ? 1.0f : 0.0f);
+                                                    audio::rtpcId("movement.intensity"),
+                                                    stepId == SfxId::FootstepHeavy ? 1.0f : 0.0f);
                             if (c.isLocal)
                                 sfxSystem->postLocalAudioEvent("footstep", object, gain);
                             else

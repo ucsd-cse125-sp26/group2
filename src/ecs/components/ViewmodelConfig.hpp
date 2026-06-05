@@ -199,10 +199,10 @@ inline const WeaponHoldPose& getWeaponHoldPose(WeaponType type)
         {65.0f, 0.0f, 0.0f},   {85.0f, 0.0f, 0.0f}, {70.0f, 0.0f, 0.0f}, {30.0f, 0.0f, 0.0f}, // pinky
     }};
 
-    auto make = [&](glm::vec3 offset, float scale, BoneAngles right, BoneAngles left) {
+    auto make = [&](glm::vec3 offset, float scale, BoneAngles right, BoneAngles left, float yawDeg = 0.0f) {
         WeaponHoldPose p;
         p.spineOffset = offset;
-        p.spineRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        p.spineRotation = glm::angleAxis(glm::radians(yawDeg), glm::vec3(0.0f, 1.0f, 0.0f));
         p.scale = scale;
         p.rightArm.boneAngles = right;
         p.leftArm.boneAngles = left;
@@ -232,11 +232,12 @@ inline const WeaponHoldPose& getWeaponHoldPose(WeaponType type)
              22.9f,
              {{{0.0f, -14.0f, 0.0f}, {0.0f, 0.0f, 35.0f}, {-120.0f, 5.0f, 7.0f}, {13.0f, 53.0f, -27.0f}}},
              {{{24.0f, 0.0f, 0.0f}, {36.0f, 0.0f, 48.0f}, {71.0f, -3.0f, 6.0f}, {-11.0f, -123.0f, -21.0f}}}),
-        // Shotgun — reuses the EnergyGun model + pose.
-        make({-21.0f, 3.25f, 80.0f},
-             22.9f,
+        // Shotgun
+        make({-21.0f, -7.75f, 80.0f},
+             75.0f,
              {{{0.0f, -14.0f, 0.0f}, {0.0f, 0.0f, 35.0f}, {-120.0f, 5.0f, 7.0f}, {13.0f, 53.0f, -27.0f}}},
-             {{{24.0f, 0.0f, 0.0f}, {36.0f, 0.0f, 48.0f}, {71.0f, -3.0f, 6.0f}, {-11.0f, -123.0f, -21.0f}}}),
+             {{{24.0f, 0.0f, 0.0f}, {36.0f, 0.0f, 48.0f}, {71.0f, -3.0f, 6.0f}, {-11.0f, -123.0f, -21.0f}}},
+             180.0f),
     }};
 
     return k_params[static_cast<std::size_t>(type)];
@@ -339,8 +340,8 @@ inline const WeaponSpawnerModelParams& getWeaponSpawnerModelParams(WeaponType ty
          .spinDegreesPerSecond = 45.0f,
          .bobAmplitude = 6.0f,
          .bobHz = 0.6f},
-        // Shotgun — pickup model reuses energy gun mesh.
-        {.scale = {10.0f, 10.0f, 10.0f},
+        // Shotgun
+        {.scale = {30.0f, 30.0f, 30.0f},
          .translation = {0.0f, 2.0f, 0.0f},
          .yawOffset = 0.0f,
          .pitchOffset = 0.0f,
