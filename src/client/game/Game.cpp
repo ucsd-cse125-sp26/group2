@@ -3697,10 +3697,6 @@ SDL_AppResult Game::iterate()
                             post("ability.recall", 1.0f);
                     }
 
-                    // Respawn: dead → alive.
-                    if (tracked.isDead && !vis.isDead)
-                        post("player.respawn", 1.0f);
-
                     tracked.grounded = vis.grounded;
                     tracked.isDead = vis.isDead;
                     tracked.moveMode = newMode;

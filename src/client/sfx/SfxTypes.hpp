@@ -39,7 +39,6 @@ enum class SfxId : uint8_t
     DamageTaken, ///< damage.mp3
     ArmorBreak,  ///< Voicy_Fortnite Shield Break.mp3
     Death,       ///< Death.wav
-    Respawn,     ///< Voicy_totem of undying sfx .mp3
     KillConfirm, ///< Voicy_Pilot Killed Indicator SFX.mp3
 
     // Charge rifle
@@ -173,8 +172,6 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "ArmorBreak";
     case SfxId::Death:
         return "Death";
-    case SfxId::Respawn:
-        return "Respawn";
     case SfxId::KillConfirm:
         return "KillConfirm";
     case SfxId::ChargeRifleLoad:

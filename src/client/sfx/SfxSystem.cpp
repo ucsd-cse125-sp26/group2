@@ -9,6 +9,7 @@
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/WorldData.hpp"
@@ -164,7 +165,6 @@ bool SfxSystem::init()
     loadClip(SfxId::DamageTaken, "damage.mp3", SfxCategory::Player, 0.8f, 0.30f);
     loadClip(SfxId::ArmorBreak, "Voicy_Fortnite Shield Break.mp3", SfxCategory::Player, 0.9f, 1.00f);
     loadClip(SfxId::Death, "Death.wav", SfxCategory::Player, 1.0f, 2.00f);
-    loadClip(SfxId::Respawn, "Voicy_totem of undying sfx .mp3", SfxCategory::Player, 0.8f, 2.00f);
     loadClip(SfxId::KillConfirm, "Voicy_Pilot Killed Indicator SFX.mp3", SfxCategory::Player, 0.9f, 0.30f);
     loadClip(SfxId::Healing, "Voicy_Syringe SFX .mp3", SfxCategory::Player, 0.5f, 1.00f);
     loadClip(SfxId::ShieldRecharge, "Voicy_Halo Shield Recharge.mp3", SfxCategory::Player, 0.5f, 1.00f);
@@ -597,6 +597,15 @@ void SfxSystem::update(float dt)
 
     {
         std::lock_guard lock(mixerMutex_);
+        constexpr float kMuffleFadeRate = 7.0f;
+        const float muffleAlpha = 1.0f - std::exp(-std::max(dt, 0.0f) * kMuffleFadeRate);
+        deathMuffleAmount_ += (deathMuffleTarget_ - deathMuffleAmount_) * muffleAlpha;
+        if (deathMuffleAmount_ < 0.001f) {
+            deathMuffleAmount_ = 0.0f;
+            deathMuffleStateL_ = 0.0f;
+            deathMuffleStateR_ = 0.0f;
+        }
+
         for (Source& source : sources_) {
             if (!source.active)
                 continue;
@@ -613,6 +622,13 @@ void SfxSystem::update(float dt)
 
 void SfxSystem::update(float dt, const Registry& registry)
 {
+    const auto localDeadView = registry.view<const LocalPlayer, const RespawnTimer>();
+    const bool localPlayerDead = localDeadView.begin() != localDeadView.end();
+    {
+        std::lock_guard lock(mixerMutex_);
+        deathMuffleTarget_ = localPlayerDead ? 1.0f : 0.0f;
+    }
+
     update(dt);
 
     if (!mixStream_)
@@ -1299,8 +1315,19 @@ void SfxSystem::mixIntoStream(SDL_AudioStream* stream, int additionalAmount)
             const float wetL = reverbDelayL_[readA] * 0.34f + reverbDelayR_[readB] * 0.16f;
             const float wetR = reverbDelayR_[readA] * 0.34f + reverbDelayL_[readB] * 0.16f;
             const std::size_t out = static_cast<std::size_t>(frame) * 2u;
-            mix[out] = softClip(mix[out] + wetL);
-            mix[out + 1u] = softClip(mix[out + 1u] + wetR);
+            float finalL = mix[out] + wetL;
+            float finalR = mix[out + 1u] + wetR;
+            if (deathMuffleAmount_ > 0.001f) {
+                const float amount = std::clamp(deathMuffleAmount_, 0.0f, 1.0f);
+                const float lowPass = 1.0f + (0.045f - 1.0f) * amount;
+                const float roomGain = 1.0f + (0.58f - 1.0f) * amount;
+                deathMuffleStateL_ += lowPass * (finalL - deathMuffleStateL_);
+                deathMuffleStateR_ += lowPass * (finalR - deathMuffleStateR_);
+                finalL = (finalL + (deathMuffleStateL_ - finalL) * amount) * roomGain;
+                finalR = (finalR + (deathMuffleStateR_ - finalR) * amount) * roomGain;
+            }
+            mix[out] = softClip(finalL);
+            mix[out + 1u] = softClip(finalR);
             const float send = reverbSend[static_cast<std::size_t>(frame)];
             reverbDelayL_[reverbWrite_] = send + wetL * 0.22f;
             reverbDelayR_[reverbWrite_] = send + wetR * 0.22f;
