@@ -312,6 +312,8 @@ SDL_AppResult App::iterate()
             } else {
                 SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
                 currentServerName = config.serverName;
+                currentServerIp = "127.0.0.1";
+                currentServerPort = hostedServer.port();
                 menu_theme::playUiSound(UiSoundAction::Success);
             }
         }
@@ -364,6 +366,8 @@ SDL_AppResult App::iterate()
             } else {
                 SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
                 currentServerName = config.serverName;
+                currentServerIp = "127.0.0.1";
+                currentServerPort = hostedServer.port();
             }
         }
 
@@ -694,6 +698,8 @@ AppContext App::screenContext()
         .userSettings = userSettings,
         .userSettingsPath = userSettingsPath,
         .currentServerName = currentServerName,
+        .currentServerIp = currentServerIp,
+        .currentServerPort = currentServerPort,
     };
 }
 
@@ -833,6 +839,8 @@ void App::pollJoinAttempt()
 
     SDL_Log("Successfully connected to server at %s:%d", result.serverIp.c_str(), result.serverPort);
     currentServerName = result.serverName.empty() ? result.serverIp : result.serverName;
+    currentServerIp = result.serverIp;
+    currentServerPort = result.serverPort;
     menu_theme::playUiSound(UiSoundAction::Success);
     transitionTo(Screen::Lobby);
 }

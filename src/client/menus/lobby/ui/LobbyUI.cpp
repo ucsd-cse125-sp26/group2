@@ -68,19 +68,19 @@ void drawPlayersTable(const LobbyUIConfig& config)
 
 void drawSidebar(const LobbyUIConfig& config, BuildResult& result, bool localReady)
 {
-    if (config.isHosting) {
+    if (config.isHost) {
         menu_theme::terminalSection("HOSTING");
         const float prevScale = ImGui::GetCurrentWindow()->FontWindowScale;
         const float smallScale = prevScale * 0.75f;
-        const float reservedHeight = ImGui::GetTextLineHeightWithSpacing() * (smallScale / prevScale) * 2.0f;
+        const float reservedHeight = ImGui::GetTextLineHeightWithSpacing() * (smallScale / prevScale);
         const ImVec2 startCursor = ImGui::GetCursorPos();
         if (config.hostAddressesVisible) {
             ImGui::SetWindowFontScale(smallScale);
-            ImGui::Text("Listen: %.*s:%u",
-                        static_cast<int>(config.hostLanIp.size()),
-                        config.hostLanIp.data(),
-                        static_cast<unsigned>(config.hostPort));
-            ImGui::Text("Local:  127.0.0.1:%u", static_cast<unsigned>(config.hostPort));
+            if (!config.hostLanIp.empty()) {
+                ImGui::Text("Address: %.*s", static_cast<int>(config.hostLanIp.size()), config.hostLanIp.data());
+            } else {
+                ImGui::TextDisabled("Address unavailable");
+            }
             ImGui::SetWindowFontScale(prevScale);
         } else {
             ImGui::SetWindowFontScale(smallScale);

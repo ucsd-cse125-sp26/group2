@@ -71,6 +71,8 @@ private:
     UserSettings userSettings;       ///< User-specific input and gameplay settings.
     std::string userSettingsPath;    ///< Path used to load and save user settings.
     std::string currentServerName;   ///< Display name for the connected server, if known.
+    std::string currentServerIp;     ///< Address used for the current server connection, if known.
+    uint16_t currentServerPort = 0;  ///< Port used for the current server connection, if known.
     SfxSystem sfxSystem;             ///< Shared audio system for menus, music, and gameplay sounds.
     Client client;                   ///< Network client connected to the authoritative server when in a session.
     HostedServer hostedServer;       ///< Optional local server process launched by the host screen.
@@ -103,7 +105,7 @@ private:
 
     std::future<JoinAttemptResult> joinAttempt_; ///< Background direct/global join attempt, if active.
     std::string joinAttemptLabel_;               ///< Target label displayed by the main menu while joining.
-    Uint64 previousAudioCounter_ = 0;             ///< Performance counter used to tick menu audio.
+    Uint64 previousAudioCounter_ = 0;            ///< Performance counter used to tick menu audio.
 
     /// @brief Destroy all subsystems without asserting on partial-init state.
     void cleanup();
