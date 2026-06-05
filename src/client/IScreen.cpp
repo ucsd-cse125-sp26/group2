@@ -19,7 +19,7 @@ SDL_AppResult IScreen::processCommonImguiEvent(SDL_Event* event)
     ImGui_ImplSDL3_ProcessEvent(event);
     if (event->type == SDL_EVENT_QUIT)
         return SDL_APP_SUCCESS;
-    return SDL_APP_CONTINUE;
+    return SDL_APP_CONTINUE; 
 }
 
 bool IScreen::handleSystemMenuEvent(SDL_Event* event, SystemMenuOverlay& menu, UserSettings* settings)
