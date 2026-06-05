@@ -1451,8 +1451,8 @@ void NewRenderer::drawModel(ModelIdInt modelId,
             Uint32 useRoughnessTexture;
             Uint32 useMetallicTexture;
             Uint32 useTint;
-            Uint32 _pad0;
-            Uint32 _pad1;
+            float metallicTextureStrength;
+            float ambientColorMultiplier;
             Uint32 _pad2;
         } materialFlags{
             useTexture ? 1u : 0u,
@@ -1460,8 +1460,8 @@ void NewRenderer::drawModel(ModelIdInt modelId,
             toggles.roughnessTextures && metallicRoughnessTexture != texture_ ? 1u : 0u,
             toggles.metallicTextures && metallicRoughnessTexture != texture_ ? 1u : 0u,
             useTint ? 1u : 0u,
-            0u,
-            0u,
+            metallicTextureStrength,
+            ambientColorMultiplier,
             0u,
         };
         if (materialFlags.useTint != 0u)

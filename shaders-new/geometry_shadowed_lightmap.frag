@@ -52,8 +52,8 @@ layout(set = 3, binding = 1) uniform MaterialFlags {
     uint useRoughnessTexture;
     uint useMetallicTexture;
     uint useTint;
-    uint _pad0;
-    uint _pad1;
+    float metallicTextureStrength;
+    float ambientColorMultiplier;
     uint _pad2;
 } materialFlags;
 
@@ -76,7 +76,7 @@ layout(location = 1) out vec4 normalColor;
 // Just a single directional light for now...
 //const vec3 light_direction = normalize(-vec3(1.0f,1.0f,1.0f));
 //const vec4 light_color = vec4(1.0f,1.0f,1.0f,1.0f);
-const vec3 ambient_color = 0.0f * vec3(0.08f, 0.08f,0.12f); // dark-blue
+const vec3 ambient_color = vec3(0.08f, 0.08f,0.12f); // dark-blue
 //const vec3 ambient_color = normalize(vec3(0.08f, 0.08f,0.12f)); // dark-blue
 //const vec3 ambient_color = vec3(0.0f, 0.0f,0.0f); // dark-black
 
@@ -108,7 +108,9 @@ void main()
     }
     vec2 mr = texture(metallicRoughnessTex, frag_vt).gb;
     float roughness = materialFlags.useRoughnessTexture != 0 ? clamp(mr.x, 0.0, 1.0) : 0.5;
-    float metallic = materialFlags.useMetallicTexture != 0 ? clamp(mr.y, 0.0, 1.0) : 0.0;
+    float metallic = materialFlags.useMetallicTexture != 0
+        ? clamp(mr.y * materialFlags.metallicTextureStrength, 0.0, 1.0)
+        : 0.0;
 
     float depthA = lightInfo.pointLightNearPlane / (lightInfo.pointLightNearPlane - lightInfo.pointLightFarPlane );
     float depthB = depthA * lightInfo.pointLightFarPlane;
@@ -152,7 +154,7 @@ void main()
         diffuseIrradiance -= staticShadow_i * (1.0f-dynamicShadow_i) * lightRadiance * cosT_i; //subtract direct lighting component in shadow from prebaked irradiance
     }
     diffuseIrradiance = max(vec3(0.0f),diffuseIrradiance);
-    diffuseIrradiance += ambient_color;
+    diffuseIrradiance += ambient_color * materialFlags.ambientColorMultiplier;
 
     for (int i = 0; i < lightInfo.numMovingPointLights; i++ ){
         PointLight pLight_i = lightInfo.movingPointLights[i];

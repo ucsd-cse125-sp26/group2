@@ -50,8 +50,8 @@ layout(set = 3, binding = 1) uniform MaterialFlags {
     uint useRoughnessTexture;
     uint useMetallicTexture;
     uint useTint;
-    uint _pad0;
-    uint _pad1;
+    float metallicTextureStrength;
+    float ambientColorMultiplier;
     uint _pad2;
 } materialFlags;
 
@@ -74,7 +74,7 @@ layout(location = 1) out vec4 normalColor;
 // Just a single directional light for now...
 //const vec3 light_direction = normalize(-vec3(1.0f,1.0f,1.0f));
 //const vec4 light_color = vec4(1.0f,1.0f,1.0f,1.0f);
-const vec3 ambient_color = 0.5f * vec3(0.08f, 0.08f,0.12f); // dark-blue
+const vec3 ambient_color = vec3(0.08f, 0.08f,0.12f); // dark-blue
 //const vec3 ambient_color = normalize(vec3(0.08f, 0.08f,0.12f)); // dark-blue
 //const vec3 ambient_color = vec3(0.0f, 0.0f,0.0f); // dark-black
 
@@ -106,7 +106,9 @@ void main()
     }
     vec2 mr = texture(metallicRoughnessTex, frag_vt).gb;
     float roughness = materialFlags.useRoughnessTexture != 0 ? clamp(mr.x, 0.0, 1.0) : 0.5;
-    float metallic = materialFlags.useMetallicTexture != 0 ? clamp(mr.y, 0.0, 1.0) : 0.0;
+    float metallic = materialFlags.useMetallicTexture != 0
+        ? clamp(mr.y * materialFlags.metallicTextureStrength, 0.0, 1.0)
+        : 0.0;
 
 //    float depthA = lightInfo.pointLightFarPlane / (lightInfo.pointLightFarPlane - lightInfo.pointLightNearPlane );
 //    float depthB = depthA * lightInfo.pointLightNearPlane;
@@ -118,7 +120,7 @@ void main()
 
 //    float cosT = max(0.0f, dot(-light_direction, normal));
 //    vec4 irradiance = light_color * cosT + ambient_color;
-    vec3 diffuseIrradiance = ambient_color;
+    vec3 diffuseIrradiance = ambient_color * materialFlags.ambientColorMultiplier;
     vec3 specularIrradiance = vec3(0.0);
     vec3 cameraPos = vec3(lightInfo.cameraPosX, lightInfo.cameraPosY, lightInfo.cameraPosZ);
     vec3 viewDir = normalize(cameraPos - frag_worldPos);

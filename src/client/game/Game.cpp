@@ -6026,6 +6026,8 @@ SDL_AppResult Game::iterate()
             ImGui::Checkbox("Normal Textures", &renderer->toggles.normalTextures);
             ImGui::Checkbox("Roughness Textures", &renderer->toggles.roughnessTextures);
             ImGui::Checkbox("Metallic Textures", &renderer->toggles.metallicTextures);
+            ImGui::SliderFloat("Metallic Strength", &renderer->metallicTextureStrength, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Ambient Strength", &renderer->ambientColorMultiplier, 0.0f, 4.0f, "%.2f");
 
             ImGui::SeparatorText("SSAO");
             ImGui::Checkbox("SSAO Enabled", &renderer->toggles.ssao);
