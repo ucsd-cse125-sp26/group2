@@ -153,7 +153,7 @@ inline std::vector<JumpPadSpawner> jumpPadSpawner_;
 struct KillzoneSpawner
 {
     glm::vec3 pos{0.0f};
-    glm::vec3 halfExtents{128.0f, 32.0f, 128.0f};
+    glm::vec3 halfExtents{674.0f, 184.0f, 499.0f};
 };
 inline std::vector<KillzoneSpawner> killzoneSpawner_;
 

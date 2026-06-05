@@ -3,8 +3,8 @@
 
 #include "debug/DebugUI.hpp"
 
-#include "config/UserSettings.hpp"
 #include "client/systems/GamepadAimAssistSystem.hpp"
+#include "config/UserSettings.hpp"
 #include "ecs/components/AbilityState.hpp"
 #include "ecs/components/CollisionShape.hpp"
 #include "ecs/components/DroppedWeapon.hpp"
@@ -2376,8 +2376,7 @@ void DebugUI::buildDroppedWeaponUI(const Registry& registry,
         const auto& pos = dropView.get<Position>(e);
         const auto& shape = dropView.get<CollisionShape>(e);
 
-        const ImU32 boxColor =
-            (drop.pickupDelay > 0.0f) ? IM_COL32(255, 180, 50, 210) : IM_COL32(80, 220, 255, 230);
+        const ImU32 boxColor = (drop.pickupDelay > 0.0f) ? IM_COL32(255, 180, 50, 210) : IM_COL32(80, 220, 255, 230);
         const physics::WorldAABB box{.min = pos.value - shape.halfExtents, .max = pos.value + shape.halfExtents};
         drawAABBWireframe(dl, box, viewProj, screenWidth, screenHeight, boxColor);
 
@@ -2514,6 +2513,10 @@ void DebugUI::buildKillzoneUI(const Registry& registry,
         if (ImGui::Begin("Killzone Debug", &showKillzoneWindow)) {
             ImGui::Checkbox("Draw Killzones", &drawKillzoneOverlay);
             ImGui::Separator();
+            ImGui::TextWrapped("Tuning is visual-only on the client. Kills run server-side from the "
+                               "Blender custom properties, so bake final values onto the map node "
+                               "(half_extent_x/y/z and the object transform) once dialed in.");
+            ImGui::Separator();
 
             int totalKillzones = 0;
             for ([[maybe_unused]] auto e : killzoneView)
@@ -2524,21 +2527,30 @@ void DebugUI::buildKillzoneUI(const Registry& registry,
             int idx = 0;
             for (auto e : killzoneView) {
                 const auto& zone = killzoneView.get<Killzone>(e);
-                const auto& pos = killzoneView.get<Position>(e);
-                const auto& shape = killzoneView.get<CollisionShape>(e);
+                auto& pos = const_cast<Position&>(killzoneView.get<Position>(e));
+                auto& shape = const_cast<CollisionShape&>(killzoneView.get<CollisionShape>(e));
 
                 char label[64];
                 std::snprintf(label, sizeof(label), "Killzone #%d", idx);
                 if (ImGui::TreeNode(label)) {
-                    ImGui::Text("Position: (%.0f, %.0f, %.0f)",
-                                static_cast<double>(pos.value.x),
-                                static_cast<double>(pos.value.y),
-                                static_cast<double>(pos.value.z));
-                    ImGui::Text("Box half-extents: (%.0f, %.0f, %.0f)",
-                                static_cast<double>(shape.halfExtents.x),
-                                static_cast<double>(shape.halfExtents.y),
-                                static_cast<double>(shape.halfExtents.z));
+                    ImGui::PushID(idx);
+                    ImGui::DragFloat3("Position", &pos.value.x, 1.0f);
+                    ImGui::DragFloat3("Half-extents", &shape.halfExtents.x, 1.0f, 1.0f, 100000.0f);
                     ImGui::Text("Damage: %.0f", static_cast<double>(zone.damage));
+                    ImGui::Separator();
+                    ImGui::TextUnformatted("Blender custom props (bake when done):");
+                    char bake[160];
+                    std::snprintf(bake,
+                                  sizeof(bake),
+                                  "half_extent_x=%.1f half_extent_y=%.1f half_extent_z=%.1f",
+                                  static_cast<double>(shape.halfExtents.x),
+                                  static_cast<double>(shape.halfExtents.y),
+                                  static_cast<double>(shape.halfExtents.z));
+                    ImGui::InputText("##bake", bake, sizeof(bake), ImGuiInputTextFlags_ReadOnly);
+                    if (ImGui::Button("Copy")) {
+                        ImGui::SetClipboardText(bake);
+                    }
+                    ImGui::PopID();
                     ImGui::TreePop();
                 }
                 ++idx;
