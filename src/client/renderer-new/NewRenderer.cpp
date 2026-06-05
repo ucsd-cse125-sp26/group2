@@ -941,9 +941,9 @@ void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUComm
         shadowBindings.reserve(3);
     }
 
-    shadowBindings.push_back({staticShadowMaps_, nearestSampler_});
-    shadowBindings.push_back({dynamicShadowMaps_, nearestSampler_});
-    shadowBindings.push_back({movingLightShadowMaps_, nearestSampler_});
+    shadowBindings.push_back({staticShadowMaps_, staticDepthSampler_});
+    shadowBindings.push_back({dynamicShadowMaps_, dynamicDepthSampler_});
+    shadowBindings.push_back({movingLightShadowMaps_, dynamicDepthSampler_});
 
     SDL_BindGPUFragmentSamplers(
         renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings.data(), static_cast<Uint32>(shadowBindings.size()));
