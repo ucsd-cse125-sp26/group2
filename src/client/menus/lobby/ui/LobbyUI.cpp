@@ -107,8 +107,9 @@ void drawSidebar(const LobbyUIConfig& config, BuildResult& result, bool localRea
     menu_theme::terminalStatusLine("LOBBY COMMANDS", "ARROWS / ENTER");
     if (config.startCountdownActive) {
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "MATCH STARTING");
-        ImGui::Text("in %.1fs", static_cast<double>(config.startCountdownRemaining));
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f),
+                           "MATCH STARTING in %.1fs",
+                           static_cast<double>(config.startCountdownRemaining));
     }
 
     ImGui::BeginDisabled(config.startCountdownActive);

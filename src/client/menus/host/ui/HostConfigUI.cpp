@@ -14,8 +14,9 @@ namespace host_config_ui
 {
 namespace
 {
-constexpr float k_labelColumnWidth = 190.0f;
-}
+constexpr float k_labelColumnWidth = 250.0f;
+constexpr float k_portInputWidth = 220.0f;
+} // namespace
 
 HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs, bool showBackRow)
 {
@@ -105,7 +106,7 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs, bool 
         }
         if (draft.useSpecificPort) {
             ImGui::SameLine();
-            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SetNextItemWidth(k_portInputWidth);
             if (ImGui::InputInt("##HostPort", &draft.port)) {
                 menu_theme::playUiSound(UiSoundAction::SliderStep);
             }
