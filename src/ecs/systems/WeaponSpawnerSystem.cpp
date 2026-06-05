@@ -74,6 +74,14 @@ inline void checkForPlayers(Registry& registry,
         const glm::vec3 viewFwd = viewForward(input.yaw, input.pitch);
 
         if (spawner.hasWeapon && input.pickup && isPlayerLookingAtPickup(eye, viewFwd, spawnerPos.value)) {
+            if (std::ranges::contains(kGrenadeTypes, spawner.type)) {
+                int& currentAmmo = grenadeAmmo(grenade, spawner.type);
+                spawner.hasWeapon = false;
+                spawner.spawnCooldown = weaponCooldownTime;
+                currentAmmo += 2;
+                return;
+            }
+
             const WeaponConfig& config = getWeaponConfig(spawner.type);
             GunInstance& primary = getSlot(weapon, WeaponSlot::PRIMARY);
             GunInstance& secondary = getSlot(weapon, WeaponSlot::SECONDARY);
