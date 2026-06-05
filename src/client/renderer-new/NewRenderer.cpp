@@ -222,8 +222,7 @@ bool NewRenderer::init(SDL_Window* window)
     ;
 
     if (!loadLightMap()) {
-        SDL_Log("NewRenderer: failed to load LightMap");
-        return false;
+        SDL_Log("NewRenderer: failed to load LightMap, reverting to in game lighting");
     }
 
     return true;
@@ -691,15 +690,22 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
 
     SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
 
-    SDL_BindGPUGraphicsPipeline(geometryPass, geometryLightMapPipeline_);
-    bindLightShadowInfo(geometryPass, cmd, true);
-    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
-    drawWorldModelInstances(geometryPass, cmd, false,frustumPlanes);
 
+    if (lightMap_ != nullptr) {
+        SDL_BindGPUGraphicsPipeline(geometryPass, geometryLightMapPipeline_);
+        bindLightShadowInfo(geometryPass, cmd, true);
+        SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
+        drawWorldModelInstances(geometryPass, cmd, false,frustumPlanes);
+    }
 
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
     bindLightShadowInfo(geometryPass, cmd, false);
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
+
+    if (lightMap_ == nullptr) {
+        drawWorldModelInstances(geometryPass, cmd, false,frustumPlanes);
+    }
+
     drawEntityModels(geometryPass, cmd, false,frustumPlanes);
 
     drawSkinnedModels(geometryPass, cmd);
