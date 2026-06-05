@@ -35,9 +35,9 @@ layout(set = 2, binding = 0) uniform sampler2D tex;
 layout(set = 2, binding = 1) uniform sampler2D normalTex;
 layout(set = 2, binding = 2) uniform sampler2D metallicRoughnessTex;
 
-layout(set = 2, binding = 3) uniform samplerCubeArrayShadow staticPointLightShadowMaps;
-layout(set = 2, binding = 4) uniform samplerCubeArrayShadow dynamicPointLightShadowMaps;
-layout(set = 2, binding = 5) uniform samplerCubeArrayShadow movingPointLightShadowMaps;
+layout(set = 2, binding = 3) uniform samplerCubeArray staticPointLightShadowMaps;
+layout(set = 2, binding = 4) uniform samplerCubeArray dynamicPointLightShadowMaps;
+layout(set = 2, binding = 5) uniform samplerCubeArray movingPointLightShadowMaps;
 
 
 layout(set = 3, binding = 0) uniform Material {
@@ -82,6 +82,12 @@ float roughnessToShininess(float roughness)
 vec3 specularTint(vec3 albedo, float metallic)
 {
     return mix(vec3(0.04), albedo, clamp(metallic, 0.0, 1.0));
+}
+
+float sampleReverseZPointShadow(samplerCubeArray shadowMap, vec3 lightToWorldPos, float lightIndex, float depth)
+{
+    float storedDepth = texture(shadowMap, vec4(lightToWorldPos, lightIndex)).r;
+    return depth >= storedDepth ? 1.0 : 0.0;
 }
 
 void main()
@@ -134,8 +140,8 @@ void main()
         float dominantAxis = max(absDir.x, max(absDir.y, absDir.z));
         float depth = depthA - depthB / dominantAxis;
 
-        float staticShadow_i = texture(staticPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
-        float dynamicShadow_i = texture(dynamicPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
+        float staticShadow_i = sampleReverseZPointShadow(staticPointLightShadowMaps, lightToWorldPos, float(i), depth);
+        float dynamicShadow_i = sampleReverseZPointShadow(dynamicPointLightShadowMaps, lightToWorldPos, float(i), depth);
 
         float shadow_i = dynamicShadow_i * staticShadow_i;
 
@@ -162,7 +168,7 @@ void main()
         float dominantAxis = max(absDir.x, max(absDir.y, absDir.z));
         float depth = depthA - depthB / dominantAxis;
 
-        float shadow_i = texture(movingPointLightShadowMaps, vec4(lightToWorldPos, float(i)), depth);
+        float shadow_i = sampleReverseZPointShadow(movingPointLightShadowMaps, lightToWorldPos, float(i), depth);
 
         float attenutaion = 1.0f / (r * r);
 
