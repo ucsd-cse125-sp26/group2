@@ -58,6 +58,7 @@ struct EntityRenderCmd
     int32_t modelIndex = -1;        ///< Renderer-side model handle (returned by `loadSceneModel` / `uploadSceneModel`).
     glm::mat4 worldTransform{1.0f}; ///< Full world transform (position × rotation × scale).
     glm::vec4 tint{1.0f};           ///< RGB multiplier into baseColorFactor (alpha unused).  Default = no tint.
+    bool occludedSilhouette = false; ///< True = draw an extra flat silhouette only where hidden behind scene depth.
 };
 
 /// @brief Dynamic point light — built by Game, injected into the PBR light array.
@@ -168,5 +169,5 @@ struct RigMeshSource
     std::vector<ModelVertex> bindPoseVertices; ///< Bind-pose vertices (never deformed CPU-side).
     std::vector<BoneInfluence> boneInfluences; ///< Parallel to `bindPoseVertices`.  Must be same size.
     std::vector<uint32_t> indices;             ///< Triangle list (3 indices per triangle).
-    uint32_t materialIndex = 0;                ///< Source material index — picks this mesh's per-mesh diffuse texture.
+    uint32_t materialIndex = 0; ///< Source material index — picks this mesh's per-mesh diffuse texture.
 };

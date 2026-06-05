@@ -36,7 +36,7 @@ enum class SfxId : uint8_t
     HEExplosion,      ///< Weapons/Grenade/Explosion_HE.wav
 
     // Player feedback
-    DamageTaken, ///< Voicy_roblox ooof.mp3
+    DamageTaken, ///< damage.mp3
     ArmorBreak,  ///< Voicy_Fortnite Shield Break.mp3
     Death,       ///< Voicy_Minecraft Death Sound.mp3
     Respawn,     ///< Voicy_totem of undying sfx .mp3
@@ -52,6 +52,7 @@ enum class SfxId : uint8_t
     // Healing / Shield
     Healing,        ///< Voicy_Syringe SFX .mp3
     ShieldRecharge, ///< Voicy_Halo Shield Recharge.mp3
+    PowerupPickup,  ///< Configurable filler pickup sound.
 
     // Movement / equipment placeholders. FootstepLight/Heavy still back simple impact fallbacks.
     FootstepLight,
@@ -97,6 +98,7 @@ enum class SfxId : uint8_t
     VoiceStop,
     MenuMusic, ///< Music/Gamesong1.wav
     GameMusic, ///< Music/Gamesong2.wav
+    GameMusicLoop, ///< Music/Gamesong2_Main2.wav
 
     // Menu UI feedback. Files live flat under assets/sounds/MenuSFX/.
     UiHover01,
@@ -217,6 +219,8 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "Healing";
     case SfxId::ShieldRecharge:
         return "ShieldRecharge";
+    case SfxId::PowerupPickup:
+        return "PowerupPickup";
     case SfxId::FootstepLight:
         return "FootstepLight";
     case SfxId::FootstepHeavy:
@@ -329,6 +333,8 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "UiDisabled01";
     case SfxId::UiDanger01:
         return "UiDanger01";
+    case SfxId::GameMusicLoop:
+        return "GameMusicLoop";
     default:
         return "Unknown";
     }

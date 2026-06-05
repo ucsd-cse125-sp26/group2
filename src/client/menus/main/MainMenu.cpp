@@ -165,8 +165,12 @@ bool MainMenu::init(AppContext& ctx, ServerBrowserTab initialTab)
         lastSyncedMatchConfig = latestMatchConfig;
     } else {
         const HostConfigState initialDraft = draftConfig();
-        lastSyncedMatchConfig =
-            MatchConfig{.killsToWin = initialDraft.killsToWin, .maxPlayers = initialDraft.maxPlayers};
+        lastSyncedMatchConfig = MatchConfig{
+            .killsToWin = initialDraft.killsToWin,
+            .maxPlayers = initialDraft.maxPlayers,
+            .powerupInitialSpawnDelaySeconds = initialDraft.powerupInitialSpawnDelaySeconds,
+            .powerupRespawnCooldownSeconds = initialDraft.powerupRespawnCooldownSeconds,
+        };
     }
     const HostConfigState initialDraft = draftConfig();
     lastSyncedDiscoverySettings =
@@ -361,6 +365,8 @@ SDL_AppResult MainMenu::iterate()
             if (lastSyncedMatchConfig) {
                 draft->killsToWin = lastSyncedMatchConfig->killsToWin;
                 draft->maxPlayers = lastSyncedMatchConfig->maxPlayers;
+                draft->powerupInitialSpawnDelaySeconds = lastSyncedMatchConfig->powerupInitialSpawnDelaySeconds;
+                draft->powerupRespawnCooldownSeconds = lastSyncedMatchConfig->powerupRespawnCooldownSeconds;
             }
             if (lastSyncedDiscoverySettings) {
                 draft->advertiseGlobal = lastSyncedDiscoverySettings->advertiseGlobal;
@@ -507,6 +513,10 @@ bool MainMenu::hasUnsavedServerChanges() const
 
     return std::clamp(draft->killsToWin, 1, 100) != lastSyncedMatchConfig->killsToWin ||
            std::clamp(draft->maxPlayers, 2, 128) != lastSyncedMatchConfig->maxPlayers ||
+           std::clamp(draft->powerupInitialSpawnDelaySeconds, 0.0f, 600.0f) !=
+               lastSyncedMatchConfig->powerupInitialSpawnDelaySeconds ||
+           std::clamp(draft->powerupRespawnCooldownSeconds, 1.0f, 300.0f) !=
+               lastSyncedMatchConfig->powerupRespawnCooldownSeconds ||
            draft->advertiseGlobal != lastSyncedDiscoverySettings->advertiseGlobal ||
            draft->advertiseLan != lastSyncedDiscoverySettings->advertiseLan;
 }
@@ -524,6 +534,8 @@ HostConfigState MainMenu::draftConfig() const
             .serverName = std::string(server_name::k_default),
             .killsToWin = 25,
             .maxPlayers = 8,
+            .powerupInitialSpawnDelaySeconds = 240.0f,
+            .powerupRespawnCooldownSeconds = 30.0f,
         };
 
     HostConfigState result = *draft;
@@ -531,6 +543,8 @@ HostConfigState MainMenu::draftConfig() const
     result.serverName = server_name::sanitize(result.serverName);
     result.killsToWin = std::clamp(result.killsToWin, 1, 100);
     result.maxPlayers = std::clamp(result.maxPlayers, 2, 128);
+    result.powerupInitialSpawnDelaySeconds = std::clamp(result.powerupInitialSpawnDelaySeconds, 0.0f, 600.0f);
+    result.powerupRespawnCooldownSeconds = std::clamp(result.powerupRespawnCooldownSeconds, 1.0f, 300.0f);
     return result;
 }
 
@@ -539,12 +553,18 @@ bool MainMenu::updateServerSettings()
     if (!client || !draft)
         return false;
 
-    const MatchConfig config{.killsToWin = std::clamp(draft->killsToWin, 1, 100),
-                             .maxPlayers = std::clamp(draft->maxPlayers, 2, 128)};
+    const MatchConfig config{
+        .killsToWin = std::clamp(draft->killsToWin, 1, 100),
+        .maxPlayers = std::clamp(draft->maxPlayers, 2, 128),
+        .powerupInitialSpawnDelaySeconds = std::clamp(draft->powerupInitialSpawnDelaySeconds, 0.0f, 600.0f),
+        .powerupRespawnCooldownSeconds = std::clamp(draft->powerupRespawnCooldownSeconds, 1.0f, 300.0f),
+    };
     const DiscoverySettings discoverySettings{.advertiseGlobal = draft->advertiseGlobal,
                                               .advertiseLan = draft->advertiseLan};
     draft->killsToWin = config.killsToWin;
     draft->maxPlayers = config.maxPlayers;
+    draft->powerupInitialSpawnDelaySeconds = config.powerupInitialSpawnDelaySeconds;
+    draft->powerupRespawnCooldownSeconds = config.powerupRespawnCooldownSeconds;
     if (!client->sendMatchConfig(config)) {
         lastHostError = "Failed to send match settings update";
         menu_theme::playUiSound(UiSoundAction::Error);

@@ -81,5 +81,6 @@ private:
 
     bool validateKillsToWin(int killsToWin);
     bool validateMaxPlayers(int maxPlayers);
+    bool validatePowerupTiming(float initialSpawnDelaySeconds, float respawnCooldownSeconds);
     void broadcastMatchConfig(Server& server);
 };

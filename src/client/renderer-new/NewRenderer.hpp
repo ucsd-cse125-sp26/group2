@@ -42,6 +42,7 @@ struct Vertex
     glm::vec3 normal;
     glm::vec2 texUV;
     glm::vec4 tangent;
+    glm::vec2 lightMapUV;
 };
 
 enum class PointLightType : std::uint8_t
@@ -59,7 +60,9 @@ struct LightUBO
     uint32_t numSpotLights = 0;
     float pointLightFarPlane = 4000.0f;
     float pointLightNearPlane = 5.0f;
-    uint32_t _pad0[3];
+    float cameraPosX = 0.0f;
+    float cameraPosY = 0.0f;
+    float cameraPosZ = 0.0f;
     PointLight pointLights[MAX_POINT_LIGHTS];
     PointLight movingPointLights[MAX_MOVING_POINT_LIGHTS];
 };
@@ -388,6 +391,9 @@ private:
     // ─── Existing internal helpers ───────────────────────────────────────────
 
     bool createGeometryPipeline();
+    bool createGeometryLightMapPipeline();
+    /// @brief Create the flat static-entity chams pipeline used for occluded powerup silhouettes.
+    bool createEntityChamsPipeline();
     SDL_GPUGraphicsPipeline* createDepthPipeline(const SDL_GPURasterizerState& rasterizer_state) const;
     bool createDepthRes0Pipeline(bool reverseZ);
     bool createDepthRes1Pipeline(bool reverseZ);
@@ -422,7 +428,8 @@ private:
 
     void onFirstFrame(SDL_GPUCommandBuffer* cmd);
 
-    void bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+    void bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool lightmap);
+    void drawStaticLightmapGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawGeometryOverlayPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
     void drawSsaoPass(SDL_GPUTexture* depth, SDL_GPUTexture* normal, SDL_GPUTexture* ao, SDL_GPUCommandBuffer* cmd);
@@ -436,16 +443,20 @@ private:
     void drawTonemapPass(SDL_GPUTexture* hdrSceneColor, SDL_GPUTexture* ldrColor, SDL_GPUCommandBuffer* cmd);
     void drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd) const;
     void drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd);
-    void drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth, const FrustumPlanes& frustumPlanes);
+    void drawWorldModelInstances(SDL_GPURenderPass* renderPass,
+                                 SDL_GPUCommandBuffer* cmd,
+                                 bool depth,
+                                 const FrustumPlanes& frustumPlanes);
     void drawWeapon(SDL_GPURenderPass* geometryPass, SDL_GPUCommandBuffer* cmd, const FrustumPlanes& frustumPlanes);
     void drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+    void drawEntityChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, const FrustumPlanes& frustumPlanes);
 
     void drawModel(ModelIdInt modelId,
                    const glm::mat4& modelTransform,
                    SDL_GPURenderPass* renderPass,
                    SDL_GPUCommandBuffer* cmd,
-                   const FrustumPlanes& frustumPlanes);
-
+                   const FrustumPlanes& frustumPlanes,
+                   glm::vec4 tint = glm::vec4{1.0f});
 
     void drawModelDepth(ModelIdInt modelId,
                         const glm::mat4& modelTransform,
@@ -453,12 +464,17 @@ private:
                         SDL_GPUCommandBuffer* cmd,
                         const FrustumPlanes& frustumPlanes);
 
-    void drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth,const FrustumPlanes& frustumPlanes);
+    void drawEntityModels(SDL_GPURenderPass* renderPass,
+                          SDL_GPUCommandBuffer* cmd,
+                          bool depth,
+                          const FrustumPlanes& frustumPlanes);
 
     void drawMesh(SDL_GPURenderPass* renderPass, const Asset::Mesh& mesh) const;
     void drawHud(SDL_GPURenderPass* pass);
 
-    static bool inFrustum(const Asset::AABB &modelElementAABB,const FrustumPlanes &frustumPlanes,const glm::mat4 &modelMat);
+    static bool
+    inFrustum(const Asset::AABB& modelElementAABB, const FrustumPlanes& frustumPlanes, const glm::mat4& modelMat);
+    bool loadLightMap();
 
     // ─── Member state ────────────────────────────────────────────────────────
 
@@ -467,6 +483,8 @@ private:
     SDL_GPUShaderFormat shaderFormat_ = SDL_GPU_SHADERFORMAT_INVALID;
 
     SDL_GPUGraphicsPipeline* geometryPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* geometryLightMapPipeline_ = nullptr;
+    SDL_GPUGraphicsPipeline* entityChamsPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* hudPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* fxaaPipeline_ = nullptr;
     SDL_GPUGraphicsPipeline* tonemapPipeline_ = nullptr;
@@ -485,6 +503,7 @@ private:
     SDL_GPUTexture* ssaoBlurred_ = nullptr;
     SDL_GPUTexture* sceneWithAo_ = nullptr;
     SDL_GPUTexture* tonemappedColor_ = nullptr;
+    SDL_GPUTexture* lightMap_ = nullptr;
     SDL_GPUDepthStencilTargetInfo depthTarget_{};
     Uint32 sceneWidth_ = 0;
     Uint32 sceneHeight_ = 0;
@@ -496,6 +515,7 @@ private:
     // Default fallback texture used when a mesh has no material/texture.
     SDL_GPUTexture* texture_ = nullptr;
     SDL_GPUSampler* sampler_ = nullptr;
+    SDL_GPUSampler* nearestSampler_ = nullptr;
 
     SDL_GPUTexture* hudTexture_ = nullptr;
     SDL_GPUSampler* hudSampler_ = nullptr;
@@ -510,7 +530,6 @@ private:
     SDL_GPUTexture* staticShadowMaps_ = nullptr;
     SDL_GPUSampler* staticDepthSampler_ = nullptr;
     SDL_GPUSampler* dynamicDepthSampler_ = nullptr;
-
 
     SDL_GPUTexture* movingLightShadowMaps_ = nullptr;
 

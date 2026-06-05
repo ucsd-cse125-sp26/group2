@@ -80,6 +80,20 @@ HostConfigResult buildHostConfigContents(const HostConfigUIInputs& inputs, bool 
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted("Powerup Initial Spawn");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        ImGui::SliderFloat("##PowerupInitialSpawn", &draft.powerupInitialSpawnDelaySeconds, 0.0f, 600.0f, "%.0f s");
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted("Powerup Respawn");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        ImGui::SliderFloat("##PowerupRespawn", &draft.powerupRespawnCooldownSeconds, 1.0f, 300.0f, "%.0f s");
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
         ImGui::TextUnformatted("Keep Server Running");
         ImGui::TableSetColumnIndex(1);
         ImGui::BeginDisabled(inputs.serverRunning);

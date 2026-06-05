@@ -34,6 +34,7 @@
 #include "ecs/components/HealthPackSpawner.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
+#include "ecs/components/Killzone.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/Orientation.hpp"
 #include "ecs/components/PlayerColor.hpp"
@@ -199,6 +200,35 @@ WeaponSpawnerModelParams defaultSpawnerModelParams(WeaponType type)
 {
     return getWeaponSpawnerModelParams(type);
 }
+
+WeaponSpawnerModelParams defaultPowerupModelParams(PowerupType type)
+{
+    if (type == PowerupType::Shield) {
+        return WeaponSpawnerModelParams{
+            .scale = kShieldPowerupModel.renderScale,
+            .translation = {0.0f, -6.0f, 0.0f},
+            .yawOffset = 0.0f,
+            .pitchOffset = 0.0f,
+            .rollOffset = 0.0f,
+            .spinDegreesPerSecond = 45.0f,
+            .bobAmplitude = 6.0f,
+            .bobHz = 0.6f,
+        };
+    }
+
+    return WeaponSpawnerModelParams{
+        .scale = kDamagePowerupModel.renderScale,
+        .translation = {0.0f, -4.0f, 0.0f},
+        .yawOffset = 0.0f,
+        .pitchOffset = 0.0f,
+        .rollOffset = 0.0f,
+        .spinDegreesPerSecond = 60.0f,
+        .bobAmplitude = 6.0f,
+        .bobHz = 0.7f,
+    };
+}
+
+constexpr glm::vec4 kShieldPowerupModelTint{0.02f, 0.10f, 0.62f, 1.0f};
 
 bool isRenderableGunType(WeaponType type)
 {
@@ -954,6 +984,12 @@ bool Game::init(AppContext& ctx)
     {
         // 1) Extract collision geometry (shared with server).
         gamemap::loadConfiguredMap(mapCollision_, "client");
+        for (const gamemap::KillzoneSpawner& kz : gamemap::killzoneSpawner_) {
+            const entt::entity zone = registry.create();
+            registry.emplace<Killzone>(zone);
+            registry.emplace<Position>(zone, kz.pos);
+            registry.emplace<CollisionShape>(zone, CollisionShape{.halfExtents = kz.halfExtents});
+        }
 
         // 2) Load visual model for rendering (scene-pass so it draws as static world geometry).
         // In separated mode, exclude collision-only nodes so they aren't rendered.
@@ -1124,6 +1160,28 @@ bool Game::init(AppContext& ctx)
                 SDL_Log("[client] WARNING: medkit model '%s' failed to load", kMedkitModel.filename);
         }
 
+        {
+            const int id = addAssetDefinition(assets_, kShieldPowerupModel);
+            shieldPowerupModelIdx_ = renderer->loadSceneModel(kShieldPowerupModel.filename,
+                                                              kShieldPowerupModel.loadTranslation,
+                                                              kShieldPowerupModel.loadScale,
+                                                              kShieldPowerupModel.flipUVs);
+            assets_.setModelIndex(id, shieldPowerupModelIdx_);
+            if (shieldPowerupModelIdx_ < 0)
+                SDL_Log("[client] WARNING: shield powerup model '%s' failed to load", kShieldPowerupModel.filename);
+        }
+
+        {
+            const int id = addAssetDefinition(assets_, kDamagePowerupModel);
+            damagePowerupModelIdx_ = renderer->loadSceneModel(kDamagePowerupModel.filename,
+                                                              kDamagePowerupModel.loadTranslation,
+                                                              kDamagePowerupModel.loadScale,
+                                                              kDamagePowerupModel.flipUVs);
+            assets_.setModelIndex(id, damagePowerupModelIdx_);
+            if (damagePowerupModelIdx_ < 0)
+                SDL_Log("[client] WARNING: damage powerup model '%s' failed to load", kDamagePowerupModel.filename);
+        }
+
         viewmodelLeftHandModelIdx_ = renderer->loadSceneModel("viewmodel_hand_left.glb", glm::vec3{0.0f}, 1.0f, false);
         viewmodelRightHandModelIdx_ =
             renderer->loadSceneModel("viewmodel_hand_right.glb", glm::vec3{0.0f}, 1.0f, false);
@@ -1226,9 +1284,10 @@ bool Game::init(AppContext& ctx)
             if (shotgunPelletAccumCount_ < static_cast<int>(shotgunPelletAccum_.pellets.size())) {
                 const bool isHit = (evt.surfaceType == SurfaceType::Flesh);
                 const bool isHead = (evt.headshot != 0);
-                shotgunPelletAccum_.pellets[shotgunPelletAccumCount_].result = isHead  ? HudShotgunPellet::Result::Head
-                                                                               : isHit ? HudShotgunPellet::Result::Body
-                                                                                       : HudShotgunPellet::Result::Miss;
+                shotgunPelletAccum_.pellets[static_cast<std::size_t>(shotgunPelletAccumCount_)].result =
+                    isHead  ? HudShotgunPellet::Result::Head
+                    : isHit ? HudShotgunPellet::Result::Body
+                            : HudShotgunPellet::Result::Miss;
                 ++shotgunPelletAccumCount_;
                 shotgunPelletLastTimeSec_ = nowSec;
                 if (shotgunPelletAccumCount_ == static_cast<int>(shotgunPelletAccum_.pellets.size())) {
@@ -1249,9 +1308,9 @@ bool Game::init(AppContext& ctx)
         //     always get the correct surface type and normal.
         if (evt.source == localPlayer) {
             const bool isChargeWeapon = getWeaponConfig(evt.weaponType).isCharge;
-            const bool isServerAuthoritative = evt.effectType == ParticleEffectType::Explosion ||
-                                               evt.effectType == ParticleEffectType::Smoke ||
-                                               evt.effectType == ParticleEffectType::Impact;
+            const bool isServerAuthoritative =
+                evt.effectType == ParticleEffectType::Explosion || evt.effectType == ParticleEffectType::Smoke ||
+                evt.effectType == ParticleEffectType::Impact || evt.effectType == ParticleEffectType::PowerupPickup;
             if (!isChargeWeapon && !isServerAuthoritative)
                 return;
 
@@ -1356,6 +1415,16 @@ bool Game::init(AppContext& ctx)
         case ParticleEffectType::Fire:
             particleSystem.spawnExplosionVfx(evt.pos1, {0.0f, 1.0f, 0.0f}, evt.param, ExplosionVfxKind::Molotov);
             spawnExplosionFlashLight(evt.pos1, WeaponType::Molotov, evt.param);
+            break;
+        case ParticleEffectType::PowerupPickup:
+            if (sfxSystem->isInitialized()) {
+                const audio::AudioObjectId object = audio::objectId("event.powerup.pickup");
+                sfxSystem->setAudioObjectTransform(object, evt.pos1);
+                if (evt.source == localPlayer)
+                    sfxSystem->postLocalAudioEvent("powerup.pickup", object, 1.0f);
+                else
+                    sfxSystem->postAudioEvent("powerup.pickup", object, 1.0f);
+            }
             break;
         }
     });
@@ -4539,15 +4608,20 @@ SDL_AppResult Game::iterate()
             world *= glm::mat4_cast(rend.orientation);
             world = glm::scale(world, rend.scale);
 
-            // Projectile entities carry a per-grenade tint (HE = green,
-            // Molotov = orange, Sticky = blue). Non-projectile entities use
-            // the default white tint (no recolor).
-            glm::vec4 tint{1.0f};
+            // Projectile entities carry a per-grenade tint; other entities use
+            // their Renderable tint.
+            glm::vec4 tint = rend.tint;
             if (const auto* proj = registry.try_get<Projectile>(e)) {
                 tint = glm::vec4(proj->tint, 1.0f);
             }
 
-            entityCmds.push_back(EntityRenderCmd{.modelIndex = rend.modelIndex, .worldTransform = world, .tint = tint});
+            const auto* powerup = registry.try_get<PowerupSpawner>(e);
+            const bool occludedSilhouette = powerup != nullptr && powerup->hasPowerup;
+
+            entityCmds.push_back(EntityRenderCmd{.modelIndex = rend.modelIndex,
+                                                 .worldTransform = world,
+                                                 .tint = tint,
+                                                 .occludedSilhouette = occludedSilhouette});
         });
 
         // (Legacy third-person remote-weapon emission removed. Every player
@@ -5474,6 +5548,7 @@ SDL_AppResult Game::iterate()
             debugUI.buildWeaponSpawnerUI(registry, hbVP, winWf, winHf);
             debugUI.buildDroppedWeaponUI(registry, hbVP, winWf, winHf);
             debugUI.buildSpawnPointUI(registry, hbVP, winWf, winHf);
+            debugUI.buildKillzoneUI(registry, hbVP, winWf, winHf);
             // PR-20: CSGO sv_showimpacts-style shot debug.  Window
             // toggles + ring-buffer slider + per-shot summary table;
             // when `drawShotDebugOverlay` is checked we also render
@@ -6927,7 +7002,14 @@ void Game::refreshRemoteRespawnRenderables()
                 }
                 rend.modelIndex = grenadeIdx;
                 const WeaponSpawnerModelParams& params = defaultSpawnerModelParams(spawner.type);
-                rend.scale = params.scale;
+                if (spawner.type == WeaponType::HEGrenade)
+                    rend.scale = kHEGrenadeModel.renderScale;
+                else if (spawner.type == WeaponType::Sticky)
+                    rend.scale = kStickyGrenadeModel.renderScale;
+                else if (spawner.type == WeaponType::Molotov)
+                    rend.scale = kMolotovModel.renderScale;
+                else
+                    rend.scale = kGrenadeModel.renderScale;
 
                 const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
@@ -6983,11 +7065,24 @@ void Game::refreshRemotePowerupRenderables()
     registry.view<Position, PowerupSpawner, CollisionShape>().each(
         [&](entt::entity e, const Position&, const PowerupSpawner& spawner, const CollisionShape&) {
             auto& rend = registry.get_or_emplace<Renderable>(e, Renderable{});
-            const int powerupIndex = rocketProjectileModelIdx_;
+            const int powerupIndex =
+                spawner.type == PowerupType::Shield ? shieldPowerupModelIdx_ : damagePowerupModelIdx_;
+            const WeaponSpawnerModelParams params = defaultPowerupModelParams(spawner.type);
+            const float t = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
             rend.modelIndex = powerupIndex;
-            rend.scale = glm::vec3(kRocketProjectile.loadScale);
-            rend.visible = spawner.hasPowerup;
+            rend.scale =
+                spawner.type == PowerupType::Shield ? kShieldPowerupModel.renderScale : kDamagePowerupModel.renderScale;
+            rend.tint = spawner.type == PowerupType::Shield ? kShieldPowerupModelTint : glm::vec4{1.0f};
+            if (spawner.hasPowerup) {
+                static constexpr float k_twoPi = 6.28318530718f;
+                rend.translation = params.translation +
+                                   glm::vec3{0.0f, std::sin(t * k_twoPi * params.bobHz) * params.bobAmplitude, 0.0f};
+            } else {
+                rend.translation = params.translation;
+            }
+            rend.orientation = spawnerModelRotation(params, t, spawner.hasPowerup);
+            rend.visible = spawner.hasPowerup && powerupIndex >= 0;
         });
 }
 
