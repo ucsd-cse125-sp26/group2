@@ -77,14 +77,28 @@ public:
               bool outlined = false);
     void knockoutText(const char* str, float x, float y, float size, HudAlign align = HudAlign::Left);
     float measureText(const char* str, float size) const;
+    void measureTextVerticalBounds(const char* str, float size, float& outTop, float& outBottom) const;
 
     // ── Icons ───────────────────────────────────────────────────────────
 
     bool icon(HudIcon id, float x, float y, float size, HudColor tint = HudColor::white());
     bool svg(HudIcon id, float x, float y, float w, float h, HudColor tint = HudColor::white());
     bool svgFlipped(HudIcon id, float x, float y, float w, float h, bool flipX, bool flipY, HudColor tint = HudColor::white());
+    bool svgPartialX(HudIcon id, float x, float y, float w, float h, float fraction, HudColor tint = HudColor::white());
     bool svgMask(HudIcon id, float x, float y, float w, float h, HudColor color);
     bool svgMaskFlipped(HudIcon id, float x, float y, float w, float h, bool flipX, bool flipY, HudColor color);
+    bool svgMaskPartialX(HudIcon id, float x, float y, float w, float h, float fraction, HudColor color);
+    bool svgMaskRangeX(HudIcon id, float x, float y, float w, float h, float startFraction, float endFraction, HudColor color);
+    bool svgMaskPartialXFlipped(HudIcon id,
+                                float x,
+                                float y,
+                                float w,
+                                float h,
+                                float fraction,
+                                bool fromRight,
+                                bool flipX,
+                                bool flipY,
+                                HudColor color);
 
     // ── Crosshair ───────────────────────────────────────────────────────
 
@@ -116,6 +130,9 @@ public:
 
     /// @brief Multiply already-emitted vertex colors by a tint.
     void tintVertices(std::size_t startVertex, HudColor tint);
+
+    /// @brief Rotate vertices emitted since startVertex around a screen-space point.
+    void rotateVertices(std::size_t startVertex, float cx, float cy, float angleDeg);
 
     // ── Access for HudRenderer ──────────────────────────────────────────
 

@@ -6,6 +6,9 @@
 #include "FbxImportUtils.hpp"
 #include "SkinVertex.hpp"
 
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -30,6 +33,7 @@ struct RigMeshData
     std::vector<ModelVertex> baseVertices; ///< Bind-pose vertices (never mutated).
     std::vector<SkinWeight> skinWeights;   ///< Parallel to baseVertices.
     std::vector<uint32_t> indices;         ///< Triangle indices.
+    uint32_t materialIndex = 0;            ///< Source aiMesh material index — used to bind the right per-mesh texture.
 };
 
 /// @brief Shared skinned rig — skeleton + bind-pose meshes + joint map.
@@ -47,10 +51,24 @@ public:
     CharacterRig(CharacterRig&&) noexcept;
     CharacterRig& operator=(CharacterRig&&) noexcept;
 
-    /// @brief Load rig from an FBX file.
-    /// @param path  Absolute path to an FBX with a skin-weighted mesh.
+    /// @brief Load rig from an FBX/GLB file.
+    /// @param path  Absolute path to a file with a skin-weighted mesh.
+    /// @param orientationFix  Rotation prepended to the skeleton root so the
+    ///        whole rig (render mesh, joint frames, hitboxes) is re-oriented
+    ///        consistently. Defaults to identity. Needed when a re-export
+    ///        changes the up/forward axis convention (e.g. a glTF export of a
+    ///        rig whose armature carried an unapplied 90° rotation).
+    /// @param flipNormals  Negate every bind-pose vertex normal. Defaults to
+    ///        false. Use when an export inverts normal/winding handedness so
+    ///        the lit surface faces the wrong way.
+    /// @param flipUVs  Apply aiProcess_FlipUVs. Defaults to false. Matches the
+    ///        static model loader's glTF-vs-DCC convention so skinned viewmodel
+    ///        meshes sample their textures right-side-up.
     /// @return True on success (skeleton built + at least one skinned mesh).
-    bool loadFromFBX(const std::string& path);
+    bool loadFromFBX(const std::string& path,
+                     const glm::quat& orientationFix = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                     bool flipNormals = false,
+                     bool flipUVs = false);
 
     /// @brief True after a successful loadFromFBX().
     [[nodiscard]] bool isLoaded() const noexcept;

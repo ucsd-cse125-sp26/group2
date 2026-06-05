@@ -3,9 +3,11 @@
 
 #pragma once
 #include "ecs/components/ClientId.hpp"
+#include "ecs/components/PlayerName.hpp"
 
+#include <array>
 #include <cstdint>
-#include <string>
+#include <type_traits>
 #include <vector>
 
 /// @brief Per-player state entry in the lobby.
@@ -14,7 +16,11 @@ struct LobbyPlayer
     ClientId id;         ///< Network identity of this player.
     bool ready = false;  ///< True when the player has confirmed they are ready to play.
     bool isHost = false; ///< True if this player is the current lobby host.
+    std::array<char, PlayerName::k_maxLen + 1> displayName{}; ///< NUL-terminated display name.
 };
+
+static_assert(std::is_trivially_copyable_v<LobbyPlayer>,
+              "LobbyPlayer is sent as raw bytes in LOBBY_STATE and must stay trivially copyable.");
 
 /// @brief Full lobby snapshot sent to a client upon joining.
 struct LobbyState
@@ -36,6 +42,10 @@ struct LobbyUpdateEvent
         PlayerNewHost, ///< Host assignment transferred to a different player.
     };
 
-    Type type;   ///< Kind of lobby change.
-    ClientId id; ///< Player this event applies to.
+    Type type;                                                ///< Kind of lobby change.
+    ClientId id;                                              ///< Player this event applies to.
+    std::array<char, PlayerName::k_maxLen + 1> displayName{}; ///< Display name (only populated for PlayerJoined).
 };
+
+static_assert(std::is_trivially_copyable_v<LobbyUpdateEvent>,
+              "LobbyUpdateEvent is sent as raw bytes and must stay trivially copyable.");

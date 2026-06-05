@@ -7,9 +7,13 @@
 #include "game/Game.hpp"
 #include "host/HostedServer.hpp"
 #include "menus/MenuTheme.hpp"
-#include "menus/home/Home.hpp"
 #include "menus/host/HostConfig.hpp"
+#include "menus/loading/LoadingScreen.hpp"
 #include "menus/lobby/Lobby.hpp"
+#include "menus/main/MainMenu.hpp"
+#include "menus/postmatch/PostMatchScoreboard.hpp"
+#include "menus/settings/SettingsScreen.hpp"
+#include "menus/title/TitleScreen.hpp"
 #include "network/discovery/GlobalDiscoveryClient.hpp"
 #include "renderer-new/GraphicsConfig.hpp"
 
@@ -17,6 +21,7 @@
 
 #include <SDL3_net/SDL_net.h>
 #include <backends/imgui_impl_sdl3.h>
+#include <chrono>
 #include <imgui.h>
 #include <optional>
 #include <string>
@@ -148,6 +153,12 @@ bool App::init()
         return false;
     }
 
+    if (!sfxSystem.init()) {
+        SDL_Log("[client] SfxSystem init failed (non-fatal — music and sound effects disabled)");
+    }
+    applyAudioSettings();
+    previousAudioCounter_ = SDL_GetPerformanceCounter();
+
     // Developer skip
     if (developerConfig.skipLobby) {
         const NetworkAddress clientNet = networkConfig.clientNetwork;
@@ -159,25 +170,27 @@ bool App::init()
             return false;
         }
         AppContext ctx = screenContext();
-        auto game = std::make_unique<Game>();
-        if (!game->initDebugUI(ctx) || !game->init(ctx)) {
-            game->quit();
+        auto loading = std::make_unique<LoadingScreen>();
+        if (!loading->init(ctx)) {
+            loading->quit();
             cleanup();
             return false;
         }
-        screen_ = std::move(game);
-        current = Screen::InGame;
+        screen_ = std::move(loading);
+        current = Screen::Loading;
     } else {
         AppContext ctx = screenContext();
-        auto homeScreen = std::make_unique<Home>();
-        if (!homeScreen->init(ctx)) {
-            homeScreen->quit();
+        auto titleScreen = std::make_unique<TitleScreen>();
+        if (!titleScreen->init(ctx)) {
+            titleScreen->quit();
             cleanup();
             return false;
         }
-        screen_ = std::move(homeScreen);
-        current = Screen::Home;
+        screen_ = std::move(titleScreen);
+        current = Screen::TitleScreen;
     }
+
+    updateBackgroundMusic();
 
     return true;
 }
@@ -186,6 +199,8 @@ SDL_AppResult App::event(SDL_Event* event)
 {
     if (!screen_)
         return SDL_APP_FAILURE;
+    if (event)
+        sfxSystem.handleEvent(*event);
     return screen_->event(event);
 }
 
@@ -193,93 +208,117 @@ SDL_AppResult App::iterate()
 {
     if (!screen_)
         return SDL_APP_FAILURE;
+
+    const Uint64 now = SDL_GetPerformanceCounter();
+    const Uint64 frequency = SDL_GetPerformanceFrequency();
+    const float audioDt = previousAudioCounter_ != 0 && frequency != 0
+                              ? static_cast<float>(now - previousAudioCounter_) / static_cast<float>(frequency)
+                              : 0.0f;
+    previousAudioCounter_ = now;
+    applyAudioSettings();
+    updateBackgroundMusic();
+    if (current != Screen::InGame)
+        sfxSystem.update(audioDt);
+
     const SDL_AppResult result = screen_->iterate();
     if (result != SDL_APP_CONTINUE)
         return result;
+    pollJoinAttempt();
 
     switch (current) {
-    case Screen::Home: {
-        auto home = dynamic_cast<Home*>(screen_.get());
-        if (!home)
+    case Screen::TitleScreen: {
+        auto* titleScreen = dynamic_cast<TitleScreen*>(screen_.get());
+        if (!titleScreen)
             break;
-        if (auto joinRequest = home->consumeJoinRequest()) {
-            std::string serverIp = joinRequest->serverIp;
-            uint16_t serverPort = joinRequest->serverPort;
-            std::optional<net::UdpSessionTransport::RelayConfig> relayConfig;
-            std::optional<net::UdpSessionTransport::PunchAssist> punchAssist;
-            if (joinRequest->globalServerId != 0 && networkConfig.discovery.enabled) {
-                GlobalDiscoveryClient discovery;
-                net::discovery::ServerInfo punchedServer;
-                std::string punchError;
-                const std::uint32_t clientNonce = net::discovery::randomNonce();
-                net::RelayToken relayToken;
-                if (discovery.requestHolePunch(networkConfig.discovery,
-                                               joinRequest->globalServerId,
-                                               clientNonce,
-                                               punchedServer,
-                                               punchError,
-                                               networkConfig.discovery.connectPunchTimeoutMs,
-                                               &relayToken))
-                {
-                    serverIp = punchedServer.udpHost.empty() ? punchedServer.host : punchedServer.udpHost;
-                    serverPort = punchedServer.udpPort != 0 ? punchedServer.udpPort : punchedServer.gamePort;
-                    SDL_Log("Global punch assist selected public UDP endpoint %s:%u for server %u",
-                            serverIp.c_str(),
-                            serverPort,
-                            joinRequest->globalServerId);
-                    // Keep punching from the real game socket during connect:
-                    // the discovery punch above ran on a throwaway socket, so
-                    // its NAT mapping won't match the session socket. Re-sending
-                    // the PunchRequest (same nonce) from the session socket makes
-                    // the directory re-notify the host with our true game port.
-                    punchAssist = net::UdpSessionTransport::PunchAssist{
-                        .directoryHost = networkConfig.discovery.directoryHost,
-                        .directoryPort = networkConfig.discovery.directoryUdpPort,
-                        .request = net::discovery::encodePunchRequest(
-                            {.serverId = joinRequest->globalServerId, .clientNonce = clientNonce}),
-                        .enabled = true,
-                    };
-                    if (!networkConfig.transport.noRelay) {
-                        relayConfig = net::UdpSessionTransport::RelayConfig{
-                            .host = networkConfig.discovery.directoryHost,
-                            .port = networkConfig.discovery.directoryUdpPort,
-                            .serverId = joinRequest->globalServerId,
-                            .clientNonce = clientNonce,
-                            .relayToken = relayToken,
-                            .enabled = true,
-                        };
-                    } else {
-                        SDL_Log("Global punch assist succeeded for server %u; relay disabled, trying direct UDP only",
-                                joinRequest->globalServerId);
-                    }
-                } else if (!punchError.empty()) {
-                    SDL_Log("Global punch assist failed for server %u: %s",
-                            joinRequest->globalServerId,
-                            punchError.c_str());
-                }
+
+        if (titleScreen->consumeExitRequest()) {
+            return SDL_APP_SUCCESS;
+        }
+        if (titleScreen->consumePlayRequest()) {
+            nextMainMenuTab_ = ServerBrowserTab::LocalListing;
+            transitionTo(Screen::MainMenu);
+            break;
+        }
+        if (titleScreen->consumeHostRequest()) {
+            nextMainMenuTab_ = ServerBrowserTab::HostConfig;
+            transitionTo(Screen::MainMenu);
+            break;
+        }
+        if (titleScreen->consumeSettingsRequest()) {
+            settingsReturnScreen_ = Screen::TitleScreen;
+            transitionTo(Screen::Settings);
+            break;
+        }
+        break;
+    }
+    case Screen::Settings: {
+        auto* settings = dynamic_cast<SettingsScreen*>(screen_.get());
+        if (!settings)
+            break;
+
+        if (settings->consumeBackRequest()) {
+            transitionTo(settingsReturnScreen_);
+            break;
+        }
+        break;
+    }
+    case Screen::MainMenu: {
+        auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get());
+        if (!mainMenu)
+            break;
+        if (mainMenu->consumeReturnToTitleScreenRequest()) {
+            transitionTo(Screen::TitleScreen);
+            break;
+        }
+        if (mainMenu->consumeExitRequest()) {
+            return SDL_APP_SUCCESS;
+        }
+        if (auto joinRequest = mainMenu->consumeJoinRequest()) {
+            startJoinAttempt(*joinRequest);
+        }
+
+        if (mainMenu->consumeLaunchRequest()) {
+            if (client.isConnected()) {
+                client.shutdown();
             }
-            SDL_Log("Attempting to join server at %s:%d...", serverIp.c_str(), serverPort);
-            const ConnectError connectError = client.init(serverIp.c_str(),
-                                                          serverPort,
-                                                          networkConfig.transport,
-                                                          k_joinConnectionTimeoutMs,
-                                                          relayConfig,
-                                                          punchAssist);
+
+            HostConfigState config = mainMenu->consumeDraftConfig();
+            hostConfigState = config;
+
+            if (config.useLegacyTcp && !config.useSpecificPort) {
+                mainMenu->setLaunchError("Legacy TCP requires a specific port");
+                break;
+            }
+
+            std::string error;
+            if (!hostedServer.start(config, error)) {
+                mainMenu->setLaunchError(error.empty() ? "Failed to start hosted server" : error);
+                break;
+            }
+
+            SDL_Log("Hosted server started on port %d, connecting client...", hostedServer.port());
+            TransportConfig hostedTransport = networkConfig.transport;
+            if (config.useLegacyTcp) {
+                hostedTransport.useUdpSessions = false;
+            }
+            const ConnectError connectError = client.init("127.0.0.1", hostedServer.port(), hostedTransport);
             if (connectError != ConnectError::None) {
-                SDL_Log("Failed to connect to server at %s:%d: %s",
-                        serverIp.c_str(),
-                        serverPort,
-                        connectErrorLogName(connectError));
-                home->setJoinError(joinErrorMessage(connectError));
+                SDL_Log("Failed to connect to hosted server: %s", connectErrorLogName(connectError));
+                mainMenu->setLaunchError(joinErrorMessage(connectError));
+                hostedServer.shutdown();
             } else {
-                SDL_Log("Successfully connected to server at %s:%d", serverIp.c_str(), serverPort);
-                currentServerName = joinRequest->serverName.empty() ? serverIp : joinRequest->serverName;
-                transitionTo(Screen::Lobby);
+                SDL_Log("Successfully connected to hosted server at 127.0.0.1:%d", hostedServer.port());
+                currentServerName = config.serverName;
             }
         }
 
-        if (home->consumeHostRequest()) {
-            transitionTo(Screen::HostConfig);
+        if (mainMenu->consumeShutdownRequest()) {
+            shutdownHostedServerGracefully();
+            client.shutdown();
+        }
+
+        if (mainMenu->consumeGoToLobbyRequest() && (hostedServer.isRunning() || client.isConnected())) {
+            transitionTo(Screen::Lobby);
         }
         break;
     }
@@ -328,17 +367,21 @@ SDL_AppResult App::iterate()
             client.shutdown();
         }
 
+        if (hostConfig->consumeExitRequest()) {
+            return SDL_APP_SUCCESS;
+        }
+
         if (hostConfig->consumeGoToLobbyRequest() && (hostedServer.isRunning() || client.isConnected())) {
             transitionTo(Screen::Lobby);
             break;
         }
 
-        if (hostConfig->consumeBackToHomeRequest()) {
+        if (hostConfig->consumeBackToMainMenuRequest()) {
             if (hostedServer.isRunning()) {
                 shutdownHostedServerGracefully();
             }
             client.shutdown();
-            transitionTo(Screen::Home);
+            transitionTo(Screen::MainMenu);
         }
         break;
     }
@@ -348,8 +391,13 @@ SDL_AppResult App::iterate()
             break;
 
         if (lobby->consumeReturnToHostConfig()) {
-            transitionTo(Screen::HostConfig);
+            nextMainMenuTab_ = ServerBrowserTab::HostConfig;
+            transitionTo(Screen::MainMenu);
             break;
+        }
+
+        if (lobby->consumeExitRequest()) {
+            return SDL_APP_SUCCESS;
         }
 
         if (lobby->consumeReturnToMenu()) {
@@ -359,16 +407,67 @@ SDL_AppResult App::iterate()
             }
             client.shutdown();
 
-            transitionTo(Screen::Home);
             if (showServerShutdownNotice) {
-                showHomePopupMessage("Server shutdown");
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
+                transitionTo(Screen::MainMenu);
+                showMainMenuPopupMessage("Server shutdown");
+            } else {
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
+                transitionTo(Screen::MainMenu);
             }
             break;
         }
 
         if (lobby->shouldStartMatch()) {
             lobby->consumeStartMatchState();
+            if (const auto latestServerName = client.getLatestServerName();
+                latestServerName && !latestServerName->empty())
+            {
+                currentServerName = *latestServerName;
+            }
+            transitionTo(Screen::Loading);
+        }
+        break;
+    }
+    case Screen::Loading: {
+        auto* loading = dynamic_cast<LoadingScreen*>(screen_.get());
+        if (!loading)
+            break;
+
+        if (loading->readyToStartGame()) {
             transitionTo(Screen::InGame);
+        }
+        break;
+    }
+    case Screen::PostMatch: {
+        auto* postMatch = dynamic_cast<PostMatchScoreboard*>(screen_.get());
+        if (!postMatch)
+            break;
+
+        if (postMatch->consumeReturnToMenu()) {
+            const bool showServerShutdownNotice = postMatch->consumeServerShutdownNotice();
+            if (hostedServer.isRunning()) {
+                shutdownHostedServerGracefully();
+            }
+            client.shutdown();
+            if (showServerShutdownNotice) {
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
+                transitionTo(Screen::MainMenu);
+                showMainMenuPopupMessage("Server shutdown");
+            } else {
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
+                transitionTo(Screen::MainMenu);
+            }
+            break;
+        }
+
+        if (postMatch->consumeExitRequest()) {
+            return SDL_APP_SUCCESS;
+        }
+
+        if (postMatch->consumeReturnToLobby()) {
+            transitionTo(Screen::Lobby);
+            break;
         }
         break;
     }
@@ -383,15 +482,24 @@ SDL_AppResult App::iterate()
                 shutdownHostedServerGracefully();
             }
             client.shutdown();
-            transitionTo(Screen::Home);
             if (showServerShutdownNotice) {
-                showHomePopupMessage("Server shutdown");
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
+                transitionTo(Screen::MainMenu);
+                showMainMenuPopupMessage("Server shutdown");
+            } else {
+                nextMainMenuTab_ = ServerBrowserTab::LocalListing;
+                transitionTo(Screen::MainMenu);
             }
             break;
         }
 
         if (developerConfig.skipLobby)
             break;
+        if (auto postMatchResult = game->consumePostMatchResult()) {
+            pendingPostMatchResult_ = std::move(*postMatchResult);
+            transitionTo(Screen::PostMatch);
+            break;
+        }
         if (game->shouldReturnToLobby()) {
             transitionTo(Screen::Lobby);
         }
@@ -421,6 +529,16 @@ void App::transitionTo(Screen next)
 
     AppContext ctx = screenContext();
     switch (next) {
+    case Screen::TitleScreen: {
+        auto titleScreen = std::make_unique<TitleScreen>();
+        if (titleScreen->init(ctx)) {
+            screen_ = std::move(titleScreen);
+            current = next;
+        } else {
+            titleScreen->quit();
+        }
+        break;
+    }
     case Screen::InGame: {
         auto game = std::make_unique<Game>();
         if (game->initDebugUI(ctx) && game->init(ctx)) {
@@ -428,6 +546,26 @@ void App::transitionTo(Screen next)
             current = next;
         } else {
             game->quit();
+            client.shutdown();
+            auto mainMenu = std::make_unique<MainMenu>();
+            nextMainMenuTab_ = ServerBrowserTab::LocalListing;
+            if (mainMenu->init(ctx, nextMainMenuTab_)) {
+                mainMenu->setPopupMessage("Failed to initialize match");
+                screen_ = std::move(mainMenu);
+                current = Screen::MainMenu;
+            } else {
+                mainMenu->quit();
+            }
+        }
+        break;
+    }
+    case Screen::Loading: {
+        auto loading = std::make_unique<LoadingScreen>();
+        if (loading->init(ctx)) {
+            screen_ = std::move(loading);
+            current = next;
+        } else {
+            loading->quit();
         }
         break;
     }
@@ -441,29 +579,65 @@ void App::transitionTo(Screen next)
         }
         break;
     }
-    case Screen::HostConfig: {
-        auto hostConfig = std::make_unique<HostConfig>();
-        if (hostConfig->init(ctx)) {
-            screen_ = std::move(hostConfig);
+    case Screen::PostMatch: {
+        if (!pendingPostMatchResult_) {
+            next = Screen::Lobby;
+            auto lobby = std::make_unique<Lobby>();
+            if (lobby->init(ctx)) {
+                screen_ = std::move(lobby);
+                current = next;
+            } else {
+                lobby->quit();
+            }
+            break;
+        }
+
+        auto postMatch = std::make_unique<PostMatchScoreboard>();
+        if (postMatch->init(ctx, std::move(*pendingPostMatchResult_))) {
+            pendingPostMatchResult_.reset();
+            screen_ = std::move(postMatch);
             current = next;
         } else {
-            hostConfig->quit();
+            pendingPostMatchResult_.reset();
+            postMatch->quit();
         }
         break;
     }
-    case Screen::Home: {
-        auto homeScreen = std::make_unique<Home>();
-        if (homeScreen->init(ctx)) {
-            screen_ = std::move(homeScreen);
+    case Screen::Settings: {
+        auto settings = std::make_unique<SettingsScreen>();
+        if (settings->init(ctx)) {
+            screen_ = std::move(settings);
             current = next;
         } else {
-            homeScreen->quit();
+            settings->quit();
+        }
+        break;
+    }
+    case Screen::HostConfig: {
+        auto mainMenu = std::make_unique<MainMenu>();
+        if (mainMenu->init(ctx, ServerBrowserTab::HostConfig)) {
+            screen_ = std::move(mainMenu);
+            current = Screen::MainMenu;
+        } else {
+            mainMenu->quit();
+        }
+        break;
+    }
+    case Screen::MainMenu: {
+        auto mainMenu = std::make_unique<MainMenu>();
+        if (mainMenu->init(ctx, nextMainMenuTab_)) {
+            screen_ = std::move(mainMenu);
+            current = next;
+        } else {
+            mainMenu->quit();
         }
         break;
     }
     default:
         break;
     }
+
+    updateBackgroundMusic();
 }
 
 void App::cleanup()
@@ -471,6 +645,7 @@ void App::cleanup()
     if (screen_) {
         screen_->quit();
     }
+    waitForJoinAttempt();
     if (!userSettingsPath.empty()) {
         user_settings::save(userSettingsPath, userSettings);
     }
@@ -478,6 +653,8 @@ void App::cleanup()
         shutdownHostedServerGracefully();
     }
     client.shutdown();
+    sfxSystem.stopMusic();
+    sfxSystem.quit();
     menu_theme::releaseBackground(renderer.getDevice());
     renderer.quit();
     if (screen_) {
@@ -504,6 +681,7 @@ AppContext App::screenContext()
         .window = *window,
         .renderer = renderer,
         .client = client,
+        .sfxSystem = sfxSystem,
         .hostedServer = hostedServer,
         .hostConfigState = hostConfigState,
         .networkConfig = networkConfig,
@@ -514,12 +692,153 @@ AppContext App::screenContext()
     };
 }
 
-void App::showHomePopupMessage(const std::string& message)
+void App::applyAudioSettings()
 {
-    auto* home = dynamic_cast<Home*>(screen_.get());
-    if (home) {
-        home->setPopupMessage(message);
+    if (!sfxSystem.isInitialized())
+        return;
+
+    sfxSystem.setCategoryVolume(SfxCategory::Music, userSettings.musicVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::Weapons, userSettings.sfxVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::Impacts, userSettings.sfxVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::Player, userSettings.sfxVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::Footsteps, userSettings.sfxVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::Voice, userSettings.sfxVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::UI, userSettings.sfxVolume);
+}
+
+void App::updateBackgroundMusic()
+{
+    if (!sfxSystem.isInitialized())
+        return;
+
+    const SfxId desiredMusic = current == Screen::InGame ? SfxId::GameMusic : SfxId::MenuMusic;
+    sfxSystem.playMusic(desiredMusic);
+}
+
+void App::showMainMenuPopupMessage(const std::string& message)
+{
+    auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get());
+    if (mainMenu) {
+        mainMenu->setPopupMessage(message);
     }
+}
+
+void App::startJoinAttempt(const JoinRequest& request)
+{
+    if (joinAttempt_.valid())
+        return;
+
+    joinAttemptLabel_ = request.serverName.empty() ? request.serverIp : request.serverName;
+    if (auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get())) {
+        mainMenu->setJoinInProgress(true, joinAttemptLabel_);
+    }
+
+    NetworkConfig cfg = networkConfig;
+    Client& joinClient = client;
+    joinAttempt_ = std::async(std::launch::async, [request, cfg, &joinClient]() mutable {
+        JoinAttemptResult result{
+            .error = ConnectError::ConnectFailed,
+            .serverIp = request.serverIp,
+            .serverPort = request.serverPort,
+            .serverName = request.serverName,
+        };
+
+        std::optional<net::UdpSessionTransport::RelayConfig> relayConfig;
+        std::optional<net::UdpSessionTransport::PunchAssist> punchAssist;
+        if (request.globalServerId != 0 && cfg.discovery.enabled) {
+            GlobalDiscoveryClient discovery;
+            net::discovery::ServerInfo punchedServer;
+            std::string punchError;
+            const std::uint32_t clientNonce = net::discovery::randomNonce();
+            net::RelayToken relayToken;
+            if (discovery.requestHolePunch(cfg.discovery,
+                                           request.globalServerId,
+                                           clientNonce,
+                                           punchedServer,
+                                           punchError,
+                                           cfg.discovery.connectPunchTimeoutMs,
+                                           &relayToken))
+            {
+                result.serverIp = punchedServer.udpHost.empty() ? punchedServer.host : punchedServer.udpHost;
+                result.serverPort = punchedServer.udpPort != 0 ? punchedServer.udpPort : punchedServer.gamePort;
+                SDL_Log("Global punch assist selected public UDP endpoint %s:%u for server %u",
+                        result.serverIp.c_str(),
+                        result.serverPort,
+                        request.globalServerId);
+                punchAssist = net::UdpSessionTransport::PunchAssist{
+                    .directoryHost = cfg.discovery.directoryHost,
+                    .directoryPort = cfg.discovery.directoryUdpPort,
+                    .request = net::discovery::encodePunchRequest(
+                        {.serverId = request.globalServerId, .clientNonce = clientNonce}),
+                    .enabled = true,
+                };
+                if (!cfg.transport.noRelay) {
+                    relayConfig = net::UdpSessionTransport::RelayConfig{
+                        .host = cfg.discovery.directoryHost,
+                        .port = cfg.discovery.directoryUdpPort,
+                        .serverId = request.globalServerId,
+                        .clientNonce = clientNonce,
+                        .relayToken = relayToken,
+                        .enabled = true,
+                    };
+                } else {
+                    SDL_Log("Global punch assist succeeded for server %u; relay disabled, trying direct UDP only",
+                            request.globalServerId);
+                }
+            } else if (!punchError.empty()) {
+                SDL_Log("Global punch assist failed for server %u: %s", request.globalServerId, punchError.c_str());
+            }
+        }
+
+        SDL_Log("Attempting to join server at %s:%d...", result.serverIp.c_str(), result.serverPort);
+        result.error = joinClient.init(result.serverIp.c_str(),
+                                       result.serverPort,
+                                       cfg.transport,
+                                       k_joinConnectionTimeoutMs,
+                                       relayConfig,
+                                       punchAssist);
+        return result;
+    });
+}
+
+void App::pollJoinAttempt()
+{
+    if (!joinAttempt_.valid())
+        return;
+    if (joinAttempt_.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+        return;
+
+    JoinAttemptResult result = joinAttempt_.get();
+    if (auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get())) {
+        mainMenu->setJoinInProgress(false);
+    }
+    joinAttemptLabel_.clear();
+
+    if (result.error != ConnectError::None) {
+        SDL_Log("Failed to connect to server at %s:%d: %s",
+                result.serverIp.c_str(),
+                result.serverPort,
+                connectErrorLogName(result.error));
+        if (auto* mainMenu = dynamic_cast<MainMenu*>(screen_.get())) {
+            mainMenu->setJoinError(joinErrorMessage(result.error));
+        }
+        return;
+    }
+
+    SDL_Log("Successfully connected to server at %s:%d", result.serverIp.c_str(), result.serverPort);
+    currentServerName = result.serverName.empty() ? result.serverIp : result.serverName;
+    transitionTo(Screen::Lobby);
+}
+
+void App::waitForJoinAttempt()
+{
+    if (!joinAttempt_.valid())
+        return;
+    const JoinAttemptResult result = joinAttempt_.get();
+    if (result.error != ConnectError::None) {
+        SDL_Log("Join attempt ended during shutdown: %s", connectErrorLogName(result.error));
+    }
+    joinAttemptLabel_.clear();
 }
 
 bool App::shutdownHostedServerGracefully()

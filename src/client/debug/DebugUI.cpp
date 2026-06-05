@@ -933,7 +933,10 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         {"Tracers (caps.)", ps.tracerCount(), 512},
         {"Ribbon verts", ps.ribbonVertexCount(), 24576},
         {"Hitscan beams", ps.hitscanBeamCount(), 64},
-        {"Arc verts", ps.arcVertexCount(), 2048},
+        {"Railgun arc verts", ps.railgunArcVertexCount(), 4096},
+        {"Energy arc verts", ps.energyTeslaArcVertexCount(), 8192},
+        {"Energy arc beams", ps.energyTeslaBeamCount(), 8},
+        {"Merged arc verts", ps.arcVertexCount(), 8192},
         {"Smoke", ps.smokeCount(), 1024},
         {"Explosion sprites", ps.explosionSpriteCount(), 2048},
         {"Explosion debris", ps.explosionDebrisCount(), 1024},
@@ -987,6 +990,49 @@ void DebugUI::buildParticleUI(ParticleSystem& ps, glm::vec3 eyePos, glm::vec3 fo
         const glm::vec3 hitPoint = hipfireOrigin + forward * particleSpawnDist_;
         ps.spawnHitscanBeam(hipfireOrigin, hitPoint, WeaponType::EnergyGun);
         ps.spawnImpactEffect(hitPoint, wallNorm, SurfaceType::Energy, WeaponType::EnergyGun);
+    }
+
+    ImGui::SeparatorText("Energy Gun Tesla");
+    ImGui::Checkbox("Live Tesla Preview", &energyTeslaPreviewLive_);
+    ImGui::SameLine();
+    ImGui::Checkbox("Locked", &energyTeslaPreviewLocked_);
+    ImGui::SliderFloat("Guide distance", &energyTeslaGuideDist_, 30.f, 350.f, "%.0f");
+    ImGui::SliderFloat("Endpoint forward", &energyTeslaEndpointForward_, 20.f, 350.f, "%.0f");
+    ImGui::SliderFloat("Endpoint right", &energyTeslaEndpointRight_, -180.f, 180.f, "%.0f");
+    ImGui::SliderFloat("Endpoint up", &energyTeslaEndpointUp_, -120.f, 160.f, "%.0f");
+    ImGui::SliderFloat("Lock strength", &energyTeslaPreviewLockStrength_, 0.f, 1.f, "%.2f");
+
+    auto buildEnergyTeslaPreview = [&]() {
+        const glm::vec3 guidePoint = hipfireOrigin + forward * energyTeslaGuideDist_;
+        const glm::vec3 targetPoint = energyTeslaPreviewLocked_
+                                          ? hipfireOrigin + forward * energyTeslaEndpointForward_ +
+                                                camRight * energyTeslaEndpointRight_ + worldUp * energyTeslaEndpointUp_
+                                          : guidePoint;
+        return std::array<glm::vec3, 2>{guidePoint, targetPoint};
+    };
+
+    const auto previewPoints = buildEnergyTeslaPreview();
+    if (energyTeslaPreviewLive_) {
+        ps.debugEnergyTeslaPreview(hipfireOrigin,
+                                   previewPoints[0],
+                                   previewPoints[1],
+                                   energyTeslaPreviewLocked_,
+                                   energyTeslaPreviewLocked_ ? energyTeslaPreviewLockStrength_ : 0.0f);
+    }
+    if (ImGui::Button("Spawn Tesla Preview", {160.f, 0.f})) {
+        ps.debugEnergyTeslaArc(hipfireOrigin,
+                               previewPoints[0],
+                               previewPoints[1],
+                               energyTeslaPreviewLocked_,
+                               energyTeslaPreviewLocked_ ? energyTeslaPreviewLockStrength_ : 0.0f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset Tesla Endpoint", {165.f, 0.f})) {
+        energyTeslaGuideDist_ = 200.f;
+        energyTeslaEndpointForward_ = 136.f;
+        energyTeslaEndpointRight_ = 95.f;
+        energyTeslaEndpointUp_ = 32.f;
+        energyTeslaPreviewLockStrength_ = 1.f;
     }
 
     if (ImGui::Button("Smoke Cloud", {120.f, 0.f}))
@@ -1436,9 +1482,10 @@ void DebugUI::buildHitboxUI(
                     ImGui::PopStyleColor();
 
                     if (open) {
-                        ImGui::DragFloat3("Offset", &def.localOffset.x, 0.5f, -100.0f, 100.0f, "%.1f");
-                        ImGui::DragFloat("Radius", &def.radius, 0.1f, 0.5f, 30.0f, "%.1f");
-                        ImGui::DragFloat("Half Height", &def.halfHeight, 0.1f, 0.5f, 40.0f, "%.1f");
+                        // Values are WORLD units (player ≈ 72 tall); keep precision fine for tweaking.
+                        ImGui::DragFloat3("Offset", &def.localOffset.x, 0.05f, -40.0f, 40.0f, "%.2f");
+                        ImGui::DragFloat("Radius", &def.radius, 0.05f, 0.05f, 20.0f, "%.2f");
+                        ImGui::DragFloat("Half Height", &def.halfHeight, 0.05f, 0.0f, 20.0f, "%.2f");
                         ImGui::DragFloat3("Axis", &def.localAxis.x, 0.05f, -1.0f, 1.0f, "%.2f");
                         ImGui::TreePop();
                     }

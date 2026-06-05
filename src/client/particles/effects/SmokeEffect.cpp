@@ -48,6 +48,23 @@ void SmokeEffect::spawn(glm::vec3 pos, float radius, bool isFire)
     }
 }
 
+void SmokeEffect::spawnTrailPuff(glm::vec3 pos, float radius)
+{
+    auto* p = pool_.spawn();
+    if (!p)
+        return;
+
+    const float angle = randf() * 2.f * glm::pi<float>();
+    const float r = randf() * radius;
+    p->pos = pos + glm::vec3{std::cos(angle) * r, randRange(-radius * 0.35f, radius * 0.35f), std::sin(angle) * r};
+    p->size = randRange(9.f, 16.f);
+    p->maxLifetime = randRange(0.55f, 0.85f);
+    p->normalizedAge = 0.f;
+    p->rotation = randRange(-0.3f, 0.3f);
+    p->color = glm::vec4{0.f};
+    p->kind = 2.f;
+}
+
 void SmokeEffect::update(float dt, Registry& registry, glm::vec3 camPos, glm::vec3 camForward)
 {
     // Drive continuous emitters
@@ -66,20 +83,22 @@ void SmokeEffect::update(float dt, Registry& registry, glm::vec3 camPos, glm::ve
         if (p.normalizedAge >= 1.f)
             return false;
 
-        p.pos.y += k_upDrift * dt;
-        p.size += (120.f - p.size) * 0.3f * dt; // grow toward max
+        const bool rocketTrail = p.kind > 1.5f;
+        p.pos.y += (rocketTrail ? 6.f : k_upDrift) * dt;
+        p.size += ((rocketTrail ? 38.f : 120.f) - p.size) * 0.3f * dt; // grow toward max
         p.rotation += dt * 0.15f;
 
         // Alpha: fade in 0->0.35 during first 20% of life, out 0.35->0 during last 30%
+        const float maxAlpha = rocketTrail ? 0.22f : 0.35f;
         float alpha;
         if (p.normalizedAge < 0.2f)
-            alpha = (p.normalizedAge / 0.2f) * 0.35f;
+            alpha = (p.normalizedAge / 0.2f) * maxAlpha;
         else if (p.normalizedAge > 0.7f)
-            alpha = ((1.f - p.normalizedAge) / 0.3f) * 0.35f;
+            alpha = ((1.f - p.normalizedAge) / 0.3f) * maxAlpha;
         else
-            alpha = 0.35f;
+            alpha = maxAlpha;
 
-        const glm::vec3 baseRgb = p.kind > 0.5f ? glm::vec3{0.9f, 0.4f, 0.05f} : glm::vec3{0.4f};
+        const glm::vec3 baseRgb = p.kind > 0.5f && !rocketTrail ? glm::vec3{0.9f, 0.4f, 0.05f} : glm::vec3{0.4f};
         p.color = glm::vec4(baseRgb * alpha, alpha);
         return true;
     });

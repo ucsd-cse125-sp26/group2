@@ -3,15 +3,11 @@
 
 #include "HostConfig.hpp"
 
-#include "menus/MenuTheme.hpp"
 #include "network/ServerName.hpp"
 #include "ui/HostConfigUI.hpp"
 #include "util/InputCapture.hpp"
 
 #include <algorithm>
-#include <backends/imgui_impl_sdl3.h>
-#include <backends/imgui_impl_sdlgpu3.h>
-#include <glm/vec3.hpp>
 #include <imgui.h>
 
 bool HostConfig::init(AppContext& ctx)
@@ -21,6 +17,8 @@ bool HostConfig::init(AppContext& ctx)
     client = &ctx.client;
     hostedServer = &ctx.hostedServer;
     draft = &ctx.hostConfigState;
+    settings = &ctx.userSettings;
+    settingsPath = ctx.userSettingsPath;
 
     // Defensive: menus always run with a free desktop cursor.
     input_capture::releaseGameplayInputCapture(window);
@@ -32,8 +30,12 @@ bool HostConfig::init(AppContext& ctx)
         lastSyncedMatchConfig = latestMatchConfig;
     } else {
         const HostConfigState initialDraft = draftConfig();
-        lastSyncedMatchConfig =
-            MatchConfig{.killsToWin = initialDraft.killsToWin, .maxPlayers = initialDraft.maxPlayers};
+        lastSyncedMatchConfig = MatchConfig{
+            .killsToWin = initialDraft.killsToWin,
+            .maxPlayers = initialDraft.maxPlayers,
+            .powerupInitialSpawnDelaySeconds = initialDraft.powerupInitialSpawnDelaySeconds,
+            .powerupRespawnCooldownSeconds = initialDraft.powerupRespawnCooldownSeconds,
+        };
     }
     const HostConfigState initialDraft = draftConfig();
     lastSyncedDiscoverySettings =
@@ -44,10 +46,10 @@ bool HostConfig::init(AppContext& ctx)
 
 SDL_AppResult HostConfig::event(SDL_Event* event)
 {
-    ImGui_ImplSDL3_ProcessEvent(event);
-    if (event->type == SDL_EVENT_QUIT)
-        return SDL_APP_SUCCESS;
+    if (const SDL_AppResult result = processCommonImguiEvent(event); result != SDL_APP_CONTINUE)
+        return result;
 
+    handleSystemMenuEvent(event, systemMenu_, settings);
     return SDL_APP_CONTINUE;
 }
 
@@ -63,10 +65,7 @@ SDL_AppResult HostConfig::iterate()
     if (!renderer || !hostedServer || !draft)
         return SDL_APP_FAILURE;
 
-    ImGui_ImplSDLGPU3_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
-    menu_theme::drawBackground(renderer ? renderer->getDevice() : nullptr);
+    beginMenuFrame(renderer);
 
     const bool ownsLocalProcess = hostedServer->isRunning();
     const bool serverRunning = ownsLocalProcess || (client && client->isConnected());
@@ -104,8 +103,8 @@ SDL_AppResult HostConfig::iterate()
             pendingGoToLobby = true;
         }
     }
-    if (result.backToHomeClicked) {
-        pendingBackToHome = true;
+    if (result.backToMainMenuClicked) {
+        pendingBackToMainMenu = true;
     }
 
     const ConfirmResult confirmResult = confirm_.drawAndPoll();
@@ -114,6 +113,8 @@ SDL_AppResult HostConfig::iterate()
             if (lastSyncedMatchConfig) {
                 draft->killsToWin = lastSyncedMatchConfig->killsToWin;
                 draft->maxPlayers = lastSyncedMatchConfig->maxPlayers;
+                draft->powerupInitialSpawnDelaySeconds = lastSyncedMatchConfig->powerupInitialSpawnDelaySeconds;
+                draft->powerupRespawnCooldownSeconds = lastSyncedMatchConfig->powerupRespawnCooldownSeconds;
             }
             if (lastSyncedDiscoverySettings) {
                 draft->advertiseGlobal = lastSyncedDiscoverySettings->advertiseGlobal;
@@ -129,8 +130,14 @@ SDL_AppResult HostConfig::iterate()
         pendingConfirmAction = PendingConfirmAction::None;
     }
 
-    ImGui::Render();
-    renderer->drawFrame(glm::vec3(0.0f), 0.0f, 0.0f, 0.0f);
+    if (settings != nullptr) {
+        const SystemMenuOverlayResult menuResult = systemMenu_.render(*settings, settingsPath);
+        if (menuResult.exitToDesktop) {
+            pendingExitRequest = true;
+        }
+    }
+
+    presentMenuFrame(*renderer);
     return SDL_APP_CONTINUE;
 }
 
@@ -161,12 +168,21 @@ bool HostConfig::consumeGoToLobbyRequest()
     return true;
 }
 
-bool HostConfig::consumeBackToHomeRequest()
+bool HostConfig::consumeBackToMainMenuRequest()
 {
-    if (!pendingBackToHome)
+    if (!pendingBackToMainMenu)
         return false;
 
-    pendingBackToHome = false;
+    pendingBackToMainMenu = false;
+    return true;
+}
+
+bool HostConfig::consumeExitRequest()
+{
+    if (!pendingExitRequest)
+        return false;
+
+    pendingExitRequest = false;
     return true;
 }
 
@@ -183,6 +199,8 @@ HostConfigState HostConfig::draftConfig() const
             .serverName = std::string(server_name::k_default),
             .killsToWin = 25,
             .maxPlayers = 8,
+            .powerupInitialSpawnDelaySeconds = 240.0f,
+            .powerupRespawnCooldownSeconds = 30.0f,
         };
 
     HostConfigState result = *draft;
@@ -190,6 +208,8 @@ HostConfigState HostConfig::draftConfig() const
     result.serverName = server_name::sanitize(result.serverName);
     result.killsToWin = std::clamp(result.killsToWin, 1, 100);
     result.maxPlayers = std::clamp(result.maxPlayers, 2, 128);
+    result.powerupInitialSpawnDelaySeconds = std::clamp(result.powerupInitialSpawnDelaySeconds, 0.0f, 600.0f);
+    result.powerupRespawnCooldownSeconds = std::clamp(result.powerupRespawnCooldownSeconds, 1.0f, 300.0f);
     return result;
 }
 
@@ -220,6 +240,10 @@ bool HostConfig::hasUnsavedServerChanges() const
 
     return std::clamp(draft->killsToWin, 1, 100) != lastSyncedMatchConfig->killsToWin ||
            std::clamp(draft->maxPlayers, 2, 128) != lastSyncedMatchConfig->maxPlayers ||
+           std::clamp(draft->powerupInitialSpawnDelaySeconds, 0.0f, 600.0f) !=
+               lastSyncedMatchConfig->powerupInitialSpawnDelaySeconds ||
+           std::clamp(draft->powerupRespawnCooldownSeconds, 1.0f, 300.0f) !=
+               lastSyncedMatchConfig->powerupRespawnCooldownSeconds ||
            draft->advertiseGlobal != lastSyncedDiscoverySettings->advertiseGlobal ||
            draft->advertiseLan != lastSyncedDiscoverySettings->advertiseLan;
 }
@@ -229,12 +253,18 @@ bool HostConfig::updateServerSettings()
     if (!client || !draft)
         return false;
 
-    const MatchConfig config{.killsToWin = std::clamp(draft->killsToWin, 1, 100),
-                             .maxPlayers = std::clamp(draft->maxPlayers, 2, 128)};
+    const MatchConfig config{
+        .killsToWin = std::clamp(draft->killsToWin, 1, 100),
+        .maxPlayers = std::clamp(draft->maxPlayers, 2, 128),
+        .powerupInitialSpawnDelaySeconds = std::clamp(draft->powerupInitialSpawnDelaySeconds, 0.0f, 600.0f),
+        .powerupRespawnCooldownSeconds = std::clamp(draft->powerupRespawnCooldownSeconds, 1.0f, 300.0f),
+    };
     const DiscoverySettings discoverySettings{.advertiseGlobal = draft->advertiseGlobal,
                                               .advertiseLan = draft->advertiseLan};
     draft->killsToWin = config.killsToWin;
     draft->maxPlayers = config.maxPlayers;
+    draft->powerupInitialSpawnDelaySeconds = config.powerupInitialSpawnDelaySeconds;
+    draft->powerupRespawnCooldownSeconds = config.powerupRespawnCooldownSeconds;
     if (!client->sendMatchConfig(config)) {
         lastError = "Failed to send match settings update";
         return false;

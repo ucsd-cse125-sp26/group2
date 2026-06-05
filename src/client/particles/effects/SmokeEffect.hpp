@@ -32,6 +32,9 @@ public:
     /// @param isFire If true, spawn fire-colored particles instead of grey smoke.
     void spawn(glm::vec3 pos, float radius, bool isFire = false);
 
+    /// @brief Spawn a compact, short-lived smoke puff for rocket trails.
+    void spawnTrailPuff(glm::vec3 pos, float radius);
+
     [[nodiscard]] const SmokeParticle* data() const { return sorted_.data(); }
     [[nodiscard]] uint32_t count() const { return static_cast<uint32_t>(sorted_.size()); }
 

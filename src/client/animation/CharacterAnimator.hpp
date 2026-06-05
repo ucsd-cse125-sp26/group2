@@ -8,6 +8,7 @@
 #include "SkinningBackend.hpp"
 #include "ecs/components/AnimSnapshot.hpp"
 #include "ecs/components/GripPose.hpp"
+#include "ecs/components/WeaponHoldPose.hpp"
 
 #include <array>
 #include <glm/glm.hpp>
@@ -60,55 +61,9 @@ struct ClipSampler
     bool active = false;        ///< False = slot unused this frame.
 };
 
-/// @brief Number of fingers per hand. Used as the iteration count for grip-pose
-/// blending in CharacterAnimator. The IK finger targets that previously lived
-/// here were removed in Phase E — finger contact is fully GripPose-driven now.
+/// @brief Number of fingers per hand. Iteration count for the FK finger pose
+/// applied in CharacterAnimator::applyWeaponHoldPose.
 static constexpr size_t kHandFingerIkCount = 5;
-
-/// @brief Model-space IK target for one player hand.
-///
-/// Phase E removed the per-finger IK target arrays (fingerPositionsModel /
-/// fingerEnabled) — finger pose is now driven by the authored GripPose blend
-/// in HandIkTargets, not by per-frame iterative finger IK.
-struct ArmIkTarget
-{
-    glm::vec3 positionModel{0.0f};
-    glm::vec3 elbowPositionModel{0.0f};
-    glm::quat orientationModel{1.0f, 0.0f, 0.0f, 0.0f};
-    bool enabled = false;
-    bool elbowEnabled = false;
-    bool orientationEnabled = false;
-    /// Debug toggle: when false, the analytical solver skips the shoulder
-    /// swing/twist cone, the elbow hinge clamp, and the wrist twist clamp.
-    /// Default OFF — current clamps don't contribute useful pose-quality
-    /// improvements and tend to fight anchor authoring. Will be revisited
-    /// once the constraint geometry is tuned to the rig.
-    bool enableJointConstraints = false;
-    /// Debug toggle: when false, the IK rotation magnitudes are NOT slerped
-    /// toward identity when the target is past `upperLen + foreLen`. The arm
-    /// will reach as far as physically possible without fading out. Helpful
-    /// when tuning anchors that sit near the edge of reach.
-    bool enableReachFade = true;
-};
-
-/// @brief Optional per-frame IK targets for both hands.
-///
-/// Carries arm-IK targets (positionModel, elbowPositionModel, ...) and
-/// per-hand grip poses (Phase C+ of the AAA IK overhaul). When a grip-pose
-/// pointer is non-null, CharacterAnimator blends the animated finger
-/// local-space rotations toward the authored pose by the matching
-/// `*GripWeight` (1.0 = fully gripped, 0.0 = ignore pose). Grip blending
-/// is applied AFTER arm IK so the finger pose is anchored at the wrist
-/// position determined by the arm.
-struct HandIkTargets
-{
-    ArmIkTarget left;
-    ArmIkTarget right;
-    const GripPose* leftGripPose = nullptr;
-    const GripPose* rightGripPose = nullptr;
-    float leftGripWeight = 0.0f;
-    float rightGripWeight = 0.0f;
-};
 
 /// @brief Per-entity animator.
 ///
@@ -178,36 +133,21 @@ public:
     /// @brief Playback-speed multiplier applied in debug-override mode.
     void setDebugPlaybackSpeed(float mul) noexcept;
 
-    /// @brief Move the arm chains so hands reach weapon-authored grip targets.
+    /// @brief Pose both arms (and the gun-holding fingers) for a held weapon.
     ///
-    /// Targets are in rig model space and should be applied after sampling for
-    /// the frame, before copying joint/skinning matrices into renderer buffers.
-    /// Convenience wrapper around `applyArmIk` + `applyGripPose` + `updateSkinMatrices`.
-    void applyHandIkTargets(const HandIkTargets& targets);
-
-    /// @brief Apply two-bone arm IK + optional wrist orientation to one arm.
+    /// Pure forward kinematics — no IK solving. Each bone in the chain
+    /// Shoulder → UpperArm → ForeArm → Hand (plus every finger joint) is driven
+    /// to its authored local rotation from `pose`, processed root → tip so the
+    /// chain stays connected. `weight` ∈ [0,1] slerps from the sampled animation
+    /// toward the authored hold pose (used for the weapon-swap fade); 1.0 fully
+    /// replaces the arm animation with the static hold.
     ///
-    /// Mutates `jointModelMatrices()` in place. The caller is responsible for
-    /// calling `updateSkinMatrices()` once after all per-frame IK + grip
-    /// operations have run, so the LBS palette reflects the final pose.
-    ///
-    /// Splitting per-arm lets the right hand be IK'd first (placing the
-    /// weapon, which is parented to it) and the left-hand target then be
-    /// derived from the resulting weapon world transform — so the support
-    /// hand actually grabs the gun where it is, not where some precomputed
-    /// player-relative offset thinks it should be.
-    void applyArmIk(bool isLeft, const ArmIkTarget& target);
-
-    /// @brief Blend an authored GripPose into the animated finger rotations
-    /// for one hand. Same semantics as the grip-pose half of
-    /// `applyHandIkTargets`, but per-hand.
-    void applyGripPose(bool isLeft, const GripPose& pose, float weight);
+    /// Mutates `jointModelMatrices()` in place and recomputes `skinMatrices()`
+    /// at the end. Call once per frame after `update()`/`renderFromServer()`.
+    void applyWeaponHoldPose(const WeaponHoldPose& pose, float weight);
 
     /// @brief Recompute `skinMatrices()` = jointModelMats * inverseBindMats.
-    ///
-    /// Call once after `applyArmIk` / `applyGripPose` calls have settled the
-    /// per-bone model matrices for the frame. The LBS skinning palette and
-    /// hitbox-tracking code both read these matrices.
+    /// The LBS skinning palette and hitbox-tracking code both read these.
     void updateSkinMatrices();
 
     /// @brief Phase F additive recoil kick.
@@ -224,12 +164,9 @@ public:
     /// @brief Number of joints in the underlying rig.
     [[nodiscard]] int numJoints() const noexcept;
 
-    /// @brief Current high-level animator mode, mapped to the values used by
-    /// `HoldStance` in ViewmodelConfig.hpp. Used by Game.cpp to pick the right
-    /// per-stance weapon anchor each frame (crouched-hold vs standing-hold
-    /// etc.). Returns the underlying int of CharacterAnimator's private Mode
-    /// enum — callers should treat 0..N as opaque and translate via the
-    /// codebase's MapAnimModeToHoldStance helper.
+    /// @brief Current high-level animator mode as the underlying int of the
+    /// private Mode enum (0 = Locomotion, then Crouch, Airborne, Slide, WallRun,
+    /// …). Callers should treat the value as opaque.
     [[nodiscard]] int currentModeValue() const noexcept;
 
     /// @brief Freeze animation playback. While frozen, `update()` and
@@ -269,13 +206,22 @@ private:
     /// wallrun-mirror post-processing.
     void runSamplingAndSkinning(const AnimationInputs& inputs);
 
-    /// @brief Shared implementation behind `applyHandIkTargets`,
-    /// `applyArmIk`, and `applyGripPose`. When `finalize` is true the
-    /// skin-matrix palette is recomputed at the end — used by the all-in-one
-    /// public entry point. When false, the caller is responsible for invoking
-    /// `updateSkinMatrices()` once after staging multiple per-arm operations.
-    void applyHandIkTargetsImpl(const HandIkTargets& targets, bool finalize);
-
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+/// @brief Grounding reference that aligns the IDLE pose's feet with the floor.
+///
+/// The renderer grounds a character by aligning the rig's bind-pose lowest
+/// vertex (`bindMeshMinY`) with the bottom of the collision AABB. Mixamo clips
+/// bend the knees slightly, so the *animated* feet sit a constant amount above
+/// the straight-legged T-pose bind — grounding off the bind makes every clip
+/// appear lifted by that amount. This samples the Idle clip once and returns
+/// `bindMeshMinY` shifted by the idle-vs-bind foot-joint Y delta, so all clips
+/// (which share the idle floor reference) sit on the ground. Falls back to
+/// `bindMeshMinY` if the rig has no recognisable foot joints or no Idle clip.
+///
+/// @param orientationFix  Same rotation passed to CharacterRig::loadFromFBX,
+///        so the bind foot positions are measured in the rendered frame.
+[[nodiscard]] float computeIdleGroundedMinY(const CharacterRig& rig, const AnimationLibrary& library,
+                                            const glm::quat& orientationFix, float bindMeshMinY);

@@ -77,15 +77,29 @@ enum class HudIcon : uint8_t
     Scoreboard,
     EnemyDiamond,
     Fall,
+    DashAbilityIcon,
     Grapple,
+    GrappleAbilityIcon,
     Gravity,
+    GravityAbilityIcon,
     Grenade,
+    FragGrenadeIcon,
+    MolotovGrenadeIcon,
+    StickyGrenadeIcon,
     Headshot,
     Hp,
     PlayerArrow,
     Shield,
     Skull,
     Tactical,
+    RecallAbilityIcon,
+    TopDecal,
+    BottomDecal,
+    WeaponFrame,
+    ARIcon,
+    RocketLauncherIcon,
+    RailGunIcon,
+    TrackingGunIcon,
 };
 
 /// @brief Visual category for generic transient HUD popup messages.
@@ -173,8 +187,10 @@ struct HudDamageAccum
 struct HudTeamMemberStatus
 {
     std::string name;
+    HudColor color = HudColor::white();
     int health = 100;
     bool isAlive = true;
+    bool isLocal = false;
     int kills = 0;
     int deaths = 0;
     int ping = 0;
@@ -356,6 +372,9 @@ struct HudGameState
     int abilityLevel = 0;
     int ammoClip = 30, ammoReserve = 90;
     int weaponId = 0;
+    int primaryWeaponId = 0;   ///< WeaponType ordinal in the primary slot.
+    int secondarySlotWeaponId = 2; ///< WeaponType ordinal in the secondary slot.
+    int activeWeaponSlot = 0;      ///< 0 = primary, 1 = secondary.
     bool railgunScoped = false;    ///< True while the local player holds right click with the railgun equipped.
     float railgunChargeTime = 0.f; ///< Current GunInstance::chargeTime for the equipped railgun.
     float roundTimeRemaining = 0.f;

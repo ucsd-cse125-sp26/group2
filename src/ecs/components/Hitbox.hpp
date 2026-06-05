@@ -82,9 +82,9 @@ struct HitboxDef
     std::string boneName;                       ///< Skeleton joint name (e.g. "mixamorig:Head").
     int boneIndex = -1;                         ///< Resolved runtime joint index (-1 = unresolved).
     BodyRegion region = BodyRegion::UpperTorso; ///< Which body part this covers.
-    glm::vec3 localOffset{0.0f};                ///< Offset from bone origin in bone-local space.
-    float radius = 4.0f;                        ///< Capsule radius (rig model-space units).
-    float halfHeight = 4.0f;                    ///< Capsule half-height of centerline.
+    glm::vec3 localOffset{0.0f};                ///< Offset from bone origin, bone-local dir, WORLD-unit magnitude.
+    float radius = 4.0f;                        ///< Capsule radius (WORLD units; scale-invariant across rigs).
+    float halfHeight = 4.0f;                    ///< Capsule half-height of centerline (WORLD units).
     glm::vec3 localAxis{0.0f, 1.0f, 0.0f};      ///< Capsule axis direction in bone-local space.
 };
 
@@ -161,9 +161,14 @@ struct HitboxRig
 
     /// @brief Build the default Mixamo-rig hitbox definitions (12 capsules).
     ///
-    /// Capsule dimensions are in the rig's model space (before `rigScale` is
-    /// applied).  Values are tuned for a standard Mixamo mannequin (~170 cm
-    /// tall in model space).
+    /// Capsule dimensions are in WORLD units (the same units as the player AABB:
+    /// standing height = 2 * k_standingHalfHeight = 72). They are scale-invariant
+    /// — `updateHitboxes` divides the bone-local offset by `rigScale` so the same
+    /// values produce the same physical capsule on any rig regardless of its
+    /// model-space scale (so re-exporting the model at a different scale no longer
+    /// breaks the hitboxes). Values below are a starting point converted from the
+    /// previous ~170-unit-model tuning; expect to hand-tune against the current
+    /// character.
     static HitboxRig buildMixamoDefault()
     {
         HitboxRig rig;
@@ -176,20 +181,20 @@ struct HitboxRig
         // Therefore offsets that push the capsule ALONG the bone (toward the child
         // joint) use negative Y.  The localAxis {0,-1,0} makes halfHeight extend
         // in the -Y direction (along the bone) so the capsule covers from the bone
-        // origin toward the next joint.
-        //                boneName                        region                       offset                   radius  halfH   axis
-        defs.push_back({"mixamorig:Head",          -1, BodyRegion::Head,          {0,    8,   2.5f},     13.7f,  2.4f, {0,-1,0}});
-        defs.push_back({"mixamorig:Neck",          -1, BodyRegion::Neck,          {0,    3,   1.5f},      6.0f,  2.0f, {0,-1,0}});
-        defs.push_back({"mixamorig:Spine2",        -1, BodyRegion::UpperTorso,    {0,    0.5f,0},        15.4f,  3.9f, {0,-1,0}});
-        defs.push_back({"mixamorig:Spine1",        -1, BodyRegion::LowerTorso,    {0,  -22.5f,-2.0f},    16.3f,  0.5f, {0,-1,0}});
-        defs.push_back({"mixamorig:LeftArm",       -1, BodyRegion::LeftUpperArm,  {0,   10,   0},         6.7f, 12.0f, {0,-1,0}});
-        defs.push_back({"mixamorig:LeftForeArm",   -1, BodyRegion::LeftLowerArm,  {0,   23,   0},         6.0f, 18.3f, {0,-1,0}});
-        defs.push_back({"mixamorig:RightArm",      -1, BodyRegion::RightUpperArm, {0,   10,   0},         6.7f, 12.0f, {0,-1,0}});
-        defs.push_back({"mixamorig:RightForeArm",  -1, BodyRegion::RightLowerArm, {0,   23,   0},         6.0f, 18.3f, {0,-1,0}});
-        defs.push_back({"mixamorig:LeftUpLeg",     -1, BodyRegion::LeftUpperLeg,  {-2.5f,24.5f,0},       10.5f, 15.4f, {0,-1,0}});
-        defs.push_back({"mixamorig:LeftLeg",       -1, BodyRegion::LeftLowerLeg,  {0,   24.5f,0},         8.3f, 20.0f, {0,-1,0}});
-        defs.push_back({"mixamorig:RightUpLeg",    -1, BodyRegion::RightUpperLeg, {2.5f,24.5f,0},        10.5f, 15.4f, {0,-1,0}});
-        defs.push_back({"mixamorig:RightLeg",      -1, BodyRegion::RightLowerLeg, {0,   24.5f,0},         8.3f, 20.0f, {0,-1,0}});
+        // origin toward the next joint. All magnitudes are WORLD units (player = 72 tall).
+        //                boneName                        region                       offset                radius  halfH  axis
+        defs.push_back({"mixamorig:Head",          -1, BodyRegion::Head,          {0,    3.4f, 1.1f},    5.8f,  1.0f, {0,-1,0}});
+        defs.push_back({"mixamorig:Neck",          -1, BodyRegion::Neck,          {0,    1.3f, 0.6f},    2.5f,  0.8f, {0,-1,0}});
+        defs.push_back({"mixamorig:Spine2",        -1, BodyRegion::UpperTorso,    {0,   -2.8f, 0},       7.45f, 2.5f, {0,-1,0}});
+        defs.push_back({"mixamorig:Spine1",        -1, BodyRegion::LowerTorso,    {0,   -9.05f,-0.8f},   8.0f,  0.9f, {0,-1,0}});
+        defs.push_back({"mixamorig:LeftArm",       -1, BodyRegion::LeftUpperArm,  {0,    4.2f, 0},       2.8f,  5.1f, {0,-1,0}});
+        defs.push_back({"mixamorig:LeftForeArm",   -1, BodyRegion::LeftLowerArm,  {0,    9.7f, 0},       2.5f,  7.7f, {0,-1,0}});
+        defs.push_back({"mixamorig:RightArm",      -1, BodyRegion::RightUpperArm, {0,    4.2f, 0},       2.8f,  5.1f, {0,-1,0}});
+        defs.push_back({"mixamorig:RightForeArm",  -1, BodyRegion::RightLowerArm, {0,    9.7f, 0},       2.5f,  7.7f, {0,-1,0}});
+        defs.push_back({"mixamorig:LeftUpLeg",     -1, BodyRegion::LeftUpperLeg,  {-1.1f,10.4f, 0},      4.4f,  6.5f, {0,-1,0}});
+        defs.push_back({"mixamorig:LeftLeg",       -1, BodyRegion::LeftLowerLeg,  {0,   10.4f, 0},       4.4f,  8.5f, {0,-1,0}});
+        defs.push_back({"mixamorig:RightUpLeg",    -1, BodyRegion::RightUpperLeg, {1.1f, 10.4f, 0},      4.4f,  6.5f, {0,-1,0}});
+        defs.push_back({"mixamorig:RightLeg",      -1, BodyRegion::RightLowerLeg, {0,   10.4f, 0},       4.4f,  8.5f, {0,-1,0}});
         // clang-format on
 
         return rig;

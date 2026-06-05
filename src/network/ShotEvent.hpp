@@ -11,12 +11,13 @@
 /// @brief Type of particle effect to spawn on the client.
 enum class ParticleEffectType : uint8_t
 {
-    BulletTracer, ///< pos1=origin, pos2=direction, param=distance
-    HitscanBeam,  ///< pos1=origin, pos2=hitPos, weaponType
-    Impact,       ///< pos1=position, pos2=normal, surfaceType, weaponType
-    Explosion,    ///< pos1=position, param=blastRadius
-    Smoke,        ///< pos1=position, param=radius
-    Fire,         ///< Persistent flame billboards from a FireField. pos1=position, param=radius.
+    BulletTracer,  ///< pos1=origin, pos2=direction, param=distance
+    HitscanBeam,   ///< pos1=origin, pos2=hitPos, weaponType
+    Impact,        ///< pos1=position, pos2=normal, surfaceType, weaponType
+    Explosion,     ///< pos1=position, param=blastRadius
+    Smoke,         ///< pos1=position, param=radius
+    Fire,          ///< Persistent flame billboards from a FireField. pos1=position, param=radius.
+    PowerupPickup, ///< pos1=pickup position, source=player that collected it.
 };
 
 /// @brief Wire-format particle event broadcast from server to all clients.

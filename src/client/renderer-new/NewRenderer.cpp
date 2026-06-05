@@ -98,7 +98,12 @@ bool NewRenderer::init(SDL_Window* window)
     }
 
     if (!createGeometryLightMapPipeline()) {
-        SDL_Log("NewRenderer: failed to create geometry pipeline: %s", SDL_GetError());
+        SDL_Log("NewRenderer: failed to create geometry lightmap pipeline: %s", SDL_GetError());
+        return false;
+    }
+
+    if (!createEntityChamsPipeline()) {
+        SDL_Log("NewRenderer: failed to create entity chams pipeline: %s", SDL_GetError());
         return false;
     }
 
@@ -107,17 +112,17 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    if (!createDepthRes0Pipeline()) {
+    if (!createDepthRes0Pipeline(true)) {
         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
         return false;
     }
 
-    if (!createDepthRes1Pipeline()) {
+    if (!createDepthRes1Pipeline(true)) {
         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
         return false;
     }
 
-    if (!createDepthRes2Pipeline()) {
+    if (!createDepthRes2Pipeline(true)) {
         SDL_Log("NewRenderer: failed to create depth pipeline: %s", SDL_GetError());
         return false;
     }
@@ -132,7 +137,22 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    sampler_ = Boilerplate::createLinearRepeatSampler(device_,false);
+    if (!createSsaoPipeline()) {
+        SDL_Log("NewRenderer: failed to create SSAO pipeline: %s", SDL_GetError());
+        return false;
+    }
+
+    if (!createSsaoBlurPipeline()) {
+        SDL_Log("NewRenderer: failed to create SSAO blur pipeline: %s", SDL_GetError());
+        return false;
+    }
+
+    if (!createSsaoCompositePipeline()) {
+        SDL_Log("NewRenderer: failed to create SSAO composite pipeline: %s", SDL_GetError());
+        return false;
+    }
+
+    sampler_ = Boilerplate::createLinearRepeatSampler(device_, false);
     if (!sampler_) {
         SDL_Log("NewRenderer: failed to create sampler: %s", SDL_GetError());
         return false;
@@ -150,13 +170,13 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    staticDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_, SDL_GPU_FILTER_LINEAR);
+    staticDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_, SDL_GPU_FILTER_LINEAR, true);
     if (!staticDepthSampler_) {
         SDL_Log("NewRenderer: failed to create depth sampler: %s", SDL_GetError());
         return false;
     }
 
-    dynamicDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_, SDL_GPU_FILTER_NEAREST);
+    dynamicDepthSampler_ = Boilerplate::createLinearComparisonSampler(device_, SDL_GPU_FILTER_NEAREST, true);
     if (!dynamicDepthSampler_) {
         SDL_Log("NewRenderer: failed to create depth sampler: %s", SDL_GetError());
         return false;
@@ -178,6 +198,7 @@ bool NewRenderer::init(SDL_Window* window)
     camera_ = NewCamera();
 
     SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    // Player character rig stays untextured (debug shader + chams/killcam path).
     skinnedRenderer_.init(device_, hdrFormat, shaderFormat_);
 
     dynamicShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, shadowSize, shadowSize, true, MAX_POINT_LIGHTS);
@@ -186,7 +207,8 @@ bool NewRenderer::init(SDL_Window* window)
         return false;
     }
 
-    staticShadowMaps_ = Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
+    staticShadowMaps_ =
+        Boilerplate::createEmptyTextureD32F(device_, staticShadowSize, staticShadowSize, true, MAX_POINT_LIGHTS);
     if (!staticShadowMaps_) {
         SDL_Log("NewRenderer: failed to create static point-light shadow map array");
         return false;
@@ -224,6 +246,55 @@ bool NewRenderer::init(SDL_Window* window)
     if (!loadLightMap()) {
         SDL_Log("NewRenderer: failed to load LightMap, reverting to in game lighting");
     }
+
+    // Hardcoded static map point lights. (Restored after the main merge dropped
+    // them — main's NewRenderer only set static lights from glTF-embedded model
+    // lights, but the map relies on these authored positions.)
+    float globalIntensity = 50000;
+    std::vector<PointLight> sampleLights;
+    PointLight pl0{};
+    pl0.position = glm::vec3(300, 100.0f, 500);
+    pl0.intensity = globalIntensity;
+    pl0.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl0.range = 500.0f;
+    sampleLights.push_back(pl0);
+
+    PointLight pl1{};
+    pl1.position = glm::vec3(1920.0f, 450.0f, 1209.0f);
+    pl1.intensity = globalIntensity;
+    pl1.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl1.range = 500.0f;
+    sampleLights.push_back(pl1);
+
+    PointLight pl2{};
+    pl2.position = glm::vec3(1315.0f, 450.0f, -651.0f);
+    pl2.intensity = globalIntensity;
+    pl2.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl2.range = 500.0f;
+    sampleLights.push_back(pl2);
+
+    PointLight pl3{};
+    pl3.position = glm::vec3(31.0f, 450.0f, -1302.0f);
+    pl3.intensity = globalIntensity;
+    pl3.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl3.range = 500.0f;
+    sampleLights.push_back(pl3);
+
+    PointLight pl4{};
+    pl4.position = glm::vec3(-1560.0f, -239.0f, 2079.0f);
+    pl4.intensity = globalIntensity;
+    pl4.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl4.range = 500.0f;
+    sampleLights.push_back(pl4);
+
+    PointLight pl5{};
+    pl5.position = glm::vec3(-1144.0f, 316.0f, -854.0f);
+    pl5.intensity = globalIntensity * 100;
+    pl5.color = glm::vec3(1.0f, 0.7f, 0.5f);
+    pl5.range = 500.0f;
+    sampleLights.push_back(pl5);
+
+    setStaticPointLights(std::move(sampleLights));
 
     return true;
 }
@@ -288,6 +359,66 @@ bool NewRenderer::createTonemapPipeline()
     return tonemapPipeline_ != nullptr;
 }
 
+bool NewRenderer::createSsaoPipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/hud.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/ssao.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = 2;
+    fragmentShader.uniformBufferCount = 1;
+
+    const Boilerplate::VertexInputLayout vertexLayout{};
+    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    ssaoPipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, hdrFormat, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, false);
+
+    return ssaoPipeline_ != nullptr;
+}
+
+bool NewRenderer::createSsaoCompositePipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/hud.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/ssao_composite.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = 3;
+    fragmentShader.uniformBufferCount = 1;
+
+    const Boilerplate::VertexInputLayout vertexLayout{};
+    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    ssaoCompositePipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, hdrFormat, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, false);
+
+    return ssaoCompositePipeline_ != nullptr;
+}
+
+bool NewRenderer::createSsaoBlurPipeline()
+{
+    Boilerplate::ShaderInfo vertexShader{};
+    vertexShader.path = "shaders-new/hud.vert";
+    vertexShader.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+
+    Boilerplate::ShaderInfo fragmentShader{};
+    fragmentShader.path = "shaders-new/ssao_blur.frag";
+    fragmentShader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShader.samplerCount = 3;
+    fragmentShader.uniformBufferCount = 1;
+
+    const Boilerplate::VertexInputLayout vertexLayout{};
+    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    ssaoBlurPipeline_ = Boilerplate::createGraphicsPipeline(
+        device_, hdrFormat, shaderFormat_, vertexShader, fragmentShader, vertexLayout, false, false);
+
+    return ssaoBlurPipeline_ != nullptr;
+}
+
 bool NewRenderer::createGeometryPipeline()
 {
     Boilerplate::ShaderInfo vertexShader{};
@@ -318,9 +449,9 @@ bool NewRenderer::createGeometryPipeline()
         Boilerplate::makeAttribute(4, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, lightMapUV)),
     };
 
-    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    const std::vector<SDL_GPUTextureFormat> colorFormats{getHdrFormat(), getHdrFormat()};
     geometryPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, hdrFormat, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
+        device_, colorFormats, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
 
     return geometryPipeline_ != nullptr;
 }
@@ -355,14 +486,83 @@ bool NewRenderer::createGeometryLightMapPipeline()
         Boilerplate::makeAttribute(4, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, lightMapUV)),
     };
 
-    SDL_GPUTextureFormat hdrFormat = getHdrFormat();
+    const std::vector<SDL_GPUTextureFormat> colorFormats{getHdrFormat(), getHdrFormat()};
     geometryLightMapPipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, hdrFormat, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
+        device_, colorFormats, shaderFormat_, vertexShader, fragmentShader, vertexLayout, true, true);
 
     return geometryLightMapPipeline_ != nullptr;
 }
 
-SDL_GPUGraphicsPipeline* NewRenderer::createDepthPipeline(const SDL_GPURasterizerState &rasterizer_state) const
+bool NewRenderer::createEntityChamsPipeline()
+{
+    Boilerplate::ShaderInfo vertexShaderInfo{};
+    vertexShaderInfo.path = "shaders-new/geometry.vert";
+    vertexShaderInfo.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+    vertexShaderInfo.uniformBufferCount = 2;
+
+    Boilerplate::ShaderInfo fragmentShaderInfo{};
+    fragmentShaderInfo.path = "shaders-new/chams.frag";
+    fragmentShaderInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShaderInfo.uniformBufferCount = 1;
+
+    SDL_GPUShader* vertexShader = Boilerplate::loadShader(device_, vertexShaderInfo, shaderFormat_);
+    SDL_GPUShader* fragmentShader = Boilerplate::loadShader(device_, fragmentShaderInfo, shaderFormat_);
+    if (!vertexShader || !fragmentShader) {
+        if (vertexShader)
+            SDL_ReleaseGPUShader(device_, vertexShader);
+        if (fragmentShader)
+            SDL_ReleaseGPUShader(device_, fragmentShader);
+        return false;
+    }
+
+    SDL_GPUVertexBufferDescription vertexBufferDescription{};
+    vertexBufferDescription.slot = 0;
+    vertexBufferDescription.pitch = sizeof(Vertex);
+    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+    std::vector<SDL_GPUVertexBufferDescription> bufferDescriptions = {vertexBufferDescription};
+    std::vector<SDL_GPUVertexAttribute> attributes = {
+        Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, position)),
+        Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, normal)),
+        Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, texUV)),
+        Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Vertex, tangent)),
+        Boilerplate::makeAttribute(4, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, lightMapUV)),
+    };
+
+    SDL_GPUVertexInputState vertexInputState{};
+    vertexInputState.num_vertex_buffers = static_cast<Uint32>(bufferDescriptions.size());
+    vertexInputState.vertex_buffer_descriptions = bufferDescriptions.data();
+    vertexInputState.num_vertex_attributes = static_cast<Uint32>(attributes.size());
+    vertexInputState.vertex_attributes = attributes.data();
+
+    SDL_GPUColorTargetDescription colorTargetDesc{};
+    colorTargetDesc.format = getHdrFormat();
+    colorTargetDesc.blend_state = Boilerplate::OVER_BLEND_MODE;
+
+    SDL_GPUGraphicsPipelineCreateInfo info{};
+    info.vertex_shader = vertexShader;
+    info.fragment_shader = fragmentShader;
+    info.vertex_input_state = vertexInputState;
+    info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    info.target_info.color_target_descriptions = &colorTargetDesc;
+    info.target_info.num_color_targets = 1;
+    info.target_info.has_depth_stencil_target = true;
+    info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER;
+    info.depth_stencil_state.enable_depth_test = true;
+    info.depth_stencil_state.enable_depth_write = false;
+    info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+    entityChamsPipeline_ = SDL_CreateGPUGraphicsPipeline(device_, &info);
+
+    SDL_ReleaseGPUShader(device_, vertexShader);
+    SDL_ReleaseGPUShader(device_, fragmentShader);
+
+    return entityChamsPipeline_ != nullptr;
+}
+
+SDL_GPUGraphicsPipeline* NewRenderer::createDepthPipeline(const SDL_GPURasterizerState& rasterizer_state) const
 {
     Boilerplate::ShaderInfo vertexShader{};
     vertexShader.path = "shaders-new/geometry_depth.vert";
@@ -395,45 +595,56 @@ SDL_GPUGraphicsPipeline* NewRenderer::createDepthPipeline(const SDL_GPURasterize
     depthPipelineDesc.shaderFormat = shaderFormat_;
     depthPipelineDesc.vertexInputLayout = &vertexLayout;
     depthPipelineDesc.colorTarget = nullptr;
+    depthPipelineDesc.reverseZ = true;
     depthPipelineDesc.depthTest = true;
     depthPipelineDesc.depthWrite = true;
 
     depthPipelineDesc.rasterizer_state = rasterizer_state;
 
-
     return Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
 }
-bool NewRenderer::createDepthRes0Pipeline()
+bool NewRenderer::createDepthRes0Pipeline(bool reverseZ)
 {
     SDL_GPURasterizerState rasterizer_state{};
     rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
     rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     rasterizer_state.enable_depth_bias = true;
-    rasterizer_state.depth_bias_constant_factor = 500.0f;
-    rasterizer_state.depth_bias_slope_factor = 1.0f;
-    rasterizer_state.depth_bias_clamp = 0.005f;
+    rasterizer_state.depth_bias_constant_factor = 400.0f;
+    rasterizer_state.depth_bias_slope_factor = 1.5f;
+    rasterizer_state.depth_bias_clamp = 0.0005f;
+
+    if (reverseZ) {
+        rasterizer_state.depth_bias_constant_factor *= -1.0f;
+        rasterizer_state.depth_bias_slope_factor *= -1.0f;
+        rasterizer_state.depth_bias_clamp *= -1.0f;
+    }
 
     depthRes0Pipeline_ = createDepthPipeline(rasterizer_state);
     return depthRes0Pipeline_ != nullptr;
 }
 
-bool NewRenderer::createDepthRes1Pipeline()
+bool NewRenderer::createDepthRes1Pipeline(bool reverseZ)
 {
     SDL_GPURasterizerState rasterizer_state{};
     rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
     rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
     rasterizer_state.enable_depth_bias = true;
-    rasterizer_state.depth_bias_constant_factor = 500.0f;
-    rasterizer_state.depth_bias_slope_factor = 10.0f;
-    rasterizer_state.depth_bias_clamp = 0.1f;
+    rasterizer_state.depth_bias_constant_factor = 600.0f;
+    rasterizer_state.depth_bias_slope_factor = 1.5f;
+    rasterizer_state.depth_bias_clamp = 0.005f;
 
+    if (reverseZ) {
+        rasterizer_state.depth_bias_constant_factor *= -1.0f;
+        rasterizer_state.depth_bias_slope_factor *= -1.0f;
+        rasterizer_state.depth_bias_clamp *= -1.0f;
+    }
     depthRes1Pipeline_ = createDepthPipeline(rasterizer_state);
     return depthRes1Pipeline_ != nullptr;
 }
 
-bool NewRenderer::createDepthRes2Pipeline()
+bool NewRenderer::createDepthRes2Pipeline(bool reverseZ)
 {
     SDL_GPURasterizerState rasterizer_state{};
     rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
@@ -443,6 +654,12 @@ bool NewRenderer::createDepthRes2Pipeline()
     rasterizer_state.depth_bias_constant_factor = 100.0f;
     rasterizer_state.depth_bias_slope_factor = 1.0f;
     rasterizer_state.depth_bias_clamp = 0.03f;
+
+    if (reverseZ) {
+        rasterizer_state.depth_bias_constant_factor *= -1.0f;
+        rasterizer_state.depth_bias_slope_factor *= -1.0f;
+        rasterizer_state.depth_bias_clamp *= -1.0f;
+    }
 
     depthRes2Pipeline_ = createDepthPipeline(rasterizer_state);
     return depthRes2Pipeline_ != nullptr;
@@ -501,6 +718,11 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         return;
     }
 
+    // Set the main camera before any per-frame skinned culling/uploads or
+    // first-frame shadow work so every pass sees this frame's matrices.
+    float fov = 60.0f;
+    setMainCamera(eye, yaw, pitch, roll, width, height, fov);
+
     // Per-frame uploads (skinning palette/instances, etc.) happen BEFORE
     // the first render pass so the copy is sequenced ahead of the draws.
     {
@@ -517,20 +739,30 @@ void NewRenderer::drawFrame(glm::vec3 eye, float yaw, float pitch, float roll)
         firstFrame_ = false;
     }
 
-    drawToShadowMap(cmd, dynamicShadowMaps_,1, false, true, true,STATIC);
+    drawToShadowMap(cmd, dynamicShadowMaps_, 1, false, true, true, STATIC);
 
     Uint8 movingRes = 1;
 #ifdef HAVE_MSL_SHADERS
     movingRes = 2;
 #endif
-    drawToShadowMap(cmd, movingLightShadowMaps_,movingRes, true, true, true,MOVING);
-
-    float fov = 60.0f;
-    setMainCamera(eye, yaw, pitch, roll, width, height, fov);
+    drawToShadowMap(cmd, movingLightShadowMaps_, movingRes, true, true, true, MOVING);
 
     drawGeometryPass(sceneColor_, cmd);
-    drawWeaponPass(sceneColor_, cmd);
-    drawTonemapPass(sceneColor_, tonemappedColor_, cmd);
+
+    SDL_GPUTexture* sceneForPost = sceneColor_;
+    const bool showSsaoDebug = ssaoDebugView != 0;
+    if (toggles.ssao || showSsaoDebug) {
+        drawSsaoPass(depthTarget_.texture, sceneNormal_, ssaoColor_, cmd);
+        if (ssaoBlurEnabled && !showSsaoDebug)
+            drawSsaoBlurPass(ssaoColor_, depthTarget_.texture, sceneNormal_, ssaoBlurred_, cmd);
+        drawSsaoCompositePass(sceneColor_, ssaoColor_, ssaoBlurred_, sceneWithAo_, cmd);
+        sceneForPost = sceneWithAo_;
+    }
+    if (!showSsaoDebug) {
+        drawGeometryOverlayPass(sceneForPost, cmd);
+        drawWeaponPass(sceneForPost, cmd);
+    }
+    drawTonemapPass(sceneForPost, tonemappedColor_, cmd);
     drawFxaaPass(tonemappedColor_, swapchain, cmd);
     drawHudPass(swapchain, cmd);
     drawUIPass(swapchain, cmd);
@@ -578,13 +810,20 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
         return;
     SDL_GPUGraphicsPipeline* depthPipeline = nullptr;
     switch (res) {
-        case 0: depthPipeline = depthRes0Pipeline_; break;
-        case 1: depthPipeline = depthRes1Pipeline_; break;
-        case 2: depthPipeline = depthRes2Pipeline_; break;
-        default: return;
+    case 0:
+        depthPipeline = depthRes0Pipeline_;
+        break;
+    case 1:
+        depthPipeline = depthRes1Pipeline_;
+        break;
+    case 2:
+        depthPipeline = depthRes2Pipeline_;
+        break;
+    default:
+        return;
     }
 
-    SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture, layer, true);
+    SDL_GPUDepthStencilTargetInfo depthTarget = Boilerplate::makeDepthTarget(depthTexture, layer, true, true);
 
     SDL_GPURenderPass* geometryDepthPass = SDL_BeginGPURenderPass(cmd, nullptr, 0, &depthTarget);
     SDL_BindGPUGraphicsPipeline(geometryDepthPass, depthPipeline);
@@ -594,9 +833,9 @@ void NewRenderer::drawGeometryDepthPass(SDL_GPUTexture* depthTexture,
     FrustumPlanes frustumPlanes = NewCamera::gribbHartmannFrustumPlanes(shadowViewProjection);
 
     if (staticGeometry)
-        drawWorldModelInstances(geometryDepthPass, cmd, true,frustumPlanes);
+        drawWorldModelInstances(geometryDepthPass, cmd, true, frustumPlanes);
     if (entityGeometry)
-        drawEntityModels(geometryDepthPass, cmd, true,frustumPlanes);
+        drawEntityModels(geometryDepthPass, cmd, true, frustumPlanes);
     if (skinnedGeometry)
         skinnedRenderer_.drawDepth(geometryDepthPass, cmd);
 
@@ -609,30 +848,61 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
                                   bool staticGeometry,
                                   bool entityGeometry,
                                   bool skinnedGeometry,
-                                  PointLightType lightType)
+                                  PointLightType lightType,
+                                  bool cullByCamera)
 {
 
     Uint32 lightCount = 0;
     Uint32 maxLightCount = 0;
-    PointLight *pointLightArray = nullptr;
+    PointLight* pointLightArray = nullptr;
     switch (lightType) {
-        case STATIC:
-            lightCount = sceneLightInfo_.numPointLights;
-            maxLightCount = MAX_POINT_LIGHTS;
-            pointLightArray = sceneLightInfo_.pointLights; break;
-        case MOVING:
-            lightCount = sceneLightInfo_.numMovingPointLights;
-            maxLightCount = MAX_MOVING_POINT_LIGHTS;
-            pointLightArray = sceneLightInfo_.movingPointLights; break;
-        default: return;
+    case STATIC:
+        lightCount = sceneLightInfo_.numPointLights;
+        maxLightCount = MAX_POINT_LIGHTS;
+        pointLightArray = sceneLightInfo_.pointLights;
+        break;
+    case MOVING:
+        lightCount = sceneLightInfo_.numMovingPointLights;
+        maxLightCount = MAX_MOVING_POINT_LIGHTS;
+        pointLightArray = sceneLightInfo_.movingPointLights;
+        break;
+    default:
+        return;
     }
 
+    // glm::mat4 shadowProjection = glm::perspective(
+    //     glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
+
     glm::mat4 shadowProjection = glm::perspective(
-        glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightNearPlane, sceneLightInfo_.pointLightFarPlane);
+        glm::radians(90.0f), 1.0f, sceneLightInfo_.pointLightFarPlane, sceneLightInfo_.pointLightNearPlane);
     shadowProjection[1][1] *= -1;
 
-    for (Uint8 iLight = 0; iLight < std::min(lightCount,maxLightCount); iLight++) {
+    // Cull shadow-casting lights against the current camera frustum. A light
+    // whose influence sphere (position, range) lies entirely outside the view
+    // cannot affect any visible pixel — and the fragment shader range-culls it
+    // too — so skipping its 6-face cubemap render is free of visible artifacts.
+    const FrustumPlanes camFrustum = camera_.getViewProjectionFrustumPlane();
+    auto lightSphereInView = [&](const PointLight& l) -> bool {
+        if (l.range <= 0.0f)
+            return true; // unbounded light: never cull
+        const glm::vec4 sides[NUM_FRUSTUM_PLANES] = {
+            camFrustum.left, camFrustum.right, camFrustum.bottom, camFrustum.top, camFrustum.near, camFrustum.far};
+        for (const glm::vec4& pl : sides) {
+            const glm::vec3 n(pl);
+            const float len = glm::length(n);
+            if (len < 1e-8f)
+                continue;
+            if ((glm::dot(n, l.position) + pl.w) / len < -l.range)
+                return false; // sphere fully behind this plane → outside frustum
+        }
+        return true;
+    };
+
+    for (Uint8 iLight = 0; iLight < std::min(lightCount, maxLightCount); iLight++) {
         PointLight& light = pointLightArray[iLight];
+
+        if (cullByCamera && !lightSphereInView(light))
+            continue;
 
         for (int face = 0; face < NUM_CUBE_FACES; face++) {
             glm::vec3& iCubeFaceTarget = cubeFaceTargets_[face];
@@ -648,15 +918,17 @@ void NewRenderer::drawToShadowMap(SDL_GPUCommandBuffer* cmd,
                                   shadowViewProjection,
                                   staticGeometry,
                                   entityGeometry,
-                                  skinnedGeometry
-                                  );
+                                  skinnedGeometry);
         }
     }
 }
 
 void NewRenderer::onFirstFrame(SDL_GPUCommandBuffer* cmd)
 {
-    drawToShadowMap(cmd, staticShadowMaps_,0, true, false, false,STATIC);
+    // One-time bake of static-world shadows for ALL static lights. Must NOT be
+    // camera-frustum-culled: a light off-screen at startup would otherwise be
+    // permanently missing its baked world shadow (this pass never runs again).
+    drawToShadowMap(cmd, staticShadowMaps_, 0, true, false, false, STATIC, /*cullByCamera=*/false);
 }
 
 void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd,bool lightmap)
@@ -673,8 +945,13 @@ void NewRenderer::bindLightShadowInfo(SDL_GPURenderPass* renderPass, SDL_GPUComm
     shadowBindings.push_back({dynamicShadowMaps_, dynamicDepthSampler_});
     shadowBindings.push_back({movingLightShadowMaps_, dynamicDepthSampler_});
 
-    SDL_BindGPUFragmentSamplers(renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings.data(), shadowBindings.size());
+    SDL_BindGPUFragmentSamplers(
+        renderPass, MATERIAL_MAX_TEXTURE_COUNT, shadowBindings.data(), static_cast<Uint32>(shadowBindings.size()));
 
+    const glm::vec3 cameraPos = camera_.getEye();
+    sceneLightInfo_.cameraPosX = cameraPos.x;
+    sceneLightInfo_.cameraPosY = cameraPos.y;
+    sceneLightInfo_.cameraPosZ = cameraPos.z;
     SDL_PushGPUFragmentUniformData(cmd, 2, &sceneLightInfo_, sizeof(LightUBO));
 }
 void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)
@@ -685,17 +962,23 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
     FrustumPlanes frustumPlanes = camera_.getViewProjectionFrustumPlane();
 
-    SDL_GPUColorTargetInfo colorTarget =
-        Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f});
+    SDL_GPUColorTargetInfo colorTargets[2] = {
+        Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}),
+        //Boilerplate::makeColorTargetClear(sceneColor, SDL_FColor{.r = 0.08f, .g = 0.08f, .b = 0.12f, .a = 1.0f}),
+        Boilerplate::makeColorTargetClear(sceneNormal_, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f}),
+    };
 
-    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthTarget_);
-
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, colorTargets, 2, &depthTarget_);
+    if (!geometryPass) {
+        SDL_Log("NewRenderer::drawGeometryPass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
 
     if (lightMap_ != nullptr) {
         SDL_BindGPUGraphicsPipeline(geometryPass, geometryLightMapPipeline_);
         bindLightShadowInfo(geometryPass, cmd, true);
         SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
-        drawWorldModelInstances(geometryPass, cmd, false,frustumPlanes);
+        drawWorldModelInstances(geometryPass, cmd, false, frustumPlanes);
     }
 
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
@@ -703,28 +986,206 @@ void NewRenderer::drawGeometryPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuf
     SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
 
     if (lightMap_ == nullptr) {
-        drawWorldModelInstances(geometryPass, cmd, false,frustumPlanes);
+        drawWorldModelInstances(geometryPass, cmd, false, frustumPlanes);
     }
 
-    drawEntityModels(geometryPass, cmd, false,frustumPlanes);
-
-    drawSkinnedModels(geometryPass, cmd);
-    drawParticles(geometryPass, cmd);
-
-    // drawWeapon(geometryPass, cmd);
+    drawEntityModels(geometryPass, cmd, false, frustumPlanes);
+    drawEntityChams(geometryPass, cmd, frustumPlanes);
 
     SDL_EndGPURenderPass(geometryPass);
 }
 
+void NewRenderer::drawGeometryOverlayPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTargets[2] = {
+        Boilerplate::makeColorTargetLoad(sceneColor),
+        Boilerplate::makeColorTargetLoad(sceneNormal_),
+    };
+    SDL_GPUDepthStencilTargetInfo depthInfo = depthTarget_;
+    depthInfo.load_op = SDL_GPU_LOADOP_LOAD;
+    depthInfo.store_op = SDL_GPU_STOREOP_STORE;
+
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, colorTargets, 2, &depthInfo);
+    if (!geometryPass) {
+        SDL_Log("NewRenderer::drawGeometryOverlayPass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
+    const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
+    SDL_PushGPUVertexUniformData(cmd, 0, &viewProjection, sizeof(glm::mat4));
+    bindLightShadowInfo(geometryPass, cmd, false);
+    drawSkinnedModels(geometryPass, cmd);
+    drawParticles(geometryPass, cmd);
+    SDL_EndGPURenderPass(geometryPass);
+}
+
+void NewRenderer::drawSsaoPass(SDL_GPUTexture* depth,
+                               SDL_GPUTexture* normal,
+                               SDL_GPUTexture* ao,
+                               SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTarget =
+        Boilerplate::makeColorTargetClear(ao, SDL_FColor{.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f});
+    SDL_GPURenderPass* ssaoPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
+    if (!ssaoPass) {
+        SDL_Log("NewRenderer::drawSsaoPass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
+    SDL_BindGPUGraphicsPipeline(ssaoPass, ssaoPipeline_);
+
+    SDL_GPUTextureSamplerBinding bindings[2] = {
+        Boilerplate::makeTextureSamplerBinding(depth, fxaaSampler_),
+        Boilerplate::makeTextureSamplerBinding(normal, fxaaSampler_),
+    };
+    SDL_BindGPUFragmentSamplers(ssaoPass, 0, bindings, 2);
+
+    struct alignas(16) SsaoParams
+    {
+        glm::mat4 inverseViewProjection;
+        glm::mat4 viewProjection;
+        glm::vec2 inverseResolution;
+        float radius;
+        float bias;
+        float pixelRadiusScale;
+        float depthJumpLimit;
+        float normalDiffMin;
+        float normalDiffMax;
+        float hemisphereMin;
+        float contactWeight;
+        float mediumRadius;
+        float mediumWeight;
+        float intensity;
+        float minAo;
+        float maxAo;
+        float _pad0;
+    } params{
+        glm::inverse(camera_.getViewProjectionMatrix()),
+        camera_.getViewProjectionMatrix(),
+        glm::vec2{1.0f / static_cast<float>(sceneWidth_), 1.0f / static_cast<float>(sceneHeight_)},
+        ssaoRadius,
+        ssaoBias,
+        ssaoPixelRadiusScale,
+        ssaoDepthThreshold,
+        ssaoNormalDiffMin,
+        ssaoNormalDiffMax,
+        ssaoHemisphereMin,
+        ssaoContactWeight,
+        ssaoMediumRadius,
+        ssaoMediumWeight,
+        ssaoIntensity,
+        ssaoMinAo,
+        ssaoMaxAo,
+        0.0f,
+    };
+    SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
+
+    SDL_DrawGPUPrimitives(ssaoPass, 6, 1, 0, 0);
+    SDL_EndGPURenderPass(ssaoPass);
+}
+
+void NewRenderer::drawSsaoBlurPass(SDL_GPUTexture* ao,
+                                   SDL_GPUTexture* depth,
+                                   SDL_GPUTexture* normal,
+                                   SDL_GPUTexture* output,
+                                   SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTarget =
+        Boilerplate::makeColorTargetClear(output, SDL_FColor{.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f});
+    SDL_GPURenderPass* blurPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
+    if (!blurPass) {
+        SDL_Log("NewRenderer::drawSsaoBlurPass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
+    SDL_BindGPUGraphicsPipeline(blurPass, ssaoBlurPipeline_);
+
+    SDL_GPUTextureSamplerBinding bindings[3] = {
+        Boilerplate::makeTextureSamplerBinding(ao, fxaaSampler_),
+        Boilerplate::makeTextureSamplerBinding(depth, fxaaSampler_),
+        Boilerplate::makeTextureSamplerBinding(normal, fxaaSampler_),
+    };
+    SDL_BindGPUFragmentSamplers(blurPass, 0, bindings, 3);
+
+    struct alignas(16) BlurParams
+    {
+        glm::mat4 inverseViewProjection;
+        glm::vec2 inverseResolution;
+        float radius;
+        float blurRadius;
+        float depthThreshold;
+        float normalThreshold;
+        float strength;
+        float _pad0;
+    } params{
+        glm::inverse(camera_.getViewProjectionMatrix()),
+        glm::vec2{1.0f / static_cast<float>(sceneWidth_), 1.0f / static_cast<float>(sceneHeight_)},
+        ssaoRadius,
+        ssaoBlurRadius,
+        ssaoBlurDepthThreshold,
+        ssaoBlurNormalThreshold,
+        ssaoBlurStrength,
+        0.0f,
+    };
+    SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
+
+    SDL_DrawGPUPrimitives(blurPass, 6, 1, 0, 0);
+    SDL_EndGPURenderPass(blurPass);
+}
+
+void NewRenderer::drawSsaoCompositePass(SDL_GPUTexture* sceneColor,
+                                        SDL_GPUTexture* rawAo,
+                                        SDL_GPUTexture* blurredAo,
+                                        SDL_GPUTexture* output,
+                                        SDL_GPUCommandBuffer* cmd)
+{
+    SDL_GPUColorTargetInfo colorTarget =
+        Boilerplate::makeColorTargetClear(output, SDL_FColor{.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f});
+    SDL_GPURenderPass* compositePass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, nullptr);
+    if (!compositePass) {
+        SDL_Log("NewRenderer::drawSsaoCompositePass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
+    SDL_BindGPUGraphicsPipeline(compositePass, ssaoCompositePipeline_);
+
+    SDL_GPUTextureSamplerBinding bindings[3] = {
+        Boilerplate::makeTextureSamplerBinding(sceneColor, fxaaSampler_),
+        Boilerplate::makeTextureSamplerBinding(rawAo, fxaaSampler_),
+        Boilerplate::makeTextureSamplerBinding(blurredAo, fxaaSampler_),
+    };
+    SDL_BindGPUFragmentSamplers(compositePass, 0, bindings, 3);
+
+    struct alignas(16) CompositeParams
+    {
+        float strength;
+        float power;
+        Uint32 blurEnabled;
+        int debugView;
+    } params{
+        ssaoCompositeStrength,
+        ssaoCompositePower,
+        ssaoBlurEnabled ? 1u : 0u,
+        std::clamp(ssaoDebugView, 0, 1),
+    };
+    SDL_PushGPUFragmentUniformData(cmd, 0, &params, sizeof(params));
+
+    SDL_DrawGPUPrimitives(compositePass, 6, 1, 0, 0);
+    SDL_EndGPURenderPass(compositePass);
+}
+
 void NewRenderer::drawWeaponPass(SDL_GPUTexture* sceneColor, SDL_GPUCommandBuffer* cmd)
 {
-    SDL_GPUColorTargetInfo colorTarget = Boilerplate::makeColorTargetLoad(sceneColor);
+    SDL_GPUColorTargetInfo colorTargets[2] = {
+        Boilerplate::makeColorTargetLoad(sceneColor),
+        Boilerplate::makeColorTargetLoad(sceneNormal_),
+    };
 
     SDL_GPUDepthStencilTargetInfo depthInfo = depthTarget_; // copy
     depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;               // override to clear
     depthInfo.clear_depth = 1.0f;
 
-    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, &colorTarget, 1, &depthInfo);
+    SDL_GPURenderPass* geometryPass = SDL_BeginGPURenderPass(cmd, colorTargets, 2, &depthInfo);
+    if (!geometryPass) {
+        SDL_Log("NewRenderer::drawWeaponPass: SDL_BeginGPURenderPass failed: %s", SDL_GetError());
+        return;
+    }
     SDL_BindGPUGraphicsPipeline(geometryPass, geometryPipeline_);
 
     const glm::mat4 viewProjection = camera_.getViewProjectionMatrix();
@@ -810,7 +1271,9 @@ void NewRenderer::drawParticles(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuf
     }
 }
 
-void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd,const FrustumPlanes& frustumPlanes)
+void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass,
+                             SDL_GPUCommandBuffer* cmd,
+                             const FrustumPlanes& frustumPlanes)
 {
     if (!weapon_.visible)
         return;
@@ -825,7 +1288,7 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
         return;
     }
 
-    drawModel(weaponModelId, weapon_.transform, renderPass, cmd,frustumPlanes);
+    drawModel(weaponModelId, weapon_.transform, renderPass, cmd, frustumPlanes);
 
     auto drawAttachment = [&](const ViewmodelAttachment& attachment) {
         if (!attachment.visible)
@@ -835,7 +1298,7 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
         const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(attachment.modelIndex)).modelId_;
         if (!Asset::models_.contains(modelId))
             return;
-        drawModel(modelId, attachment.transform, renderPass, cmd,frustumPlanes);
+        drawModel(modelId, attachment.transform, renderPass, cmd, frustumPlanes);
     };
     drawAttachment(weapon_.hands.right);
     drawAttachment(weapon_.hands.left);
@@ -844,29 +1307,34 @@ void NewRenderer::drawWeapon(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer
 
 void NewRenderer::drawSkinnedModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
 {
-    // Killcam chams pass runs BEFORE the normal skinned draw, so the depth
-    // buffer holds only the world + static entities (not the characters). The
-    // chams pipeline uses a GREATER depth test, so the killer is drawn flat-red
-    // only where it sits BEHIND world geometry (i.e. occluded by walls); its
-    // visible parts fail the test here and render normally in the pass below.
+    // Wallhack chams run before the normal skinned draw so the depth buffer
+    // still holds world-only geometry. Killcam highlight runs after normal
+    // bodies so the killer is visibly red, not just red where occluded.
     skinnedRenderer_.drawChams(renderPass, cmd);
     skinnedRenderer_.draw(renderPass, cmd);
+    skinnedRenderer_.drawKillcamHighlight(renderPass, cmd);
 }
 
-void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth, const FrustumPlanes& frustumPlanes)
+void NewRenderer::drawWorldModelInstances(SDL_GPURenderPass* renderPass,
+                                          SDL_GPUCommandBuffer* cmd,
+                                          bool depth,
+                                          const FrustumPlanes& frustumPlanes)
 {
     for (const auto& mInstance : Asset::modelInstances_) {
         if (!mInstance.drawInScenePass)
             continue;
         if (depth) {
-            drawModelDepth(mInstance.modelId_, mInstance.transform_, renderPass, cmd,frustumPlanes);
+            drawModelDepth(mInstance.modelId_, mInstance.transform_, renderPass, cmd, frustumPlanes);
         } else {
-            drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd,frustumPlanes);
+            drawModel(mInstance.modelId_, mInstance.transform_, renderPass, cmd, frustumPlanes);
         }
     }
 }
 
-void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd, bool depth,const FrustumPlanes& frustumPlanes)
+void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass,
+                                   SDL_GPUCommandBuffer* cmd,
+                                   bool depth,
+                                   const FrustumPlanes& frustumPlanes)
 {
     for (const auto& entityCmd : entities_) {
         if (entityCmd.modelIndex < 0) {
@@ -876,32 +1344,69 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass, SDL_GPUCommand
         if (static_cast<size_t>(entityCmd.modelIndex) >= Asset::modelInstances_.size())
             continue;
         ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(entityCmd.modelIndex)).modelId_;
-        // TODO(graphics): pass entityCmd.tint into the per-mesh material UBO
-        // so tinted entities (e.g. team colors, hit flashes) render correctly.
 
         if (depth) {
-            drawModelDepth(modelId, entityCmd.worldTransform, renderPass, cmd,frustumPlanes);
+            drawModelDepth(modelId, entityCmd.worldTransform, renderPass, cmd, frustumPlanes);
         } else {
-            drawModel(modelId, entityCmd.worldTransform, renderPass, cmd,frustumPlanes);
+            drawModel(modelId, entityCmd.worldTransform, renderPass, cmd, frustumPlanes, entityCmd.tint);
         }
     }
+}
+
+void NewRenderer::drawEntityChams(SDL_GPURenderPass* renderPass,
+                                  SDL_GPUCommandBuffer* cmd,
+                                  const FrustumPlanes& frustumPlanes)
+{
+    if (!entityChamsPipeline_)
+        return;
+
+    SDL_BindGPUGraphicsPipeline(renderPass, entityChamsPipeline_);
+
+    for (const auto& entityCmd : entities_) {
+        if (!entityCmd.occludedSilhouette || entityCmd.modelIndex < 0 ||
+            static_cast<size_t>(entityCmd.modelIndex) >= Asset::modelInstances_.size())
+            continue;
+
+        const ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(entityCmd.modelIndex)).modelId_;
+        if (!Asset::models_.contains(modelId))
+            continue;
+
+        Asset::Model& model = Asset::models_.at(modelId);
+        for (auto& element : model.modelElements_) {
+            glm::mat4 modelElementMatrix = entityCmd.worldTransform * element.cachedTransform_;
+
+            Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
+            if (!inFrustum(mesh.aabb_, frustumPlanes, modelElementMatrix))
+                continue;
+
+            glm::vec4 silhouetteTint = entityCmd.tint;
+            if (silhouetteTint == glm::vec4{1.0f})
+                silhouetteTint = glm::vec4{0.95f, 0.04f, 0.04f, 1.0f};
+            SDL_PushGPUFragmentUniformData(cmd, 0, &silhouetteTint, sizeof(silhouetteTint));
+            SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
+            drawMesh(renderPass, mesh);
+        }
+    }
+
+    SDL_BindGPUGraphicsPipeline(renderPass, geometryPipeline_);
 }
 
 void NewRenderer::drawModel(ModelIdInt modelId,
                             const glm::mat4& modelTransform,
                             SDL_GPURenderPass* renderPass,
                             SDL_GPUCommandBuffer* cmd,
-                            const FrustumPlanes& frustumPlanes)
+                            const FrustumPlanes& frustumPlanes,
+                            glm::vec4 tint)
 {
     Asset::Model& model = Asset::models_.at(modelId);
     for (auto& element : model.modelElements_) {
         glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
 
         Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
-        if (!inFrustum(mesh.aabb_,frustumPlanes,modelElementMatrix)) continue; //////// Frustum Culling
+        if (!inFrustum(mesh.aabb_, frustumPlanes, modelElementMatrix))
+            continue; //////// Frustum Culling
 
-
-        //if (!inFrustum(element.meshId_,frustumPlanes,modelTransform)) continue; //////// Frustum Culling
+        // if (!inFrustum(element.meshId_,frustumPlanes,modelTransform)) continue; //////// Frustum Culling
 
         const Asset::Material* material = nullptr;
         if (Asset::materials_.contains(element.materialId_))
@@ -938,18 +1443,21 @@ void NewRenderer::drawModel(ModelIdInt modelId,
         glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
         if (material != nullptr)
             materialDiffuse = glm::vec4(material->kDiffuse_, 1.0f);
+        const bool useTint = tint.a > 0.0f && (tint.r != 1.0f || tint.g != 1.0f || tint.b != 1.0f || tint.a != 1.0f);
         struct MaterialFlags
         {
             Uint32 useTexture;
             Uint32 useNormalTexture;
             Uint32 useMetallicRoughnessTexture;
-            Uint32 _pad0;
+            Uint32 useTint;
         } materialFlags{
             useTexture ? 1u : 0u,
             normalTexture != texture_ ? 1u : 0u,
             metallicRoughnessTexture != texture_ ? 1u : 0u,
-            0u,
+            useTint ? 1u : 0u,
         };
+        if (materialFlags.useTint != 0u)
+            materialDiffuse = tint;
         SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
         SDL_PushGPUFragmentUniformData(cmd, 1, &materialFlags, sizeof(materialFlags));
 
@@ -963,14 +1471,15 @@ void NewRenderer::drawModelDepth(ModelIdInt modelId,
                                  const glm::mat4& modelTransform,
                                  SDL_GPURenderPass* renderPass,
                                  SDL_GPUCommandBuffer* cmd,
-                                 const FrustumPlanes& frustumPlanes )
+                                 const FrustumPlanes& frustumPlanes)
 {
     Asset::Model& model = Asset::models_.at(modelId);
     for (auto& element : model.modelElements_) {
         glm::mat4 modelElementMatrix = modelTransform * element.cachedTransform_;
 
         Asset::Mesh& mesh = Asset::meshes_.at(element.meshId_);
-        if (!inFrustum(mesh.aabb_,frustumPlanes,modelElementMatrix)) continue; //////// Frustum Culling
+        if (!inFrustum(mesh.aabb_, frustumPlanes, modelElementMatrix))
+            continue; //////// Frustum Culling
 
         // SDL_Log("drawModelDepth: modelId=%d elements=%zu", modelId, model.modelElements_.size());
         SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
@@ -1008,7 +1517,11 @@ bool NewRenderer::ensureDepthTextureSize(Uint32 width, Uint32 height)
         depthTarget_.texture = nullptr;
     }
 
-    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, false);
+    // Later passes load this depth texture for skinned players, particles,
+    // SSAO, and the first-person weapon. It must be stored after the geometry
+    // pass; STOREOP_DONT_CARE makes those later depth tests read undefined
+    // data, which can draw players through walls or cull them up close.
+    depthTarget_ = Boilerplate::makeDepthTarget(Boilerplate::createDepthTexture(device_, width, height), 0, true, false);
 
     if (!depthTarget_.texture)
         return false;
@@ -1027,18 +1540,42 @@ bool NewRenderer::ensureSceneTextureSize(Uint32 width, Uint32 height)
         SDL_ReleaseGPUTexture(device_, sceneColor_);
         sceneColor_ = nullptr;
     }
+    if (sceneNormal_) {
+        SDL_ReleaseGPUTexture(device_, sceneNormal_);
+        sceneNormal_ = nullptr;
+    }
+    if (ssaoColor_) {
+        SDL_ReleaseGPUTexture(device_, ssaoColor_);
+        ssaoColor_ = nullptr;
+    }
+    if (ssaoBlurred_) {
+        SDL_ReleaseGPUTexture(device_, ssaoBlurred_);
+        ssaoBlurred_ = nullptr;
+    }
+    if (sceneWithAo_) {
+        SDL_ReleaseGPUTexture(device_, sceneWithAo_);
+        sceneWithAo_ = nullptr;
+    }
     if (tonemappedColor_) {
         SDL_ReleaseGPUTexture(device_, tonemappedColor_);
         tonemappedColor_ = nullptr;
     }
 
     sceneColor_ = Boilerplate::createSampledColorTarget(device_, width, height, getHdrFormat());
+    sceneNormal_ = Boilerplate::createSampledColorTarget(device_, width, height, getHdrFormat());
+    const Uint32 ssaoWidth = std::max<Uint32>(1, (width + 1) / 2);
+    const Uint32 ssaoHeight = std::max<Uint32>(1, (height + 1) / 2);
+    ssaoColor_ = Boilerplate::createSampledColorTarget(device_, ssaoWidth, ssaoHeight, getHdrFormat());
+    ssaoBlurred_ = Boilerplate::createSampledColorTarget(device_, ssaoWidth, ssaoHeight, getHdrFormat());
+    sceneWithAo_ = Boilerplate::createSampledColorTarget(device_, width, height, getHdrFormat());
     tonemappedColor_ = Boilerplate::createSampledColorTarget(device_, width, height, colorTarget_);
-    if (!sceneColor_ || !tonemappedColor_)
+    if (!sceneColor_ || !sceneNormal_ || !ssaoColor_ || !ssaoBlurred_ || !sceneWithAo_ || !tonemappedColor_)
         return false;
 
     sceneWidth_ = width;
     sceneHeight_ = height;
+    ssaoWidth_ = ssaoWidth;
+    ssaoHeight_ = ssaoHeight;
     return true;
 }
 
@@ -1094,6 +1631,14 @@ void NewRenderer::quit()
             SDL_ReleaseGPUTexture(device_, depthTarget_.texture);
         if (sceneColor_)
             SDL_ReleaseGPUTexture(device_, sceneColor_);
+        if (sceneNormal_)
+            SDL_ReleaseGPUTexture(device_, sceneNormal_);
+        if (ssaoColor_)
+            SDL_ReleaseGPUTexture(device_, ssaoColor_);
+        if (ssaoBlurred_)
+            SDL_ReleaseGPUTexture(device_, ssaoBlurred_);
+        if (sceneWithAo_)
+            SDL_ReleaseGPUTexture(device_, sceneWithAo_);
         if (tonemappedColor_)
             SDL_ReleaseGPUTexture(device_, tonemappedColor_);
 
@@ -1113,12 +1658,20 @@ void NewRenderer::quit()
 
         if (geometryPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, geometryPipeline_);
+        if (entityChamsPipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(device_, entityChamsPipeline_);
         if (hudPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, hudPipeline_);
         if (fxaaPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, fxaaPipeline_);
         if (tonemapPipeline_)
             SDL_ReleaseGPUGraphicsPipeline(device_, tonemapPipeline_);
+        if (ssaoPipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(device_, ssaoPipeline_);
+        if (ssaoBlurPipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(device_, ssaoBlurPipeline_);
+        if (ssaoCompositePipeline_)
+            SDL_ReleaseGPUGraphicsPipeline(device_, ssaoCompositePipeline_);
         if (sampler_)
             SDL_ReleaseGPUSampler(device_, sampler_);
         if (hudSampler_)
@@ -1144,11 +1697,19 @@ void NewRenderer::quit()
     shaderFormat_ = SDL_GPU_SHADERFORMAT_INVALID;
 
     geometryPipeline_ = nullptr;
+    entityChamsPipeline_ = nullptr;
     hudPipeline_ = nullptr;
     fxaaPipeline_ = nullptr;
     tonemapPipeline_ = nullptr;
+    ssaoPipeline_ = nullptr;
+    ssaoBlurPipeline_ = nullptr;
+    ssaoCompositePipeline_ = nullptr;
     depthTarget_.texture = nullptr;
     sceneColor_ = nullptr;
+    sceneNormal_ = nullptr;
+    ssaoColor_ = nullptr;
+    ssaoBlurred_ = nullptr;
+    sceneWithAo_ = nullptr;
     tonemappedColor_ = nullptr;
     texture_ = nullptr;
     sampler_ = nullptr;
@@ -1157,6 +1718,8 @@ void NewRenderer::quit()
     fxaaSampler_ = nullptr;
     sceneWidth_ = 0;
     sceneHeight_ = 0;
+    ssaoWidth_ = 0;
+    ssaoHeight_ = 0;
     depthWidth_ = 0;
     depthHeight_ = 0;
 }
@@ -1272,12 +1835,15 @@ void NewRenderer::setPointLights(std::vector<PointLight> pointLights)
     sceneLightInfo_.numMovingPointLights =
         std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_MOVING_POINT_LIGHTS));
 
-    memcpy(sceneLightInfo_.movingPointLights, pointLights.data(), sceneLightInfo_.numMovingPointLights * sizeof(PointLight));
+    memcpy(sceneLightInfo_.movingPointLights,
+           pointLights.data(),
+           sceneLightInfo_.numMovingPointLights * sizeof(PointLight));
 }
 
-void NewRenderer::setStaticPointLights(std::vector<PointLight> &&pointLights)
+void NewRenderer::setStaticPointLights(std::vector<PointLight>&& pointLights)
 {
-    sceneLightInfo_.numPointLights = std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_POINT_LIGHTS));
+    sceneLightInfo_.numPointLights =
+        std::min(static_cast<uint32_t>(pointLights.size()), static_cast<uint32_t>(MAX_POINT_LIGHTS));
 
     memcpy(sceneLightInfo_.pointLights, pointLights.data(), sceneLightInfo_.numPointLights * sizeof(PointLight));
 }
@@ -1410,37 +1976,35 @@ bool NewRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJoints
 
 void NewRenderer::setSkinnedFrame(const std::vector<glm::mat4>& palette, const std::vector<SkinnedInstance>& instances)
 {
-    // The renderer owns frustum culling for skinned characters: Game.cpp hands
-    // us every character and SkinnedRenderer keeps only the ones whose bounding
-    // sphere is on screen, using this frame's camera frustum planes.
+    // Game.cpp hands us every character. SkinnedRenderer currently keeps all
+    // submitted colour instances visible because this call happens before
+    // drawFrame() refreshes the renderer camera; culling against camera_ here
+    // would use the previous frame's frustum and can make players flicker.
     skinnedRenderer_.setFrame(palette, instances, camera_.getViewProjectionFrustumPlane());
 }
 
-
-
 bool NewRenderer::inFrustum(const Asset::AABB &modelElementAABB,const FrustumPlanes &frustumPlanes,const glm::mat4 &modelMat)
 {
-    Asset::AABB worldAabb = AssetLoader::rigidTransformAABB(modelElementAABB,modelMat);
+    Asset::AABB worldAabb = AssetLoader::rigidTransformAABB(modelElementAABB, modelMat);
 
-    auto insidePlane = [](const glm::vec4 &planeNormal, const Asset::AABB& aabb) {
+    auto insidePlane = [](const glm::vec4& planeNormal, const Asset::AABB& aabb) {
         const auto positiveVertex = glm::vec4{planeNormal.x >= 0.0f ? aabb.max.x : aabb.min.x,
-                                        planeNormal.y >= 0.0f ? aabb.max.y : aabb.min.y,
-                                        planeNormal.z >= 0.0f ? aabb.max.z : aabb.min.z,
-                                       1.0f};
+                                              planeNormal.y >= 0.0f ? aabb.max.y : aabb.min.y,
+                                              planeNormal.z >= 0.0f ? aabb.max.z : aabb.min.z,
+                                              1.0f};
 
-        return glm::dot(positiveVertex ,planeNormal) >= 0.0f;
+        return glm::dot(positiveVertex, planeNormal) >= 0.0f;
     };
     bool inFrustumRet = true;
 
-    inFrustumRet &= insidePlane(frustumPlanes.left,worldAabb);
-    inFrustumRet &= insidePlane(frustumPlanes.right,worldAabb);
+    inFrustumRet &= insidePlane(frustumPlanes.left, worldAabb);
+    inFrustumRet &= insidePlane(frustumPlanes.right, worldAabb);
 
-    inFrustumRet &= insidePlane(frustumPlanes.bottom,worldAabb);
-    inFrustumRet &= insidePlane(frustumPlanes.top,worldAabb);
+    inFrustumRet &= insidePlane(frustumPlanes.bottom, worldAabb);
+    inFrustumRet &= insidePlane(frustumPlanes.top, worldAabb);
 
-    inFrustumRet &= insidePlane(frustumPlanes.near,worldAabb);
-    inFrustumRet &= insidePlane(frustumPlanes.far,worldAabb);
-
+    inFrustumRet &= insidePlane(frustumPlanes.near, worldAabb);
+    inFrustumRet &= insidePlane(frustumPlanes.far, worldAabb);
 
     return inFrustumRet;
 }

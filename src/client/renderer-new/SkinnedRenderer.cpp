@@ -35,6 +35,7 @@ void SkinnedRenderer::init(SDL_GPUDevice* device,
     createSkinningPipeline(colorTarget, shaderFormat);
     createSkinnedDepthPipeline(shaderFormat);
     createChamsPipeline();
+    createKillcamHighlightPipeline();
 }
 
 void SkinnedRenderer::shutdown()
@@ -66,6 +67,8 @@ void SkinnedRenderer::shutdown()
         SDL_ReleaseGPUGraphicsPipeline(device_, depthPipeline_);
     if (chamsPipeline_)
         SDL_ReleaseGPUGraphicsPipeline(device_, chamsPipeline_);
+    if (killcamHighlightPipeline_)
+        SDL_ReleaseGPUGraphicsPipeline(device_, killcamHighlightPipeline_);
 
     palettesSsboInfo_.ssbo_ = nullptr;
     instancesSsboInfo_.ssbo_ = nullptr;
@@ -74,6 +77,7 @@ void SkinnedRenderer::shutdown()
     pipeline_ = nullptr;
     depthPipeline_ = nullptr;
     chamsPipeline_ = nullptr;
+    killcamHighlightPipeline_ = nullptr;
     palettesSsboInfo_.capacityBytes_ = 0;
     instancesSsboInfo_.capacityBytes_ = 0;
     paletteXferCapacityBytes_ = 0;
@@ -97,8 +101,19 @@ bool SkinnedRenderer::setRig(const std::vector<RigMeshSource>& meshes, int numJo
         return false;
     }
     if (rigInstalled_) {
-        SDL_Log("SkinnedRenderer::setRig: rig already installed; ignoring repeat call");
-        return false;
+        // Replacing the installed rig. Wait for the GPU to finish any in-flight
+        // use of the old buffers before rebuilding.
+        SDL_WaitForGPUIdle(device_);
+        for (auto& sm : skinnedMeshes_) {
+            if (sm.vb)
+                SDL_ReleaseGPUBuffer(device_, sm.vb);
+            if (sm.boneVb)
+                SDL_ReleaseGPUBuffer(device_, sm.boneVb);
+            if (sm.ib)
+                SDL_ReleaseGPUBuffer(device_, sm.ib);
+        }
+        skinnedMeshes_.clear();
+        rigInstalled_ = false;
     }
     if (meshes.empty() || numJoints <= 0) {
         SDL_Log("SkinnedRenderer::setRig: empty meshes or numJoints<=0 (%zu, %d)", meshes.size(), numJoints);
@@ -246,24 +261,29 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
     frameInstances_.clear();
     visibleInstanceCount_ = 0;
     chamsIndices_.clear();
+    killcamHighlightIndices_.clear();
 
-    // Record every chams-flagged instance (materialId == 1) so the chams pass
-    // can draw them. Scans only the colour-visible slice.
-    const auto recordChams = [&]() {
+    // Record flagged visible instances for the red overlay passes.
+    const auto recordHighlights = [&]() {
         for (Uint32 i = 0; i < visibleInstanceCount_ && i < frameInstances_.size(); ++i) {
             if (frameInstances_[i].materialId == 1)
+                killcamHighlightIndices_.push_back(i);
+            else if (frameInstances_[i].materialId == 2)
                 chamsIndices_.push_back(i);
         }
     };
 
     // Without an installed rig / a valid bounding sphere we have nothing to
     // size the cull with — submit everything untouched and treat it as visible.
-    if (!rigInstalled_ || numJoints_ <= 0 || rigBoundingRadius_ <= 0.0f) {
+    // The first-person viewmodel also disables culling: it is parented to the
+    // camera and its animated "ready" pose sits far from the bind pose, so a
+    // bind-pose sphere test would (wrongly) cull it most frames — it flickered.
+    if (!frustumCullEnabled_ || !rigInstalled_ || numJoints_ <= 0 || rigBoundingRadius_ <= 0.0f) {
         framePalette_ = palette;
         frameInstances_ = instances;
         visibleInstanceCount_ = static_cast<Uint32>(instances.size());
         frameDirty_ = !instances.empty();
-        recordChams();
+        recordHighlights();
         return;
     }
 
@@ -313,7 +333,7 @@ void SkinnedRenderer::setFrame(const std::vector<glm::mat4>& palette,
     }
 
     frameDirty_ = !frameInstances_.empty();
-    recordChams();
+    recordHighlights();
 }
 
 bool SkinnedRenderer::ensureSsbos(Uint32 paletteBytes, Uint32 instanceBytes)
@@ -398,7 +418,7 @@ void SkinnedRenderer::uploadFrame(SDL_GPUCommandBuffer* /*cmd*/, SDL_GPUCopyPass
 
 // ─── Per-frame: draw ─────────────────────────────────────────────────────────
 
-void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd)
+void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* /*cmd*/)
 {
     // TODO(graphics): instanced GPU skinning draw call.  See `setFrame`
     // doc-block for the data layout and shader pseudocode.  Sketch:
@@ -420,7 +440,9 @@ void SkinnedRenderer::draw(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* 
 
     SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
     SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
-    for (auto sm : skinnedMeshes_) {
+
+    for (size_t mi = 0; mi < skinnedMeshes_.size(); ++mi) {
+        const SkinnedMesh& sm = skinnedMeshes_[mi];
         if (!sm.vb || !sm.boneVb || !sm.ib) {
             continue;
         }
@@ -508,6 +530,37 @@ void SkinnedRenderer::drawChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuf
     }
 }
 
+void SkinnedRenderer::drawKillcamHighlight(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* /*cmd*/)
+{
+    if (!rigInstalled_ || !killcamHighlightPipeline_ || killcamHighlightIndices_.empty() || !palettesSsboInfo_.ssbo_ ||
+        !instancesSsboInfo_.ssbo_)
+    {
+        return;
+    }
+
+    SDL_BindGPUGraphicsPipeline(renderPass, killcamHighlightPipeline_);
+
+    SDL_GPUBuffer* ssbos[2] = {palettesSsboInfo_.ssbo_, instancesSsboInfo_.ssbo_};
+    SDL_BindGPUVertexStorageBuffers(renderPass, 0, ssbos, 2);
+    for (auto sm : skinnedMeshes_) {
+        if (!sm.vb || !sm.boneVb || !sm.ib)
+            continue;
+        SDL_GPUBufferBinding vertexBufferBindings[2] = {
+            {.buffer = sm.vb, .offset = 0},
+            {.buffer = sm.boneVb, .offset = 0},
+        };
+        SDL_BindGPUVertexBuffers(renderPass, 0, vertexBufferBindings, 2);
+
+        SDL_GPUBufferBinding indexBufferBinding{.buffer = sm.ib, .offset = 0};
+        SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+        for (Uint32 idx : killcamHighlightIndices_) {
+            if (idx < frameInstances_.size())
+                SDL_DrawGPUIndexedPrimitives(renderPass, sm.indexCount, 1, 0, 0, idx);
+        }
+    }
+}
+
 void SkinnedRenderer::drawDepth(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* /*cmd*/)
 {
     if (!rigInstalled_ || !depthPipeline_ || frameInstances_.empty() || !palettesSsboInfo_.ssbo_ ||
@@ -543,7 +596,7 @@ void SkinnedRenderer::drawDepth(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuf
         };
         SDL_BindGPUIndexBuffer(renderPass, &indexBufferBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-        SDL_DrawGPUIndexedPrimitives(renderPass, sm.indexCount, frameInstances_.size(), 0, 0, 0);
+        SDL_DrawGPUIndexedPrimitives(renderPass, sm.indexCount, static_cast<Uint32>(frameInstances_.size()), 0, 0, 0);
     }
 }
 
@@ -586,8 +639,12 @@ bool SkinnedRenderer::createSkinningPipeline(SDL_GPUTextureFormat& colorTarget, 
         Boilerplate::makeAttribute(5, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(BoneInfluence, boneWeights), 1),
     };
 
+    // The skinned overlay pass runs against the same HDR + normal targets as
+    // the world geometry pass, so every skinned fragment shader must be paired
+    // with a two-target pipeline.
+    const std::vector<SDL_GPUTextureFormat> colorTargets{colorTarget, colorTarget};
     pipeline_ = Boilerplate::createGraphicsPipeline(
-        device_, colorTarget, shaderFormat, vertexShader, fragmentShader, vertexLayout, true, true);
+        device_, colorTargets, shaderFormat, vertexShader, fragmentShader, vertexLayout, true, false);
 
     return pipeline_ != nullptr;
 }
@@ -637,15 +694,16 @@ bool SkinnedRenderer::createSkinnedDepthPipeline(const SDL_GPUShaderFormat& shad
     depthPipelineDesc.shaderFormat = shaderFormat;
     depthPipelineDesc.vertexInputLayout = &vertexLayout;
     depthPipelineDesc.colorTarget = nullptr;
+    depthPipelineDesc.reverseZ = true;
     depthPipelineDesc.depthTest = true;
     depthPipelineDesc.depthWrite = true;
 
     depthPipelineDesc.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     depthPipelineDesc.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
     depthPipelineDesc.rasterizer_state.enable_depth_bias = true;
-    depthPipelineDesc.rasterizer_state.depth_bias_constant_factor = 500.0f;
-    depthPipelineDesc.rasterizer_state.depth_bias_slope_factor = 1.0f;
-    depthPipelineDesc.rasterizer_state.depth_bias_clamp = 0.005f;
+    depthPipelineDesc.rasterizer_state.depth_bias_constant_factor = -500.0f;
+    depthPipelineDesc.rasterizer_state.depth_bias_slope_factor = -1.0f;
+    depthPipelineDesc.rasterizer_state.depth_bias_clamp = -0.005f;
 
     depthPipeline_ = Boilerplate::createGraphicsDepthPipeline(device_, depthPipelineDesc);
 
@@ -704,17 +762,18 @@ bool SkinnedRenderer::createChamsPipeline()
     vertexInputState.num_vertex_attributes = static_cast<Uint32>(attributes.size());
     vertexInputState.vertex_attributes = attributes.data();
 
-    SDL_GPUColorTargetDescription colorTargetDesc{};
-    colorTargetDesc.format = colorFormat_;
-    colorTargetDesc.blend_state = Boilerplate::OVER_BLEND_MODE;
+    SDL_GPUColorTargetDescription colorTargetDescs[2]{};
+    colorTargetDescs[0].format = colorFormat_;
+    colorTargetDescs[0].blend_state = Boilerplate::OVER_BLEND_MODE;
+    colorTargetDescs[1].format = colorFormat_;
 
     SDL_GPUGraphicsPipelineCreateInfo info{};
     info.vertex_shader = vertexShader;
     info.fragment_shader = fragmentShader;
     info.vertex_input_state = vertexInputState;
     info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    info.target_info.color_target_descriptions = &colorTargetDesc;
-    info.target_info.num_color_targets = 1;
+    info.target_info.color_target_descriptions = colorTargetDescs;
+    info.target_info.num_color_targets = 2;
     info.target_info.has_depth_stencil_target = true;
     info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
     // GREATER: keep only fragments BEHIND the stored (world) depth → occluded.
@@ -732,4 +791,82 @@ bool SkinnedRenderer::createChamsPipeline()
     if (!chamsPipeline_)
         std::cerr << "SkinnedRenderer: failed to create chams pipeline\n";
     return chamsPipeline_ != nullptr;
+}
+
+bool SkinnedRenderer::createKillcamHighlightPipeline()
+{
+    Boilerplate::ShaderInfo vertexShaderInfo{};
+    vertexShaderInfo.path = "shaders-new/skinned_geometry.vert";
+    vertexShaderInfo.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+    vertexShaderInfo.uniformBufferCount = 1;
+    vertexShaderInfo.storageBufferCount = 2;
+
+    Boilerplate::ShaderInfo fragmentShaderInfo{};
+    fragmentShaderInfo.path = "shaders-new/chams.frag";
+    fragmentShaderInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+
+    SDL_GPUShader* vertexShader = Boilerplate::loadShader(device_, vertexShaderInfo, shaderFormat_);
+    SDL_GPUShader* fragmentShader = Boilerplate::loadShader(device_, fragmentShaderInfo, shaderFormat_);
+    if (!vertexShader || !fragmentShader) {
+        if (vertexShader)
+            SDL_ReleaseGPUShader(device_, vertexShader);
+        if (fragmentShader)
+            SDL_ReleaseGPUShader(device_, fragmentShader);
+        return false;
+    }
+
+    SDL_GPUVertexBufferDescription vertexBufferDescription{};
+    vertexBufferDescription.slot = 0;
+    vertexBufferDescription.pitch = sizeof(ModelVertex);
+    vertexBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+    SDL_GPUVertexBufferDescription boneBufferDescription{};
+    boneBufferDescription.slot = 1;
+    boneBufferDescription.pitch = sizeof(BoneInfluence);
+    boneBufferDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+    std::vector<SDL_GPUVertexBufferDescription> bufferDescriptions = {vertexBufferDescription, boneBufferDescription};
+    std::vector<SDL_GPUVertexAttribute> attributes = {
+        Boilerplate::makeAttribute(0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, position), 0),
+        Boilerplate::makeAttribute(1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(ModelVertex, normal), 0),
+        Boilerplate::makeAttribute(2, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(ModelVertex, texCoord), 0),
+        Boilerplate::makeAttribute(3, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(ModelVertex, tangent), 0),
+        Boilerplate::makeAttribute(4, SDL_GPU_VERTEXELEMENTFORMAT_INT4, offsetof(BoneInfluence, boneIndices), 1),
+        Boilerplate::makeAttribute(5, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(BoneInfluence, boneWeights), 1),
+    };
+
+    SDL_GPUVertexInputState vertexInputState{};
+    vertexInputState.num_vertex_buffers = static_cast<Uint32>(bufferDescriptions.size());
+    vertexInputState.vertex_buffer_descriptions = bufferDescriptions.data();
+    vertexInputState.num_vertex_attributes = static_cast<Uint32>(attributes.size());
+    vertexInputState.vertex_attributes = attributes.data();
+
+    SDL_GPUColorTargetDescription colorTargetDescs[2]{};
+    colorTargetDescs[0].format = colorFormat_;
+    colorTargetDescs[0].blend_state = Boilerplate::OVER_BLEND_MODE;
+    colorTargetDescs[1].format = colorFormat_;
+
+    SDL_GPUGraphicsPipelineCreateInfo info{};
+    info.vertex_shader = vertexShader;
+    info.fragment_shader = fragmentShader;
+    info.vertex_input_state = vertexInputState;
+    info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    info.target_info.color_target_descriptions = colorTargetDescs;
+    info.target_info.num_color_targets = 2;
+    info.target_info.has_depth_stencil_target = true;
+    info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_ALWAYS;
+    info.depth_stencil_state.enable_depth_test = false;
+    info.depth_stencil_state.enable_depth_write = false;
+    info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+    killcamHighlightPipeline_ = SDL_CreateGPUGraphicsPipeline(device_, &info);
+
+    SDL_ReleaseGPUShader(device_, vertexShader);
+    SDL_ReleaseGPUShader(device_, fragmentShader);
+
+    if (!killcamHighlightPipeline_)
+        std::cerr << "SkinnedRenderer: failed to create killcam highlight pipeline\n";
+    return killcamHighlightPipeline_ != nullptr;
 }

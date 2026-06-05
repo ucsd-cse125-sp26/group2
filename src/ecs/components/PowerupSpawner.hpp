@@ -16,4 +16,5 @@ struct PowerupSpawner
     PowerupType type = PowerupType::Damage; ///< Type of powerup this spawner provides.
     float spawnCooldown = 0;                ///< Seconds remaining before the powerup reappears.
     bool hasPowerup = false;                ///< True if powerup is available for pickup.
+    bool hasSpawnedOnce = false;            ///< True after the initial delayed spawn has completed.
 };

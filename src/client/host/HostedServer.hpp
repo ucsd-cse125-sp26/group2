@@ -18,12 +18,14 @@ struct HostConfigState
     int port;                    ///< Requested port when useSpecificPort is true; 0 means auto.
     bool useSpecificPort;        ///< True when the user explicitly selected a port.
     bool useLegacyTcp;           ///< True to force the hosted server to legacy TCP transport.
-    bool persistAfterClientExit; ///< UI-only persistence request; not wired yet.
+    bool persistAfterClientExit; ///< True to detach the hosted server after launch so it survives client exit.
     bool advertiseGlobal;        ///< Initial global-directory visibility for the hosted server.
     bool advertiseLan;           ///< Initial LAN-discovery visibility for the hosted server.
     std::string serverName;      ///< Name advertised in LAN/global server browsers for this hosted session.
     int killsToWin;              ///< Match config: kill threshold to win, sent to the server on launch and update.
     int maxPlayers;              ///< Match config: maximum number of connected players accepted by the server.
+    float powerupInitialSpawnDelaySeconds; ///< Match config: seconds before powerups first appear.
+    float powerupRespawnCooldownSeconds;   ///< Match config: seconds before picked-up powerups reappear.
 };
 
 /// @brief Reserved metadata for an active hosted session.

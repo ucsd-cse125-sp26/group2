@@ -51,7 +51,13 @@ public:
     /// the device exists.  Does NOT allocate any GPU resources yet; those
     /// are created lazily on the first `setRig` / `setFrame` call.
     /// @param device  Borrowed; the device must outlive this SkinnedRenderer.
-    void init(SDL_GPUDevice* device, SDL_GPUTextureFormat& colorTarget, const SDL_GPUShaderFormat& shaderFormat);
+    void init(SDL_GPUDevice* device,
+              SDL_GPUTextureFormat& colorTarget,
+              const SDL_GPUShaderFormat& shaderFormat);
+
+    /// @brief Enable/disable per-instance frustum culling in setFrame. Defaults
+    /// to true.
+    void setFrustumCullEnabled(bool enabled) { frustumCullEnabled_ = enabled; }
 
     /// @brief Install the shared character rig.  Call ONCE after `init`.
     /// @param meshes     One source-mesh entry per skinned mesh in the rig (typically 1-3 for humanoid rigs).
@@ -137,12 +143,18 @@ public:
     /// UBO slot 0 (NewRenderer::drawGeometryDepthPass does this).
     void drawDepth(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
 
-    /// @brief Draw the killcam "chams" silhouette: the flagged killer instance
-    /// (materialId == 1) rendered flat-red with a GREATER depth test, so only
-    /// the parts occluded by world geometry show through. No-op when no
-    /// instance this frame is flagged. Must be called BEFORE `draw()` so the
-    /// depth buffer still holds world-only geometry.
+    /// @brief Draw wallhack chams for flagged instances.
+    ///
+    /// Material id 2 renders flat-red with a GREATER depth test, so only the
+    /// parts occluded by world geometry show through. Must be called BEFORE
+    /// `draw()` so the depth buffer still holds world-only geometry.
     void drawChams(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
+
+    /// @brief Draw the killcam killer full-body red highlight.
+    ///
+    /// Material id 1 renders after the normal skinned pass so the killer body is
+    /// visibly red in the killcam, matching the weapon highlight.
+    void drawKillcamHighlight(SDL_GPURenderPass* renderPass, SDL_GPUCommandBuffer* cmd);
 
     /// @brief Release all GPU resources owned by this subsystem.
     /// Called from `NewRenderer::quit` (BEFORE the device is destroyed).
@@ -196,10 +208,11 @@ private:
 
     bool createSkinnedDepthPipeline(const SDL_GPUShaderFormat& shaderFormat);
 
-    /// @brief Create the killcam chams pipeline: same skinned vertex shader,
-    /// a flat-red fragment shader, GREATER depth compare, depth-write off,
-    /// alpha-blended onto the HDR color target.
+    /// @brief Create the wallhack chams pipeline.
     bool createChamsPipeline();
+
+    /// @brief Create the killcam full-body highlight pipeline.
+    bool createKillcamHighlightPipeline();
 
     // ─── Borrowed ────────────────────────────────────────────────────────────
     SDL_GPUDevice* device_ = nullptr;
@@ -215,23 +228,31 @@ private:
     /// the rig into the shadow map so the player casts a shadow.
     SDL_GPUGraphicsPipeline* depthPipeline_ = nullptr;
 
-    /// @brief Killcam "chams" pipeline: flat-red, GREATER depth test, no depth
-    /// write — draws the flagged killer where it's occluded by world geometry.
+    /// @brief Wallhack chams pipeline: flat-red, GREATER depth test, no depth
+    /// write — draws flagged players where they're occluded by world geometry.
     SDL_GPUGraphicsPipeline* chamsPipeline_ = nullptr;
+
+    /// @brief Killcam full-body red highlight pipeline.
+    SDL_GPUGraphicsPipeline* killcamHighlightPipeline_ = nullptr;
 
     /// @brief Cached formats (from init) needed to build the chams pipeline.
     SDL_GPUTextureFormat colorFormat_{};
     SDL_GPUShaderFormat shaderFormat_{};
 
-    /// @brief Indices into `frameInstances_` of every chams-flagged instance
-    /// this frame (materialId == 1): the killcam killer and/or wallhack-revealed
-    /// enemies. Empty when nothing is flagged.
+    /// @brief Indices into `frameInstances_` of wallhack-revealed enemies.
     std::vector<Uint32> chamsIndices_;
+
+    /// @brief Indices into `frameInstances_` of killcam-highlighted killers.
+    std::vector<Uint32> killcamHighlightIndices_;
 
     // ─── Owned: rig (set once via setRig) ────────────────────────────────────
     bool rigInstalled_ = false;
     int numJoints_ = 0;
     std::vector<SkinnedMesh> skinnedMeshes_;
+    // Disabled by default: Game submits the skinned frame before drawFrame()
+    // updates the renderer camera, so culling here can use a stale frustum and
+    // make remote players flicker/fade at the edge of the previous frame's view.
+    bool frustumCullEnabled_ = false; ///< Optional per-instance frustum cull in setFrame.
 
     // Bind-pose bounding sphere (rig-local space), computed in `setRig` and used
     // by `setFrame` to frustum-cull instances.  The radius carries an animation

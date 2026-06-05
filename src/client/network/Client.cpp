@@ -1400,7 +1400,9 @@ void Client::dispatchMessage(const uint8_t* data, Uint32 size)
                                  latestLobbyPlayers_->end(),
                                  [id = lu.id](const LobbyPlayer& p) { return p.id == id; }))
                 {
-                    latestLobbyPlayers_->push_back(LobbyPlayer{lu.id});
+                    LobbyPlayer joined{lu.id};
+                    joined.displayName = lu.displayName;
+                    latestLobbyPlayers_->push_back(joined);
                 }
                 break;
             case LobbyUpdateEvent::Type::PlayerLeft:

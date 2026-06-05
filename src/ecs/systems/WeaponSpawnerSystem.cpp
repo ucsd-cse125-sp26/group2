@@ -57,12 +57,13 @@ inline void checkForPlayers(Registry& registry,
             const WeaponConfig config = getWeaponConfig(spawner.type);
             GunInstance& primary = getSlot(weapon, WeaponSlot::PRIMARY);
             GunInstance& secondary = getSlot(weapon, WeaponSlot::SECONDARY);
-            if (primary.type == spawner.type) {
-                primary.totalAmmo = config.defaultAmmoCapacity;
-                spawner.hasWeapon = false;
-                spawner.spawnCooldown = weaponCooldownTime;
-            } else if (secondary.type == spawner.type) {
-                secondary.totalAmmo = config.defaultAmmoCapacity;
+
+            if (auto* match = findSlotWithType(weapon, spawner.type)) {
+                match->totalAmmo = calcPickupReserve(match->totalAmmo,
+                                                     match->currentMagAmmo,
+                                                     config.defaultAmmoCapacity,
+                                                     config.magazineSize,
+                                                     spawner.type);
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
             }
@@ -79,14 +80,12 @@ inline void checkForPlayers(Registry& registry,
 
             // Never hold two of the same gun: if either slot already has this
             // type, top up that slot instead of placing a duplicate.
-            if (primary.type == spawner.type) {
-                primary.totalAmmo = config.defaultAmmoCapacity;
-                spawner.hasWeapon = false;
-                spawner.spawnCooldown = weaponCooldownTime;
-                return;
-            }
-            if (secondary.type == spawner.type) {
-                secondary.totalAmmo = config.defaultAmmoCapacity;
+            if (auto* match = findSlotWithType(weapon, spawner.type)) {
+                match->totalAmmo = calcPickupReserve(match->totalAmmo,
+                                                     match->currentMagAmmo,
+                                                     config.defaultAmmoCapacity,
+                                                     config.magazineSize,
+                                                     spawner.type);
                 spawner.hasWeapon = false;
                 spawner.spawnCooldown = weaponCooldownTime;
                 return;
@@ -96,8 +95,11 @@ inline void checkForPlayers(Registry& registry,
             // The currently-equipped slot is preferred; otherwise fall back to
             // PRIMARY. Grenades are not weapon-slot pickups; they live in
             // GrenadeState.
-            const WeaponSlot targetSlot =
-                canAcceptType(weapon.current, spawner.type) ? weapon.current : WeaponSlot::PRIMARY;
+            WeaponSlot targetSlot = canAcceptType(weapon.current, spawner.type) ? weapon.current : WeaponSlot::PRIMARY;
+            if (primary.type == WeaponType::None)
+                targetSlot = WeaponSlot::PRIMARY;
+            else if (secondary.type == WeaponType::None)
+                targetSlot = WeaponSlot::SECONDARY;
             if (!canAcceptType(targetSlot, spawner.type)) {
                 // Fallback slot can't accept this type either (e.g. a
                 // hypothetical world-spawned grenade hitting this path).
@@ -112,12 +114,15 @@ inline void checkForPlayers(Registry& registry,
             // with a brief pickup-immunity so it isn't instantly re-grabbed.
             const glm::vec3 rightAxis{std::cos(input.yaw), 0.0f, -std::sin(input.yaw)};
             const glm::vec3 dropFrom = pos.value + glm::vec3{0.0f, shape.halfExtents.y * 0.4f * spawnEyeDir, 0.0f};
-            pendingDrops.push_back(PendingWeaponDrop{
-                .pos = dropFrom,
-                .vel = rightAxis * 180.0f + glm::vec3{0.0f, 120.0f * spawnEyeDir, 0.0f},
-                .gun = slot,
-                .pickupDelay = k_swapDropPickupDelay,
-            });
+            if (slot.type != WeaponType::None) {
+                pendingDrops.push_back(PendingWeaponDrop{
+                    .pos = dropFrom,
+                    .vel = rightAxis * 180.0f + glm::vec3{0.0f, 120.0f * spawnEyeDir, 0.0f},
+                    .gun = slot,
+                    .pickupDelay = k_swapDropPickupDelay,
+                });
+            }
+
             slot = GunInstance{
                 .type = spawner.type,
                 .totalAmmo = config.defaultAmmoCapacity,

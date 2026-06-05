@@ -29,6 +29,7 @@ inline const AssetDefinition kMapAsset{
     .filename = "maps/map1.glb",
     .role = AssetRole::Map,
     .loadScale = 39.3701f,
+    .flipUVs = true,
 };
 
 inline const std::array<AssetDefinition, 0> kPropAssets{};
@@ -49,12 +50,53 @@ inline const AssetDefinition kGrenadeModel{
     .renderScale = {20.0f, 20.0f, 20.0f},
 };
 
+inline const AssetDefinition kHEGrenadeModel{
+    .name = "he_grenade",
+    .filename = "grenade_he.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {9.0f, 9.0f, 9.0f},
+};
+
+inline const AssetDefinition kStickyGrenadeModel{
+    .name = "sticky_grenade",
+    .filename = "grenade_sticky.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {0.4f, 0.4f, 0.4f},
+};
+
+inline const AssetDefinition kMolotovModel{
+    .name = "molotov",
+    .filename = "grenade_fire.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {600.0f, 600.0f, 600.0f},
+};
+
 inline const AssetDefinition kMedkitModel{
     .name = "medkit",
     .filename = "medkit.glb",
     .role = AssetRole::Entity,
     .flipUVs = true,
     .renderScale = {20.0f, 20.0f, 20.0f},
+};
+
+inline const AssetDefinition kShieldPowerupModel{
+    .name = "shield_powerup",
+    .filename = "shield_powerup.glb",
+    .role = AssetRole::Entity,
+    .loadTranslation = {2.7208f, -3.3826f, -0.2294f},
+    .flipUVs = true,
+    .renderScale = {20.0f, 20.0f, 20.0f},
+};
+
+inline const AssetDefinition kDamagePowerupModel{
+    .name = "damage_powerup",
+    .filename = "damage_powerup.glb",
+    .role = AssetRole::Entity,
+    .flipUVs = true,
+    .renderScale = {9.0f, 9.0f, 9.0f},
 };
 
 inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAssets{{
@@ -81,7 +123,7 @@ inline const std::array<AssetDefinition, kRenderableWeaponTypeCount> kWeaponAsse
      .renderScale = {20.0f, 20.0f, 20.0f},
      .renderRotationDegrees = {0.0f, 0.0f, 0.0f}},
     {.name = "weapon_shotgun",
-     .filename = "energy_gun.glb", // reuses energy gun mesh until a dedicated shotgun model is authored.
+     .filename = "shotgun.glb",
      .role = AssetRole::Entity,
      .flipUVs = true,
      .renderScale = {20.0f, 20.0f, 20.0f},

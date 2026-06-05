@@ -14,7 +14,6 @@
 #include "debug/FrameRecorder.hpp"
 #include "ecs/AssetCatalog.hpp"
 #include "ecs/AssetRegistry.hpp"
-#include "ecs/components/GripPose.hpp"
 #include "ecs/components/Hitbox.hpp"
 #include "ecs/components/InputSnapshot.hpp"
 #include "ecs/components/PlayerSimState.hpp"
@@ -27,6 +26,7 @@
 #include "ecs/registry/Registry.hpp"
 #include "hud/Hud.hpp"
 #include "menus/pause/PauseMenu.hpp"
+#include "menus/postmatch/PostMatchResult.hpp"
 #include "network/Client.hpp"
 #include "network/MatchStatus.hpp"
 #include "network/RegistrySerialization.hpp"
@@ -52,6 +52,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 /// @brief Top-level client game object.
@@ -110,6 +111,9 @@ public:
 
     /// @brief True once the server has returned the match phase to the lobby.
     bool shouldReturnToLobby() const;
+
+    /// @brief Return the final scoreboard snapshot captured before the server reset match stats.
+    std::optional<PostMatchResult> consumePostMatchResult();
 
     /// @brief True if the user requested leaving the match for the main menu, then clear that request.
     bool consumeReturnToMainMenu();
@@ -179,6 +183,9 @@ private:
                                const PredictedPlayerState* predictedAtAck,
                                const std::optional<PredictedPlayerState>& currentBeforeSnapshot) const noexcept;
 
+    /// @brief Refresh the final post-match scoreboard snapshot while FINISHED stats are still replicated.
+    void updateCachedPostMatchResult();
+
     /// @brief Enter chat input mode and release normal gameplay input capture.
     void openChat();
 
@@ -218,13 +225,13 @@ private:
     NewRenderer* renderer = nullptr;                               ///< Borrowed renderer owned by App.
     Registry registry;                                             ///< The shared ECS registry.
     Client* client = nullptr;                                      ///< Borrowed UDP network client owned by App.
+    SfxSystem* sfxSystem = nullptr;                                ///< Borrowed audio system owned by App.
     UserSettings* userSettings = nullptr;                          ///< Borrowed user settings owned by App.
     std::string_view userSettingsPath_;                            ///< Borrowed save path for user settings.
     std::optional<registry_serialization::Loader> snapshotLoader_; ///< Incremental loader; created on first snapshot.
     std::optional<entt::entity>
         mappedLocalPlayerEntity_;  ///< Local-registry entity for this client's player, once assigned.
     ParticleSystem particleSystem; ///< Client-side VFX particle system.
-    SfxSystem sfxSystem;           ///< Client-side sound effects system.
     VoiceChatSystem voiceChat_;    ///< Push-to-talk Opus proximity voice chat.
     Hud hud_;                      ///< In-game HUD overlay system.
     entt::dispatcher dispatcher;   ///< Event bus for weapon/impact/explosion events.
@@ -319,8 +326,10 @@ private:
                                            ///  vs only after a physics tick (false).
     bool inputSyncedWithPhysics = true;    ///< Sample mouse once per physics tick (true)
                                            ///  vs every iterate() call (false).
-    bool limitFPSToMonitor = false;        ///< VSync on (true) / off (false). Default off = uncapped
-                                           ///  (mailbox present); toggle live via the debug menu.
+    bool limitFPSToMonitor = true;         ///< VSync on (true) / off (false). Default ON: caps to the
+                                           ///  monitor refresh, which frees GPU headroom and removes the
+                                           ///  near-light stutter. Toggle live via the debug menu; the
+                                           ///  GROUP2_CLIENT_UNCAPPED env var / bench mode still force it off.
 
     Uint64 softLimitPeriod = 0;            ///< Target frame period in perf-counter ticks (0 = disabled).
     Uint64 softLimitNextFrame = 0;         ///< Performance counter target for next frame deadline.
@@ -343,19 +352,19 @@ private:
     // emote wheel fires, cleared on local movement/combat input or death. Drives
     // the local animator override, the third-person emote camera, and showing
     // the local body. Remote players' emotes are server-driven via AnimSnapshot.
-    int localEmote_{-1};            ///< Active local emote index (EmoteCatalog), or -1.
-    float emoteCamBlend_{0.0f};     ///< 0 = first-person, 1 = third-person emote cam (eased).
+    int localEmote_{-1};        ///< Active local emote index (EmoteCatalog), or -1.
+    float emoteCamBlend_{0.0f}; ///< 0 = first-person, 1 = third-person emote cam (eased).
 
     // Killcam: while dead and awaiting respawn, hold the camera at the death
     // position and rotate it to keep the killer centered on screen.
-    bool killcamActive_{false};            ///< True this frame while the killcam is driving the camera.
-    glm::vec3 killcamEye_{0.0f};           ///< Eye position locked at the moment of death.
-    float killcamYaw_{0.0f};               ///< Smoothed killcam yaw (radians).
-    float killcamPitch_{0.0f};             ///< Smoothed killcam pitch (radians).
-    glm::vec3 killcamKillerCenter_{0.0f};  ///< Killer AABB center (world) for the HUD label.
-    glm::vec3 killcamKillerHalf_{0.0f};    ///< Killer AABB half-extents (world) for the HUD label.
+    bool killcamActive_{false};                    ///< True this frame while the killcam is driving the camera.
+    glm::vec3 killcamEye_{0.0f};                   ///< Eye position locked at the moment of death.
+    float killcamYaw_{0.0f};                       ///< Smoothed killcam yaw (radians).
+    float killcamPitch_{0.0f};                     ///< Smoothed killcam pitch (radians).
+    glm::vec3 killcamKillerCenter_{0.0f};          ///< Killer AABB center (world) for the HUD label.
+    glm::vec3 killcamKillerHalf_{0.0f};            ///< Killer AABB half-extents (world) for the HUD label.
     entt::entity killcamKillerEntity_{entt::null}; ///< Killer entity (drives the chams pass), or null.
-    std::string killcamKillerName_;        ///< Killer's display nickname (for the HUD label).
+    std::string killcamKillerName_;                ///< Killer's display nickname (for the HUD label).
 
     // Map collision data — loaded from GLB, owns the vectors that back activeWorld().
     physics::MapCollisionData mapCollision_;
@@ -373,7 +382,12 @@ private:
 
     int rocketProjectileModelIdx_ = -1;
     int grenadeModelIdx_ = -1;
+    int heGrenadeModelIdx_ = -1;
+    int stickyGrenadeModelIdx_ = -1;
+    int molotovModelIdx_ = -1;
     int medkitModelIdx_ = -1;
+    int shieldPowerupModelIdx_ = -1;
+    int damagePowerupModelIdx_ = -1;
 
     // Dynamic lighting test controls (ImGui-tunable)
     bool showDynLightUI_ = false;                        ///< Show the Dynamic Lighting panel.
@@ -402,8 +416,13 @@ private:
 
     // Sound state tracking
     bool wasChargingRailgun_ = false; ///< True last frame if local player was charging RailGun.
-    bool wasBeamActive_ = false;      ///< True last frame if local player's beam was active.
-    SfxSystem::SourceHandle beamLoopHandle_ = SfxSystem::kInvalidSource;
+    struct BeamAudioState
+    {
+        bool active = false;
+        float loopDelaySeconds = 0.0f;
+        SfxSystem::SourceHandle loopHandle = SfxSystem::kInvalidSource;
+    };
+    std::unordered_map<entt::entity, BeamAudioState> beamAudioStates_;
     std::unordered_map<entt::entity, std::array<float, 5>> footstepPhases_;
     std::unordered_map<entt::entity, float> footstepCooldowns_;
 
@@ -576,30 +595,19 @@ private:
     int pendingScrollSwitch_ = 0; ///< +1 = next slot, -1 = previous slot, consumed each frame.
 
     // Third-person weapon tuning (per weapon type, live-adjustable via ImGui)
-    ThirdPersonWeaponParams
-        tpWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from defaults.
-    int tpTuneWeaponIdx_ = 0;                        ///< Which weapon type is being tuned.
-    int tpAnchorTuneStanceIdx_ = 0;                  ///< Which HoldStance the right-hand anchor sliders are editing.
-    float tpAnchorRotStepDeg_ = 5.0f; ///< Delta-rotation step (degrees) for the gimbal-free anchor rotation buttons.
-    float tpAnchorWorldRotStepDeg_ = 5.0f; ///< Delta-rotation step (degrees) for the WORLD-space rotation buttons.
-    bool tpAnchorShowDebugMarker_ = true; ///< Render the red-cube anchor wish-point marker when the 3P tweaker is open.
-    bool tpEnableJointConstraints_ =
-        false; ///< Debug toggle: pass enableJointConstraints into the arm IK targets. Default OFF — current
-               ///< shoulder/elbow/wrist clamps don't contribute usefully and fight the anchor authoring; flip on
-               ///< per-session if testing extreme poses.
-    bool tpEnableReachFade_ = true;   ///< Debug toggle: pass enableReachFade into the arm IK targets. Off = no fade-out
-                                      ///< when target is past arm reach.
-    bool tpFreezeAnimations_ = false; ///< Debug toggle: freeze every animator's playback so world-space anchor sliders
-                                      ///< don't drift from idle bob.
-    bool showTPWeaponUI_ = false;     ///< Show the 3P Weapon Tweaker window.
+    ThirdPersonWeaponParams tpWeaponParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable procedural/scale params.
+    int tpTuneWeaponIdx_ = 0;         ///< Which weapon type the Weapon Hold tweaker is editing.
+    bool tpFreezeAnimations_ = false; ///< Debug: freeze every animator's playback while tuning.
 
-    // Hand mount tuning for third-person player IK / weapon grips.
-    WeaponHandMountParams
-        weaponHandMountParams_[kRenderableWeaponTypeCount]; ///< Runtime-tunable copy; initialised from defaults.
-    WeaponHandMountParams
-        authoredWeaponHandMountParams_[kRenderableWeaponTypeCount]; ///< Defaults loaded from authored weapon assets.
-    int handMountTuneWeaponIdx_ = 0;                                ///< Which weapon type is being tuned.
-    bool showHandMountUI_ = false;                                  ///< Show the Hand Mount Tweaker window.
+    // Third-person FK weapon hold poses (spine-relative gun + per-bone arm angles).
+    std::array<WeaponHoldPose, kRenderableWeaponTypeCount> weaponHoldPoses_{};         ///< Runtime, live-tuned.
+    std::array<WeaponHoldPose, kRenderableWeaponTypeCount> authoredWeaponHoldPoses_{}; ///< Compile-time defaults.
+    std::array<std::string, kRenderableWeaponTypeCount> weaponHoldPosePaths_{};        ///< Source TOML path each.
+    std::array<std::filesystem::file_time_type, kRenderableWeaponTypeCount> weaponHoldPoseMTimes_{};
+    float holdPoseReloadAccumulator_ = 0.0f; ///< Seconds since last hot-reload mtime poll (~4 Hz throttle).
+    float holdRotStepDeg_ = 5.0f;            ///< Delta-rotation step (deg) for the spine-rotation buttons.
+    bool holdShowDebugMarker_ = true;        ///< Render the spine-anchor axis marker when the tweaker is open.
+    bool showWeaponHoldUI_ = false;          ///< Show the Weapon Hold tweaker window.
 
     // First-person arm mount tuning (separate from third-person grips).
     FirstPersonHandMountParams
@@ -647,36 +655,18 @@ private:
     // Animation subsystem — shared rig + clip library + skinning backend.
     // CharacterAnimators (one per animated entity) hold non-owning refs.
     CharacterRig charRig_;       ///< Shared skinned rig (skeleton + bind pose + weights).
-    int rightHandJointIdx_ = -1; ///< Cached "mixamorig:RightHand" joint index (-1 = not present). Used to parent the
-                                 ///< third-person weapon mesh to the right-hand bone after IK.
-    int spine2JointIdx_ = -1;    ///< Cached "mixamorig:Spine2" joint index. Anchors the chest-relative right-hand IK
-                                 ///< target so the gun is held in front of the chest instead of hanging at the side.
-    std::array<WeaponGripPose, kRenderableWeaponTypeCount>
-        weaponGripPoses_{};      ///< Per-weapon hand grip poses (Phase C+). Indexed by WeaponType. Loaded from
-                                 ///< assets/weapons/<name>.grip.toml at startup. Joint data is per-joint (pitch, yaw)
-    ///< degrees so the editor can drive sliders directly against the runtime data; the animator
-    ///< builds a local-space quat per joint on the fly via fingerLocalQuat.
-    /// Per-entity weapon-swap crossfade state (Phase F polish). When an entity's
-    /// equipped weapon changes, we reset `swapElapsedSec` to 0 and ramp the
-    /// `*GripWeight` from 0 → 1 over `kGripSwapDurationSec` so the hands briefly
-    /// release the grip and re-grip the new weapon. `lastType` tracks the last
-    /// observed weapon so we can detect the transition next frame.
+    int rightHandJointIdx_ = -1; ///< Cached "mixamorig:RightHand" joint index (-1 = not present).
+    int spine2JointIdx_ = -1;    ///< Cached "mixamorig:Spine2" joint index. The weapon is a rigid child of this bone
+                                 ///< and the FK arm hold hangs off it.
+    /// Per-entity weapon-swap fade state. When an entity's equipped weapon
+    /// changes we reset `swapElapsedSec` to 0 and ramp the arm-FK hold weight
+    /// 0 → 1 over the swap duration so the arms re-pose onto the new weapon.
     struct GripSwapState
     {
         WeaponType lastType = WeaponType::Rifle;
-        float swapElapsedSec = 1.0f; ///< Initialised to "already done" so freshly-seen entities start at full grip.
+        float swapElapsedSec = 1.0f; ///< Initialised to "already done" so freshly-seen entities start at full hold.
     };
     std::unordered_map<entt::entity, GripSwapState> gripSwapState_{};
-    std::array<std::string, kRenderableWeaponTypeCount>
-        weaponGripPosePaths_{};  ///< Source TOML path for each weapon's grip pose; populated at init and reused for
-                                 ///< Phase E hot-reload + the per-finger authoring UI's save button.
-    std::array<std::filesystem::file_time_type, kRenderableWeaponTypeCount>
-        weaponGripPoseMTimes_{}; ///< Last-observed mtime; reload triggers when the file mtime changes (Phase E hot
-                                 ///< reload).
-    float gripPoseReloadAccumulator_ =
-        0.0f; ///< Seconds since last hot-reload mtime poll; throttle to ~4 Hz to keep filesystem stats cheap.
-    bool showGripPoseUI_ = false;          ///< Show the per-finger Grip Pose Tweaker window (Phase E authoring tool).
-    int gripPoseTuneWeaponIdx_ = 0;        ///< Which weapon's grip pose is being authored in the tweaker UI.
     float aimAssistParityAccumSec_ = 0.0f; ///< Seconds since the last aim-assist parity check log line (Phase F).
     AnimationLibrary animLibrary_;         ///< Collection of ozz clips on the shared rig.
     CpuLbsSkinningBackend skinBackend_;    ///< Phase-1 CPU linear-blend-skinning backend.
@@ -686,6 +676,11 @@ private:
     float kRigVerticalOffset_ =
         -90.0f;                ///< Per-renderable Y translation for animated characters (auto-calculated, tunable).
     float rigMeshMinY_ = 0.0f; ///< Minimum Y of the bind-pose mesh vertices (model space).
+
+    /// Entities for which a death-dissolve particle burst has already been
+    /// spawned (so we emit it exactly once per death). Cleared per-entity on
+    /// respawn. See the death-capture pass in the render submit.
+    std::unordered_set<entt::entity> dissolveSpawned_;
 
     // FPS ring buffer -- inter-render deltas, newest at (head-1) % size
     float fpsHistory[k_fpsHistorySize] = {}; ///< Circular buffer of per-frame FPS samples.
@@ -760,6 +755,7 @@ private:
     MatchPhase currentMatchPhase = MatchPhase::LOBBY; ///< Latest match phase update from the server.
     ClientId currentWinnerId = ClientId{-1};          ///< ClientId of the current match winner, if in POSTMATCH.
     float countdownTimer = 0.0f; ///< Countdown timer for transitions between match phases (e.g. warmup to in-progress).
+    std::optional<PostMatchResult> cachedPostMatchResult_; ///< Final scoreboard snapshot captured during FINISHED.
     bool returnToLobbyRequested = false;         ///< Latched true when server sends MATCH_STATE with phase == LOBBY.
     bool returnToMainMenuRequested_ = false;     ///< Latched true when the pause menu or disconnect requests leaving.
     bool serverShutdownNoticeRequested_ = false; ///< Latched true when leaving because the server connection closed.
@@ -774,16 +770,19 @@ private:
     bool cachedMuzzleValid_ = false;
 
     // Local player's right-palm world position, cached from the viewmodel pass
-    // each frame. Used as the muzzle-flash origin (see muzzleFlashOrigin).
+    // each frame. Used as a muzzle-flash fallback when the weapon has no muzzle marker.
     glm::vec3 cachedRightPalmWorld_{0.0f};
     bool cachedRightPalmValid_ = false;
 
-    /// @brief World position to spawn the local player's muzzle flash: 10 units
-    /// in front of the right palm along the current view direction, falling back
-    /// to @p fallback (the weapon muzzle) when the palm position isn't available.
+    /// @brief World position to spawn local weapon particles.
+    ///
+    /// Prefer the weapon model's tagged muzzle marker (`is_muzzle` / socket_muzzle)
+    /// when available; fall back to the old palm-derived point for untagged guns.
     [[nodiscard]] glm::vec3 muzzleFlashOrigin(const glm::vec3& fallback) const
     {
         constexpr float k_muzzleFlashForward = 10.0f;
+        if (cachedMuzzleValid_)
+            return cachedMuzzleWorld_;
         return cachedRightPalmValid_ ? cachedRightPalmWorld_ + cachedCamFwd_ * k_muzzleFlashForward : fallback;
     }
 

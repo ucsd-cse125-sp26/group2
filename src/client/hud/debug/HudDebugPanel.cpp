@@ -11,19 +11,23 @@
 #include "hud/widgets/DamageNumberWidget.hpp"
 #include "hud/widgets/EnemyWorldHealthBar.hpp"
 #include "hud/widgets/EquipmentSlots.hpp"
+#include "hud/widgets/EquippedWeaponsWidget.hpp"
 #include "hud/widgets/GravityIndicator.hpp"
 #include "hud/widgets/GrenadeSlotsWidget.hpp"
 #include "hud/widgets/HealthArmorBar.hpp"
 #include "hud/widgets/HitMarkerWidget.hpp"
 #include "hud/widgets/KdaCounter.hpp"
 #include "hud/widgets/KillFeed.hpp"
+#include "hud/widgets/LevelBarWidget.hpp"
 #include "hud/widgets/Minimap.hpp"
+#include "hud/widgets/MiniScoreboardWidget.hpp"
 #include "hud/widgets/PickupNotification.hpp"
 #include "hud/widgets/PickupPrompt.hpp"
 #include "hud/widgets/PopupNotification.hpp"
 #include "hud/widgets/RailgunScopeWidget.hpp"
 #include "hud/widgets/RoundTimer.hpp"
 #include "hud/widgets/Scoreboard.hpp"
+#include "hud/widgets/ScreenDecalWidget.hpp"
 #include "hud/widgets/TeamStatusBar.hpp"
 #include "hud/widgets/VignetteWidget.hpp"
 
@@ -87,6 +91,8 @@ const char* widgetName(const HudWidget* widget)
         return "Enemy World Health Bar";
     if (dynamic_cast<const EquipmentSlots*>(widget))
         return "Ability Slots";
+    if (dynamic_cast<const EquippedWeaponsWidget*>(widget))
+        return "Equipped Weapons";
     if (dynamic_cast<const GravityIndicator*>(widget))
         return "Gravity Indicator";
     if (dynamic_cast<const GrenadeSlotsWidget*>(widget))
@@ -99,8 +105,12 @@ const char* widgetName(const HudWidget* widget)
         return "KDA Counter";
     if (dynamic_cast<const KillFeed*>(widget))
         return "Kill Feed";
+    if (dynamic_cast<const LevelBarWidget*>(widget))
+        return "Level Bar";
     if (dynamic_cast<const Minimap*>(widget))
         return "Minimap";
+    if (dynamic_cast<const MiniScoreboardWidget*>(widget))
+        return "Mini Scoreboard";
     if (dynamic_cast<const PickupNotification*>(widget))
         return "Pickup Notification";
     if (dynamic_cast<const PickupPrompt*>(widget))
@@ -113,6 +123,10 @@ const char* widgetName(const HudWidget* widget)
         return "Round Timer";
     if (dynamic_cast<const Scoreboard*>(widget))
         return "Scoreboard";
+    if (dynamic_cast<const TopDecalWidget*>(widget))
+        return "Top Decal";
+    if (dynamic_cast<const BottomDecalWidget*>(widget))
+        return "Bottom Decal";
     if (dynamic_cast<const TeamStatusBar*>(widget))
         return "Team Status Bar";
     if (dynamic_cast<const VignetteWidget*>(widget))
@@ -209,10 +223,35 @@ void writeEquipmentElementParams(std::ostream& out,
     writeEquipmentSvgTuningParam(out, first, name + "IconFrame", element.iconFrame);
     writeEquipmentSvgTuningParam(out, first, name + "Icon", element.icon);
     writeEquipmentSvgTuningParam(out, first, name + "Bar", element.bar);
+    writeFloatParam(out, first, name + "BindingOffsetX", element.bindingOffsetX);
+    writeFloatParam(out, first, name + "BindingOffsetY", element.bindingOffsetY);
     writeBoolParam(out, first, name + "IconFlipX", element.flipIconX);
     writeBoolParam(out, first, name + "IconFlipY", element.flipIconY);
     writeBoolParam(out, first, name + "BarFlipX", element.flipBarX);
     writeBoolParam(out, first, name + "BarFlipY", element.flipBarY);
+}
+
+void writeEquippedWeaponSvgTuningParam(std::ostream& out,
+                                       bool& first,
+                                       std::string_view prefix,
+                                       const EquippedWeaponsWidget::SvgPartTuning& tuning)
+{
+    const std::string name(prefix);
+    writeFloatParam(out, first, name + "Scale", tuning.scale);
+    writeFloatParam(out, first, name + "OffsetX", tuning.offsetX);
+    writeFloatParam(out, first, name + "OffsetY", tuning.offsetY);
+    writeFloatParam(out, first, name + "StretchX", tuning.stretchX);
+    writeFloatParam(out, first, name + "StretchY", tuning.stretchY);
+}
+
+void writeEquippedWeaponSlotParams(std::ostream& out,
+                                   bool& first,
+                                   std::string_view prefix,
+                                   const EquippedWeaponsWidget::WeaponSlotTuning& slot)
+{
+    const std::string name(prefix);
+    writeEquippedWeaponSvgTuningParam(out, first, name + "Frame", slot.frame);
+    writeEquippedWeaponSvgTuningParam(out, first, name + "Icon", slot.icon);
 }
 
 void editEquipmentSvgTuning(const char* label, EquipmentSlots::SvgComponentTuning& tuning)
@@ -228,6 +267,29 @@ void editEquipmentSvgTuning(const char* label, EquipmentSlots::SvgComponentTunin
     ImGui::TreePop();
 }
 
+void editEquippedWeaponSvgTuning(const char* label, EquippedWeaponsWidget::SvgPartTuning& tuning)
+{
+    if (!ImGui::TreeNode(label))
+        return;
+
+    editFloat("Scale", tuning.scale, 0.01f, 0.01f, 8.0f);
+    editFloat("Offset X", tuning.offsetX, 0.5f, -2000.0f, 2000.0f);
+    editFloat("Offset Y", tuning.offsetY, 0.5f, -2000.0f, 2000.0f);
+    editFloat("Stretch X", tuning.stretchX, 0.01f, 0.01f, 8.0f);
+    editFloat("Stretch Y", tuning.stretchY, 0.01f, 0.01f, 8.0f);
+    ImGui::TreePop();
+}
+
+void editEquippedWeaponSlot(const char* label, EquippedWeaponsWidget::WeaponSlotTuning& slot)
+{
+    if (!ImGui::TreeNode(label))
+        return;
+
+    editEquippedWeaponSvgTuning("Frame SVG", slot.frame);
+    editEquippedWeaponSvgTuning("Weapon Icon SVG", slot.icon);
+    ImGui::TreePop();
+}
+
 void editEquipmentElement(const char* label, EquipmentSlots::AbilityElementTuning& element)
 {
     if (!ImGui::TreeNode(label))
@@ -240,6 +302,8 @@ void editEquipmentElement(const char* label, EquipmentSlots::AbilityElementTunin
     editEquipmentSvgTuning("Cooldown Bar SVG", element.bar);
     ImGui::Checkbox("Flip Bar X", &element.flipBarX);
     ImGui::Checkbox("Flip Bar Y", &element.flipBarY);
+    editFloat("Binding Text Offset X", element.bindingOffsetX, 0.5f, -200.0f, 200.0f);
+    editFloat("Binding Text Offset Y", element.bindingOffsetY, 0.5f, -200.0f, 200.0f);
     ImGui::TreePop();
 }
 
@@ -262,6 +326,11 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "clipFontSize", ammo->clipFontSize);
         writeFloatParam(out, first, "reserveFontSize", ammo->reserveFontSize);
         writeFloatParam(out, first, "edgePadding", ammo->edgePadding);
+        writeFloatParam(out, first, "backgroundScale", ammo->backgroundScale);
+        writeFloatParam(out, first, "backgroundOffsetX", ammo->backgroundOffsetX);
+        writeFloatParam(out, first, "backgroundOffsetY", ammo->backgroundOffsetY);
+        writeFloatParam(out, first, "backgroundStretchX", ammo->backgroundStretchX);
+        writeFloatParam(out, first, "backgroundStretchY", ammo->backgroundStretchY);
     } else if (const auto* crosshair = dynamic_cast<const CrosshairWidget*>(&widget)) {
         writeFloatParam(out, first, "gap", crosshair->style.gap);
         writeFloatParam(out, first, "length", crosshair->style.length);
@@ -285,12 +354,21 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "iconFrameWidth", equipment->iconFrameWidth);
         writeFloatParam(out, first, "iconFrameHeight", equipment->iconFrameHeight);
         writeFloatParam(out, first, "abilityIconSize", equipment->abilityIconSize);
+        writeFloatParam(out, first, "bindingFontSize", equipment->bindingFontSize);
         writeFloatParam(out, first, "barWidth", equipment->barWidth);
         writeFloatParam(out, first, "barHeight", equipment->barHeight);
         writeFloatParam(out, first, "iconBarGap", equipment->iconBarGap);
         writeFloatParam(out, first, "centerGap", equipment->centerGap);
         writeEquipmentElementParams(out, first, "left", equipment->abilityElements[0]);
         writeEquipmentElementParams(out, first, "right", equipment->abilityElements[1]);
+    } else if (const auto* equipped = dynamic_cast<const EquippedWeaponsWidget*>(&widget)) {
+        writeFloatParam(out, first, "frameWidth", equipped->frameWidth);
+        writeFloatParam(out, first, "frameHeight", equipped->frameHeight);
+        writeFloatParam(out, first, "frameGap", equipped->frameGap);
+        writeFloatParam(out, first, "weaponIconWidth", equipped->weaponIconWidth);
+        writeFloatParam(out, first, "weaponIconHeight", equipped->weaponIconHeight);
+        writeEquippedWeaponSlotParams(out, first, "primary", equipped->slots[0]);
+        writeEquippedWeaponSlotParams(out, first, "secondary", equipped->slots[1]);
     } else if (const auto* gravity = dynamic_cast<const GravityIndicator*>(&widget)) {
         writeFloatParam(out, first, "diskSize", gravity->diskSize);
     } else if (const auto* grenades = dynamic_cast<const GrenadeSlotsWidget*>(&widget)) {
@@ -302,8 +380,15 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "countPadY", grenades->countPadY);
         writeFloatParam(out, first, "countCharacterGap", grenades->countCharacterGap);
         writeFloatParam(out, first, "iconPadRight", grenades->iconPadRight);
-        writeFloatParam(out, first, "cornerCut", grenades->cornerCut);
-        writeFloatParam(out, first, "borderThickness", grenades->borderThickness);
+        writeFloatParam(out, first, "elementsRotationDeg", grenades->elementsRotationDeg);
+        writeFloatParam(out, first, "backgroundWidth", grenades->backgroundWidth);
+        writeFloatParam(out, first, "backgroundHeight", grenades->backgroundHeight);
+        writeFloatParam(out, first, "backgroundScale", grenades->backgroundScale);
+        writeFloatParam(out, first, "backgroundOffsetX", grenades->backgroundOffsetX);
+        writeFloatParam(out, first, "backgroundOffsetY", grenades->backgroundOffsetY);
+        writeFloatParam(out, first, "backgroundStretchX", grenades->backgroundStretchX);
+        writeFloatParam(out, first, "backgroundStretchY", grenades->backgroundStretchY);
+        writeFloatParam(out, first, "backgroundRotationDeg", grenades->backgroundRotationDeg);
     } else if (const auto* health = dynamic_cast<const HealthArmorBar*>(&widget)) {
         writeFloatParam(out, first, "panelWidth", health->panelWidth);
         writeFloatParam(out, first, "barHeight", health->barHeight);
@@ -334,6 +419,15 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "fontSize", feed->fontSize);
         writeFloatParam(out, first, "fadeOutDuration", feed->fadeOutDuration);
         writeIntParam(out, first, "maxEntries", feed->maxEntries);
+    } else if (const auto* level = dynamic_cast<const LevelBarWidget*>(&widget)) {
+        writeFloatParam(out, first, "barWidth", level->barWidth);
+        writeFloatParam(out, first, "barHeight", level->barHeight);
+        writeFloatParam(out, first, "svgScale", level->svgScale);
+        writeFloatParam(out, first, "svgOffsetX", level->svgOffsetX);
+        writeFloatParam(out, first, "svgOffsetY", level->svgOffsetY);
+        writeFloatParam(out, first, "svgStretchX", level->svgStretchX);
+        writeFloatParam(out, first, "svgStretchY", level->svgStretchY);
+        writeFloatParam(out, first, "svgRotationDeg", level->svgRotationDeg);
     } else if (const auto* minimap = dynamic_cast<const Minimap*>(&widget)) {
         writeFloatParam(out, first, "mapSize", minimap->mapSize);
         writeFloatParam(out, first, "dotSize", minimap->dotSize);
@@ -341,6 +435,27 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "dotZoneOffsetX", minimap->dotZoneOffsetX);
         writeFloatParam(out, first, "dotZoneOffsetY", minimap->dotZoneOffsetY);
         writeBoolParam(out, first, "showDotZoneDebug", minimap->showDotZoneDebug);
+    } else if (const auto* mini = dynamic_cast<const MiniScoreboardWidget*>(&widget)) {
+        writeFloatParam(out, first, "backgroundWidth", mini->backgroundWidth);
+        writeFloatParam(out, first, "backgroundHeight", mini->backgroundHeight);
+        writeFloatParam(out, first, "backgroundScale", mini->backgroundScale);
+        writeFloatParam(out, first, "backgroundOffsetX", mini->backgroundOffsetX);
+        writeFloatParam(out, first, "backgroundOffsetY", mini->backgroundOffsetY);
+        writeFloatParam(out, first, "backgroundStretchX", mini->backgroundStretchX);
+        writeFloatParam(out, first, "backgroundStretchY", mini->backgroundStretchY);
+        writeFloatParam(out, first, "backgroundRotationDeg", mini->backgroundRotationDeg);
+        writeFloatParam(out, first, "rowsRotationDeg", mini->rowsRotationDeg);
+        writeBoolParam(out, first, "showRowBorders", mini->showRowBorders);
+        writeFloatParam(out, first, "rowFontSize", mini->rowFontSize);
+        writeFloatParam(out, first, "scoreFontSize", mini->scoreFontSize);
+        writeFloatParam(out, first, "colorCubeSize", mini->colorCubeSize);
+        writeFloatParam(out, first, "rowBorderPadding", mini->rowBorderPadding);
+        writeFloatParam(out, first, "cubeTextGap", mini->cubeTextGap);
+        writeFloatParam(out, first, "nameScoreGap", mini->nameScoreGap);
+        writeFloatParam(out, first, "topRowOffsetX", mini->rows[0].offsetX);
+        writeFloatParam(out, first, "topRowOffsetY", mini->rows[0].offsetY);
+        writeFloatParam(out, first, "bottomRowOffsetX", mini->rows[1].offsetX);
+        writeFloatParam(out, first, "bottomRowOffsetY", mini->rows[1].offsetY);
     } else if (const auto* pickup = dynamic_cast<const PickupNotification*>(&widget)) {
         writeFloatParam(out, first, "entryHeight", pickup->entryHeight);
         writeFloatParam(out, first, "entryGap", pickup->entryGap);
@@ -362,6 +477,15 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "headerFontSize", scoreboard->headerFontSize);
         writeFloatParam(out, first, "rowFontSize", scoreboard->rowFontSize);
         writeFloatParam(out, first, "rowHeight", scoreboard->rowHeight);
+    } else if (const auto* decal = dynamic_cast<const ScreenDecalWidget*>(&widget)) {
+        writeFloatParam(out, first, "decalWidth", decal->decalWidth);
+        writeFloatParam(out, first, "decalHeight", decal->decalHeight);
+        writeFloatParam(out, first, "decalScale", decal->decalScale);
+        writeFloatParam(out, first, "decalOffsetX", decal->decalOffsetX);
+        writeFloatParam(out, first, "decalOffsetY", decal->decalOffsetY);
+        writeFloatParam(out, first, "decalStretchX", decal->decalStretchX);
+        writeFloatParam(out, first, "decalStretchY", decal->decalStretchY);
+        writeFloatParam(out, first, "decalRotationDeg", decal->decalRotationDeg);
     } else if (const auto* team = dynamic_cast<const TeamStatusBar*>(&widget)) {
         writeFloatParam(out, first, "indicatorSize", team->indicatorSize);
         writeFloatParam(out, first, "indicatorSpacing", team->indicatorSpacing);
@@ -460,6 +584,11 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Clip Font Size", ammo->clipFontSize, 0.5f, 6.0f, 160.0f);
         editFloat("Reserve Font Size", ammo->reserveFontSize, 0.5f, 6.0f, 120.0f);
         editFloat("Edge Padding", ammo->edgePadding, 0.5f, 0.0f, 200.0f);
+        editFloat("BG Scale", ammo->backgroundScale, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Offset X", ammo->backgroundOffsetX, 0.5f, -400.0f, 400.0f);
+        editFloat("BG Offset Y", ammo->backgroundOffsetY, 0.5f, -400.0f, 400.0f);
+        editFloat("BG Stretch X", ammo->backgroundStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Stretch Y", ammo->backgroundStretchY, 0.01f, 0.01f, 8.0f);
     } else if (auto* crosshair = dynamic_cast<CrosshairWidget*>(&widget)) {
         editFloat("Gap", crosshair->style.gap, 0.25f, 0.0f, 200.0f);
         editFloat("Arm Length", crosshair->style.length, 0.25f, 0.0f, 200.0f);
@@ -483,12 +612,21 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Icon Frame Width", equipment->iconFrameWidth, 1.0f, 8.0f, 400.0f);
         editFloat("Icon Frame Height", equipment->iconFrameHeight, 1.0f, 8.0f, 400.0f);
         editFloat("Ability Icon Size", equipment->abilityIconSize, 0.5f, 4.0f, 300.0f);
+        editFloat("Binding Font Size", equipment->bindingFontSize, 0.5f, 4.0f, 80.0f);
         editFloat("Bar Width", equipment->barWidth, 1.0f, 8.0f, 800.0f);
         editFloat("Bar Height", equipment->barHeight, 1.0f, 8.0f, 400.0f);
         editFloat("Icon-Bar Gap", equipment->iconBarGap, 0.5f, 0.0f, 200.0f);
         editFloat("Center Gap", equipment->centerGap, 0.5f, 0.0f, 200.0f);
         editEquipmentElement("Left Ability SVGs", equipment->abilityElements[0]);
         editEquipmentElement("Right Ability SVGs", equipment->abilityElements[1]);
+    } else if (auto* equipped = dynamic_cast<EquippedWeaponsWidget*>(&widget)) {
+        editFloat("Frame Width", equipped->frameWidth, 1.0f, 8.0f, 800.0f);
+        editFloat("Frame Height", equipped->frameHeight, 1.0f, 8.0f, 400.0f);
+        editFloat("Frame Gap", equipped->frameGap, 0.5f, 0.0f, 120.0f);
+        editFloat("Weapon Icon Width", equipped->weaponIconWidth, 1.0f, 4.0f, 600.0f);
+        editFloat("Weapon Icon Height", equipped->weaponIconHeight, 1.0f, 4.0f, 300.0f);
+        editEquippedWeaponSlot("Primary Slot SVGs", equipped->slots[0]);
+        editEquippedWeaponSlot("Secondary Slot SVGs", equipped->slots[1]);
     } else if (auto* gravity = dynamic_cast<GravityIndicator*>(&widget)) {
         editFloat("Disk Size", gravity->diskSize, 1.0f, 4.0f, 240.0f);
     } else if (auto* grenades = dynamic_cast<GrenadeSlotsWidget*>(&widget)) {
@@ -500,8 +638,15 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Count Pad Y", grenades->countPadY, 0.25f, 0.0f, 40.0f);
         editFloat("Count Character Gap", grenades->countCharacterGap, 0.25f, 0.0f, 20.0f);
         editFloat("Icon Pad Right", grenades->iconPadRight, 0.25f, 0.0f, 40.0f);
-        editFloat("Corner Cut", grenades->cornerCut, 0.25f, 0.0f, 40.0f);
-        editFloat("Border Thickness", grenades->borderThickness, 0.25f, 0.0f, 20.0f);
+        editFloat("Elements Rotation", grenades->elementsRotationDeg, 0.5f, -180.0f, 180.0f);
+        editFloat("BG Width", grenades->backgroundWidth, 1.0f, 8.0f, 800.0f);
+        editFloat("BG Height", grenades->backgroundHeight, 1.0f, 8.0f, 400.0f);
+        editFloat("BG Scale", grenades->backgroundScale, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Offset X", grenades->backgroundOffsetX, 0.5f, -400.0f, 400.0f);
+        editFloat("BG Offset Y", grenades->backgroundOffsetY, 0.5f, -400.0f, 400.0f);
+        editFloat("BG Stretch X", grenades->backgroundStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Stretch Y", grenades->backgroundStretchY, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Rotation", grenades->backgroundRotationDeg, 0.5f, -180.0f, 180.0f);
     } else if (auto* health = dynamic_cast<HealthArmorBar*>(&widget)) {
         editFloat("Panel Width", health->panelWidth, 1.0f, 80.0f, 1200.0f);
         editFloat("Bar Height", health->barHeight, 0.5f, 4.0f, 200.0f);
@@ -532,6 +677,15 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Font Size", feed->fontSize, 0.5f, 4.0f, 96.0f);
         editFloat("Fade Out Duration", feed->fadeOutDuration, 0.05f, 0.0f, 20.0f);
         ImGui::DragInt("Max Entries", &feed->maxEntries, 0.1f, 1, 40);
+    } else if (auto* level = dynamic_cast<LevelBarWidget*>(&widget)) {
+        editFloat("Bar Width", level->barWidth, 1.0f, 8.0f, 2000.0f);
+        editFloat("Bar Height", level->barHeight, 0.5f, 4.0f, 400.0f);
+        editFloat("SVG Scale", level->svgScale, 0.01f, 0.01f, 8.0f);
+        editFloat("SVG Offset X", level->svgOffsetX, 0.5f, -2000.0f, 2000.0f);
+        editFloat("SVG Offset Y", level->svgOffsetY, 0.5f, -2000.0f, 2000.0f);
+        editFloat("SVG Stretch X", level->svgStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("SVG Stretch Y", level->svgStretchY, 0.01f, 0.01f, 8.0f);
+        editFloat("SVG Rotation", level->svgRotationDeg, 0.5f, -180.0f, 180.0f);
     } else if (auto* minimap = dynamic_cast<Minimap*>(&widget)) {
         editFloat("Map Size", minimap->mapSize, 1.0f, 20.0f, 800.0f);
         editFloat("Dot Size", minimap->dotSize, 0.25f, 0.0f, 80.0f);
@@ -539,6 +693,27 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Dot Zone Offset X", minimap->dotZoneOffsetX, 0.5f, -400.0f, 400.0f);
         editFloat("Dot Zone Offset Y", minimap->dotZoneOffsetY, 0.5f, -400.0f, 400.0f);
         ImGui::Checkbox("Show Dot Zone Debug", &minimap->showDotZoneDebug);
+    } else if (auto* mini = dynamic_cast<MiniScoreboardWidget*>(&widget)) {
+        editFloat("BG Width", mini->backgroundWidth, 1.0f, 8.0f, 800.0f);
+        editFloat("BG Height", mini->backgroundHeight, 1.0f, 8.0f, 400.0f);
+        editFloat("BG Scale", mini->backgroundScale, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Offset X", mini->backgroundOffsetX, 0.5f, -2000.0f, 2000.0f);
+        editFloat("BG Offset Y", mini->backgroundOffsetY, 0.5f, -2000.0f, 2000.0f);
+        editFloat("BG Stretch X", mini->backgroundStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Stretch Y", mini->backgroundStretchY, 0.01f, 0.01f, 8.0f);
+        editFloat("BG Rotation", mini->backgroundRotationDeg, 0.5f, -180.0f, 180.0f);
+        editFloat("Rows Rotation", mini->rowsRotationDeg, 0.5f, -180.0f, 180.0f);
+        ImGui::Checkbox("Show Row Borders", &mini->showRowBorders);
+        editFloat("Row Font Size", mini->rowFontSize, 0.5f, 4.0f, 96.0f);
+        editFloat("Score Font Size", mini->scoreFontSize, 0.5f, 4.0f, 96.0f);
+        editFloat("Color Cube Size", mini->colorCubeSize, 0.5f, 2.0f, 80.0f);
+        editFloat("Row Border Padding", mini->rowBorderPadding, 0.5f, 0.0f, 80.0f);
+        editFloat("Cube/Text Gap", mini->cubeTextGap, 0.5f, 0.0f, 80.0f);
+        editFloat("Name/Score Gap", mini->nameScoreGap, 0.5f, 0.0f, 160.0f);
+        editFloat("Top Row Offset X", mini->rows[0].offsetX, 0.5f, -400.0f, 400.0f);
+        editFloat("Top Row Offset Y", mini->rows[0].offsetY, 0.5f, -400.0f, 400.0f);
+        editFloat("Bottom Row Offset X", mini->rows[1].offsetX, 0.5f, -400.0f, 400.0f);
+        editFloat("Bottom Row Offset Y", mini->rows[1].offsetY, 0.5f, -400.0f, 400.0f);
     } else if (auto* pickup = dynamic_cast<PickupNotification*>(&widget)) {
         editFloat("Entry Height", pickup->entryHeight, 0.5f, 4.0f, 120.0f);
         editFloat("Entry Gap", pickup->entryGap, 0.25f, 0.0f, 80.0f);
@@ -560,6 +735,15 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Header Font Size", scoreboard->headerFontSize, 0.5f, 4.0f, 120.0f);
         editFloat("Row Font Size", scoreboard->rowFontSize, 0.5f, 4.0f, 120.0f);
         editFloat("Row Height", scoreboard->rowHeight, 0.5f, 4.0f, 160.0f);
+    } else if (auto* decal = dynamic_cast<ScreenDecalWidget*>(&widget)) {
+        editFloat("Decal Width", decal->decalWidth, 1.0f, 8.0f, 4000.0f);
+        editFloat("Decal Height", decal->decalHeight, 1.0f, 8.0f, 1000.0f);
+        editFloat("Decal Scale", decal->decalScale, 0.01f, 0.01f, 8.0f);
+        editFloat("Decal Offset X", decal->decalOffsetX, 0.5f, -2000.0f, 2000.0f);
+        editFloat("Decal Offset Y", decal->decalOffsetY, 0.5f, -2000.0f, 2000.0f);
+        editFloat("Decal Stretch X", decal->decalStretchX, 0.01f, 0.01f, 8.0f);
+        editFloat("Decal Stretch Y", decal->decalStretchY, 0.01f, 0.01f, 8.0f);
+        editFloat("Decal Rotation", decal->decalRotationDeg, 0.5f, -180.0f, 180.0f);
     } else if (auto* team = dynamic_cast<TeamStatusBar*>(&widget)) {
         editFloat("Indicator Size", team->indicatorSize, 0.5f, 2.0f, 120.0f);
         editFloat("Indicator Spacing", team->indicatorSpacing, 0.5f, 0.0f, 80.0f);
@@ -588,6 +772,9 @@ void HudDebugPanel::build(Hud& hud, bool* open)
         ImGui::SetTooltip(
             "Draws inactive HUD widgets for layout debugging. Railgun Scope still uses normal visibility.");
     }
+    ImGui::Checkbox("Show Alignment Border", &hud.debugShowAlignmentBorder());
+    editFloat("Border Left/Right Offset", hud.debugAlignmentBorderOffsetX(), 1.0f, 0.0f, 4000.0f);
+    editFloat("Border Top/Bottom Offset", hud.debugAlignmentBorderOffsetY(), 1.0f, 0.0f, 4000.0f);
 
     static std::array<char, 260> savePath{"hud_tweaks.json"};
     static std::string saveStatus;

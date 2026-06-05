@@ -17,6 +17,7 @@ struct BuildResult
     bool startMatchClicked = false; ///< True if the host pressed "Start Match" this frame.
     bool returnToMenuClicked = false;       ///< True if the user pressed "Return to Main Menu" this frame.
     bool returnToHostConfigClicked = false; ///< True if the host wants to return to HostConfig without disconnecting.
+    bool hostAddressesVisibilityToggled = false; ///< True if the host toggled address visibility this frame.
 };
 
 /// @brief Input data consumed by lobby_ui::buildPlayerList each frame.
@@ -33,6 +34,7 @@ struct LobbyUIConfig
     bool isHosting;                          ///< True if this client owns a local hosted server process.
     std::string_view hostLanIp;              ///< LAN IPv4 shown to other local players.
     uint16_t hostPort;                       ///< Port shown to other players when hosting locally.
+    bool hostAddressesVisible;               ///< True if the host address strip is currently visible.
 };
 
 namespace lobby_ui

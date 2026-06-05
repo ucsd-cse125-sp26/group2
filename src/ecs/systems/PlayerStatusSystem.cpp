@@ -19,6 +19,7 @@
 #include "ecs/components/PlayerSimState.hpp" // also pulls in PlayerVisState
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PowerupState.hpp"
+#include "ecs/components/Ragdoll.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/RigidBody.hpp"
@@ -247,12 +248,6 @@ inline void handleRespawn(entt::entity& player, Registry& registry)
         .currentMagAmmo = rifleConfig.magazineSize,
         .fireCooldown = 0.0f,
     };
-    getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
-        .type = WeaponType::RailGun,
-        .totalAmmo = railConfig.defaultAmmoCapacity,
-        .currentMagAmmo = railConfig.magazineSize,
-        .fireCooldown = 0.0f,
-    };
     registry.emplace_or_replace<WeaponState>(player, weaponState);
     registry.emplace_or_replace<GrenadeState>(player, makeDefaultGrenadeState());
 }
@@ -294,8 +289,10 @@ inline void handleDeath(entt::entity& player,
                                g,
                                /*pickupDelay=*/0.0f);
         };
-        spawnDrop(getSlot(deathWeapons, WeaponSlot::PRIMARY), -1.0f);
-        spawnDrop(getSlot(deathWeapons, WeaponSlot::SECONDARY), +1.0f);
+        if (getSlot(deathWeapons, WeaponSlot::PRIMARY).type != WeaponType::None)
+            spawnDrop(getSlot(deathWeapons, WeaponSlot::PRIMARY), -1.0f);
+        if (getSlot(deathWeapons, WeaponSlot::SECONDARY).type != WeaponType::None)
+            spawnDrop(getSlot(deathWeapons, WeaponSlot::SECONDARY), +1.0f);
 
         // Phase 13 ragdoll: capture pre-death velocity BEFORE we clear it
         // below, so the corpse inherits the player's motion at the moment
@@ -304,7 +301,8 @@ inline void handleDeath(entt::entity& player,
         // and instead reads the 15 ragdoll bone transforms via
         // `RagdollBoneTag` to drive the skinned-mesh palette.
         destroyRagdoll(registry, player);
-        spawnRagdoll(registry, player);
+        if (kRagdollsEnabled)
+            spawnRagdoll(registry, player);
 
         // Update death
         auto& deadVis = registry.get_or_emplace<PlayerVisState>(player);

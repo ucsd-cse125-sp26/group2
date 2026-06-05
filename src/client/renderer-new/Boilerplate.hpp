@@ -63,6 +63,7 @@ struct PipelineDescription
     const VertexInputLayout* vertexInputLayout = nullptr;
     const SDL_GPUColorTargetDescription* colorTarget;
 
+    bool reverseZ = false;
     bool depthTest = false;
     bool depthWrite = true;
 
@@ -107,7 +108,7 @@ SDL_GPUColorTargetInfo makeColorTargetLoad(SDL_GPUTexture* texture);
 /// @brief Create a depth/stencil render-target info that clears to depth 1.0.
 /// @param texture The depth texture.
 /// @return Populated SDL_GPUDepthStencilTargetInfo.
-SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture, Uint8 layer, bool store);
+SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture, Uint8 layer, bool store,bool reverseZ);
 
 /// @brief Create a texture-sampler binding pair for fragment shader use.
 /// @param texture The GPU texture.
@@ -158,6 +159,16 @@ SDL_GPUShader* loadShader(SDL_GPUDevice* device, const ShaderInfo& shaderInfo, S
 /// @return The created pipeline, or nullptr on failure.
 SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 SDL_GPUTextureFormat& colorFormat,
+                                                SDL_GPUShaderFormat shaderFormat,
+                                                const ShaderInfo& vertexShaderInfo,
+                                                const ShaderInfo& fragmentShaderInfo,
+                                                const VertexInputLayout& vertexInputLayout,
+                                                bool enableDepth = true,
+                                                bool overBlending = false);
+
+/// @brief Create a graphics pipeline with multiple color render targets.
+SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
+                                                const std::vector<SDL_GPUTextureFormat>& colorFormats,
                                                 SDL_GPUShaderFormat shaderFormat,
                                                 const ShaderInfo& vertexShaderInfo,
                                                 const ShaderInfo& fragmentShaderInfo,
@@ -241,7 +252,7 @@ SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device,bool nearest);
 /// @brief Create a linear-filtering, comparison sampler (for shadow map depth comparison).
 /// @param device The GPU device.
 /// @return The created GPU sampler.
-SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device, SDL_GPUFilter filterMode);
+SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device, SDL_GPUFilter filterMode,bool reverseZ);
 
 /// @brief Create a linear-filtering, clamp-to-edge sampler.
 /// @param device The GPU device.

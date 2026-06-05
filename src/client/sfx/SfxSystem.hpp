@@ -55,6 +55,9 @@ public:
     /// @return True on success; false on any audio-init failure (non-fatal — game continues mute).
     bool init();
 
+    /// @brief Per-frame update: decrement cooldowns and retire finished voices.
+    void update(float dt);
+
     /// @brief Per-frame update: decrement cooldowns, retire finished voices, detect state changes.
     /// @param dt        Frame delta time in seconds.
     /// @param registry  ECS registry (read-only — used to detect health/death/kill changes).
@@ -89,6 +92,8 @@ public:
                       const glm::vec3& velocity = glm::vec3{0.0f},
                       float gain = 1.0f);
     void stopSource(SourceHandle handle);
+    void playMusic(SfxId id, float gain = 1.0f);
+    void stopMusic();
     void setListener(const audio::ListenerState& listener);
     void setAudioObjectTransform(audio::AudioObjectId object,
                                  const glm::vec3& position,
@@ -128,6 +133,7 @@ public:
     [[nodiscard]] const audio::AudioRuntime& audioRuntime() const noexcept { return audioRuntime_; }
     [[nodiscard]] const audio::AudioRuntimeStats& audioStats() const noexcept { return audioRuntime_.stats(); }
     [[nodiscard]] const SfxRuntimeStats& sfxStats() const noexcept { return sfxStats_; }
+    [[nodiscard]] float clipDuration(SfxId id) const noexcept;
     [[nodiscard]] std::uint32_t activeSourceCount() const noexcept;
     [[nodiscard]] std::uint32_t activeVoiceSourceCount() const noexcept;
 
@@ -173,6 +179,8 @@ private:
     std::array<Source, kMaxSources> sources_{};
     SourceHandle nextSourceHandle_ = 1;
     std::unordered_map<int, SourceHandle> voiceSources_;
+    SourceHandle musicHandle_ = kInvalidSource;
+    SfxId currentMusic_ = SfxId::_Count;
 
     float masterVolume_ = 0.8f;
     std::array<float, static_cast<size_t>(SfxCategory::_Count)> categoryVolumes_{};
@@ -193,6 +201,10 @@ private:
     float prevArmor_ = 100.0f;
     int prevDeaths_ = 0;
     int prevKills_ = 0;
+    bool prevLocalReloading_ = false;
+    bool prevLocalRailgunCharging_ = false;
+    std::unordered_map<entt::entity, float> prevGrenadeCooldowns_;
+    std::unordered_map<entt::entity, bool> knownFireFields_;
     float healingSoundCooldown_ = 0.0f; ///< Throttle the looping heal tick sound.
     bool stateInitialized_ = false;     ///< Skip sounds on the very first update().
 

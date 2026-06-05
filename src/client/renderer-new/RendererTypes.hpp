@@ -58,6 +58,7 @@ struct EntityRenderCmd
     int32_t modelIndex = -1;        ///< Renderer-side model handle (returned by `loadSceneModel` / `uploadSceneModel`).
     glm::mat4 worldTransform{1.0f}; ///< Full world transform (position × rotation × scale).
     glm::vec4 tint{1.0f};           ///< RGB multiplier into baseColorFactor (alpha unused).  Default = no tint.
+    bool occludedSilhouette = false; ///< True = draw an extra flat silhouette only where hidden behind scene depth.
 };
 
 /// @brief Dynamic point light — built by Game, injected into the PBR light array.
@@ -144,7 +145,7 @@ struct SkinnedInstance
 {
     glm::mat4 worldTransform{1.0f}; ///< Rig-local → world.  Composed CPU-side as T * R * S.
     uint32_t paletteBase = 0;       ///< First joint slot in the palette = instanceIndex * numJoints.
-    uint32_t materialId = 0;        ///< Reserved; ignore for now (will index a material table later).
+    uint32_t materialId = 0;        ///< 0=normal, 1=killcam highlight, 2=wallhack chams.
     uint32_t _pad0 = 0;
     uint32_t _pad1 = 0;
     glm::vec4 tint{1.0f, 1.0f, 1.0f, 0.0f}; ///< rgb = per-player color, a = blend factor (0 = no tint).
@@ -168,4 +169,5 @@ struct RigMeshSource
     std::vector<ModelVertex> bindPoseVertices; ///< Bind-pose vertices (never deformed CPU-side).
     std::vector<BoneInfluence> boneInfluences; ///< Parallel to `bindPoseVertices`.  Must be same size.
     std::vector<uint32_t> indices;             ///< Triangle list (3 indices per triangle).
+    uint32_t materialIndex = 0; ///< Source material index — picks this mesh's per-mesh diffuse texture.
 };

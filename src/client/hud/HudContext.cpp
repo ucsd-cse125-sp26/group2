@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 void HudContext::init(const SdfAtlas* atlas, HudSvgAtlas* svgAtlas)
 {
@@ -46,6 +47,22 @@ void HudContext::tintVertices(std::size_t startVertex, HudColor tint)
         vertices_[i].color[1] *= tint.g;
         vertices_[i].color[2] *= tint.b;
         vertices_[i].color[3] *= tint.a;
+    }
+}
+
+void HudContext::rotateVertices(std::size_t startVertex, float cx, float cy, float angleDeg)
+{
+    if (startVertex >= vertices_.size() || std::abs(angleDeg) <= 0.001f)
+        return;
+
+    const float radians = angleDeg * 3.14159265358979323846f / 180.f;
+    const float s = std::sin(radians);
+    const float c = std::cos(radians);
+    for (std::size_t i = startVertex; i < vertices_.size(); ++i) {
+        const float dx = vertices_[i].position[0] - cx;
+        const float dy = vertices_[i].position[1] - cy;
+        vertices_[i].position[0] = cx + dx * c - dy * s;
+        vertices_[i].position[1] = cy + dx * s + dy * c;
     }
 }
 
@@ -377,6 +394,36 @@ float HudContext::measureText(const char* str, float size) const
     return width;
 }
 
+void HudContext::measureTextVerticalBounds(const char* str, float size, float& outTop, float& outBottom) const
+{
+    outTop = 0.f;
+    outBottom = size;
+    if (!sdfAtlas_ || !str || !*str)
+        return;
+
+    const float scale = size / static_cast<float>(SdfAtlas::k_renderPx);
+    float top = std::numeric_limits<float>::max();
+    float bottom = std::numeric_limits<float>::lowest();
+    bool foundGlyph = false;
+
+    for (const char* p = str; *p; ++p) {
+        const GlyphInfo* gi = sdfAtlas_->glyph(static_cast<uint8_t>(*p));
+        if (!gi || gi->width <= 0.f || gi->height <= 0.f)
+            continue;
+
+        const float glyphTop = size - gi->bearing.y * scale;
+        const float glyphBottom = glyphTop + gi->height * scale;
+        top = std::min(top, glyphTop);
+        bottom = std::max(bottom, glyphBottom);
+        foundGlyph = true;
+    }
+
+    if (foundGlyph) {
+        outTop = top;
+        outBottom = bottom;
+    }
+}
+
 // ── Icons ───────────────────────────────────────────────────────────────────
 
 bool HudContext::icon(HudIcon id, float x, float y, float size, HudColor tint)
@@ -408,6 +455,27 @@ bool HudContext::svgFlipped(HudIcon id, float x, float y, float w, float h, bool
     return true;
 }
 
+bool HudContext::svgPartialX(HudIcon id, float x, float y, float w, float h, float fraction, HudColor tint)
+{
+    if (!svgAtlas_ || w <= 0.f || h <= 0.f)
+        return false;
+
+    const float clamped = std::clamp(fraction, 0.f, 1.f);
+    if (clamped <= 0.f)
+        return true;
+
+    const int rasterW = std::max(1, static_cast<int>(std::ceil(w)));
+    const int rasterH = std::max(1, static_cast<int>(std::ceil(h)));
+    const auto sprite = svgAtlas_->sprite(id, rasterW, rasterH);
+    if (!sprite)
+        return false;
+
+    const float visibleW = w * clamped;
+    const float u1 = sprite->u0 + (sprite->u1 - sprite->u0) * clamped;
+    emitQuad(x, y, visibleW, h, sprite->u0, sprite->v0, u1, sprite->v1, tint, 2.f);
+    return true;
+}
+
 bool HudContext::svgMask(HudIcon id, float x, float y, float w, float h, HudColor color)
 {
     return svgMaskFlipped(id, x, y, w, h, false, false, color);
@@ -429,6 +497,90 @@ bool HudContext::svgMaskFlipped(HudIcon id, float x, float y, float w, float h, 
     const float v0 = flipY ? sprite->v1 : sprite->v0;
     const float v1 = flipY ? sprite->v0 : sprite->v1;
     emitQuad(x, y, w, h, u0, v0, u1, v1, color, 7.f);
+    return true;
+}
+
+bool HudContext::svgMaskPartialX(HudIcon id, float x, float y, float w, float h, float fraction, HudColor color)
+{
+    if (!svgAtlas_ || w <= 0.f || h <= 0.f)
+        return false;
+
+    const float clamped = std::clamp(fraction, 0.f, 1.f);
+    if (clamped <= 0.f)
+        return true;
+
+    const int rasterW = std::max(1, static_cast<int>(std::ceil(w)));
+    const int rasterH = std::max(1, static_cast<int>(std::ceil(h)));
+    const auto sprite = svgAtlas_->sprite(id, rasterW, rasterH);
+    if (!sprite)
+        return false;
+
+    const float visibleW = w * clamped;
+    const float u1 = sprite->u0 + (sprite->u1 - sprite->u0) * clamped;
+    emitQuad(x, y, visibleW, h, sprite->u0, sprite->v0, u1, sprite->v1, color, 7.f);
+    return true;
+}
+
+bool HudContext::svgMaskRangeX(
+    HudIcon id, float x, float y, float w, float h, float startFraction, float endFraction, HudColor color)
+{
+    if (!svgAtlas_ || w <= 0.f || h <= 0.f)
+        return false;
+
+    const float start = std::clamp(startFraction, 0.f, 1.f);
+    const float end = std::clamp(endFraction, 0.f, 1.f);
+    if (end <= start)
+        return true;
+
+    const int rasterW = std::max(1, static_cast<int>(std::ceil(w)));
+    const int rasterH = std::max(1, static_cast<int>(std::ceil(h)));
+    const auto sprite = svgAtlas_->sprite(id, rasterW, rasterH);
+    if (!sprite)
+        return false;
+
+    const float drawX = x + w * start;
+    const float drawW = w * (end - start);
+    const float u0 = sprite->u0 + (sprite->u1 - sprite->u0) * start;
+    const float u1 = sprite->u0 + (sprite->u1 - sprite->u0) * end;
+    emitQuad(drawX, y, drawW, h, u0, sprite->v0, u1, sprite->v1, color, 7.f);
+    return true;
+}
+
+bool HudContext::svgMaskPartialXFlipped(HudIcon id,
+                                        float x,
+                                        float y,
+                                        float w,
+                                        float h,
+                                        float fraction,
+                                        bool fromRight,
+                                        bool flipX,
+                                        bool flipY,
+                                        HudColor color)
+{
+    if (!svgAtlas_ || w <= 0.f || h <= 0.f)
+        return false;
+
+    const float clamped = std::clamp(fraction, 0.f, 1.f);
+    if (clamped <= 0.f)
+        return true;
+
+    const int rasterW = std::max(1, static_cast<int>(std::ceil(w)));
+    const int rasterH = std::max(1, static_cast<int>(std::ceil(h)));
+    const auto sprite = svgAtlas_->sprite(id, rasterW, rasterH);
+    if (!sprite)
+        return false;
+
+    const float t0 = fromRight ? 1.f - clamped : 0.f;
+    const float t1 = fromRight ? 1.f : clamped;
+    const float screenX = x + w * t0;
+    const float visibleW = w * (t1 - t0);
+    const float sourceT0 = flipX ? 1.f - t0 : t0;
+    const float sourceT1 = flipX ? 1.f - t1 : t1;
+    const float u0 = sprite->u0 + (sprite->u1 - sprite->u0) * sourceT0;
+    const float u1 = sprite->u0 + (sprite->u1 - sprite->u0) * sourceT1;
+    const float v0 = flipY ? sprite->v1 : sprite->v0;
+    const float v1 = flipY ? sprite->v0 : sprite->v1;
+    emitQuad(screenX, y, visibleW, h, u0, v0, u1, v1, color, 7.f);
     return true;
 }
 

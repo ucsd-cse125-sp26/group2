@@ -9,6 +9,7 @@
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
 #include "renderer-new/NewRenderer.hpp"
+#include "sfx/SfxSystem.hpp"
 
 #include <SDL3/SDL_video.h>
 
@@ -20,6 +21,7 @@ struct AppContext
     SDL_Window& window;                 ///< Main application window.
     NewRenderer& renderer;              ///< Shared renderer owned by App.
     Client& client;                     ///< Shared network client owned by App.
+    SfxSystem& sfxSystem;               ///< Shared audio system owned by App.
     HostedServer& hostedServer;         ///< Local hosted server process owned by App.
     HostConfigState& hostConfigState;   ///< Persistent draft settings for the host config screen.
     NetworkConfig& networkConfig;       ///< Runtime network/discovery config.

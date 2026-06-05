@@ -8,6 +8,8 @@
 #include "ecs/components/Projectile.hpp"
 #include "ecs/registry/Registry.hpp"
 #include "effects/BulletHoleDecal.hpp"
+#include "effects/EnergyTeslaArcEffect.hpp"
+#include "effects/DeathDissolveEffect.hpp"
 #include "effects/ExplosionVfxEffect.hpp"
 #include "effects/HitscanEffect.hpp"
 #include "effects/ImpactEffect.hpp"
@@ -21,6 +23,7 @@
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <string_view>
+#include <unordered_map>
 
 /// @brief Top-level particle system orchestrator.
 ///
@@ -77,6 +80,12 @@ public:
     /// @brief Spawn rocket explosion at pos.
     void spawnExplosion(glm::vec3 pos, float blastRadius);
 
+    /// @brief Spawn a "Thanos snap" death dissolve from a character's posed mesh.
+    /// @param worldPoints World-space points sampled from the death pose.
+    /// @param center      Body center (world) for the radial/sweep basis.
+    /// @param color       Particle tint (mesh has no texture; ~light grey).
+    void spawnDeathDissolve(const std::vector<glm::vec3>& worldPoints, glm::vec3 center, glm::vec4 color);
+
     /// @brief Spawn a fresh typed explosion VFX profile at pos.
     void spawnExplosionVfx(glm::vec3 pos,
                            glm::vec3 normal,
@@ -85,6 +94,14 @@ public:
 
     /// @brief Drive molotov ground-fire visuals from a replicated FireField entity.
     void driveGroundFire(entt::entity fieldEntity, glm::vec3 pos, float radius, float remaining, float duration);
+
+    /// @brief Spawn a short debug preview of the sustained EnergyGun Tesla arc.
+    void debugEnergyTeslaArc(glm::vec3 origin, glm::vec3 guidePoint, glm::vec3 hitPoint, bool locked, float lockStrength);
+    void debugEnergyTeslaPreview(glm::vec3 origin,
+                                  glm::vec3 guidePoint,
+                                  glm::vec3 hitPoint,
+                                  bool locked,
+                                  float lockStrength);
 
     // SDF text (queued per frame, flushed in render)
 
@@ -113,6 +130,17 @@ public:
 
     /// @brief Simulate all effects. Called once per render frame (not per physics tick).
     void update(float dt, const NewCamera& cam, Registry& reg);
+    void update(float dt, glm::vec3 eye, glm::vec3 forward, glm::vec3 right, glm::vec3 up, Registry& reg);
+
+    /// @brief Override the local EnergyGun beam origin with the first-person muzzle marker.
+    void setLocalEnergyBeamOriginOverride(glm::vec3 origin)
+    {
+        localEnergyBeamOriginOverride_ = origin;
+        localEnergyBeamOriginOverrideValid_ = true;
+    }
+
+    /// @brief Clear the local EnergyGun beam origin override for this frame.
+    void clearLocalEnergyBeamOriginOverride() { localEnergyBeamOriginOverrideValid_ = false; }
 
     /// @brief Upload all particle data to GPU. Must be called BEFORE render pass.
     void uploadToGpu(SDL_GPUCommandBuffer* cmd);
@@ -135,7 +163,10 @@ public:
     [[nodiscard]] uint32_t tracerCount() const { return tracers_.count(); }
     [[nodiscard]] uint32_t ribbonVertexCount() const { return ribbons_.count(); }
     [[nodiscard]] uint32_t hitscanBeamCount() const { return hitscan_.activeBeamCount(); }
-    [[nodiscard]] uint32_t arcVertexCount() const { return hitscan_.arcCount() + tesla_.arcCount(); }
+    [[nodiscard]] uint32_t railgunArcVertexCount() const { return hitscan_.arcCount(); }
+    [[nodiscard]] uint32_t energyTeslaArcVertexCount() const { return energyTesla_.arcCount(); }
+    [[nodiscard]] uint32_t energyTeslaBeamCount() const { return energyTesla_.activeBeamCount(); }
+    [[nodiscard]] uint32_t arcVertexCount() const { return hitscan_.arcCount() + tesla_.arcCount() + energyTesla_.arcCount(); }
     [[nodiscard]] uint32_t smokeCount() const { return smoke_.count(); }
     [[nodiscard]] uint32_t explosionSpriteCount() const { return explosionVfx_.spriteCount(); }
     [[nodiscard]] uint32_t explosionDebrisCount() const { return explosionVfx_.debrisCount(); }
@@ -146,15 +177,20 @@ public:
     [[nodiscard]] const SdfAtlas& sdfAtlas() const { return sdf_.atlas(); }
 
 private:
+    /// @brief Emit short smoke puffs behind live rocket projectile entities.
+    void driveRocketSmokeTrails(float dt, Registry& reg);
+
     ParticleRenderer renderer_;
     TracerEffect tracers_;
     RibbonTrail ribbons_;
     HitscanEffect hitscan_;
     TeslaBeamEffect tesla_;
+    EnergyTeslaArcEffect energyTesla_;
     SmokeEffect smoke_;
     ImpactEffect impact_;
     BulletHoleDecal decals_;
     ExplosionVfxEffect explosionVfx_;
+    DeathDissolveEffect death_;
     SdfRenderer sdf_;
 
     // Cached each frame from Camera
@@ -162,11 +198,15 @@ private:
     glm::vec3 camForward_{};
     glm::vec3 camRight_{};
     glm::vec3 camUp_{};
+    glm::vec3 localEnergyBeamOriginOverride_{0.0f};
+    bool localEnergyBeamOriginOverrideValid_ = false;
     float screenW_ = 1280.f;
     float screenH_ = 720.f;
 
     float frameDt_ = 0.016f; // last dt, needed by spawn callbacks
 
-    // Scratch buffer: hitscan + tesla arc verts merged for a single upload.
+    std::unordered_map<entt::entity, float> rocketSmokeAccumulators_;
+
+    // Scratch buffer: railgun + legacy tesla + energy tesla arc verts merged for a single upload.
     std::vector<ArcVertex> arcScratch_;
 };

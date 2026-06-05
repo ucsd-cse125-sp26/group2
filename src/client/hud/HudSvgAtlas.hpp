@@ -69,7 +69,7 @@ private:
     std::unordered_map<CacheKey, HudSvgSprite, CacheKeyHash> sprites_;
 
     [[nodiscard]] bool createGpuResources();
+    void resetPacking();
     [[nodiscard]] std::optional<HudSvgSprite> allocate(HudIcon id, int width, int height);
     [[nodiscard]] bool uploadSlot(const HudSvgBitmap& bitmap, const HudSvgSprite& sprite);
 };
-

@@ -166,6 +166,12 @@ void closeCsv()
 /// @brief Server entry point -- initialises SDL/NET, runs the game loop, and cleans up.
 int main(int argc, char* argv[])
 {
+    // Disable CRT stdio buffering so the hosted-client parent (which reads our
+    // stdout via a pipe to wait for "READY <port>") sees writes immediately
+    // instead of stalling in a fully-buffered FILE* when stdout isn't a TTY.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
+
     // Setup argparse
     argparse::ArgumentParser program("group2_server");
     program.add_argument("--address").help("Address to listen on for game clients (default: 127.0.0.1)");
@@ -181,6 +187,14 @@ int main(int argc, char* argv[])
     program.add_argument("--max-players")
         .scan<'i', int>()
         .help("Maximum accepted players, clamped to 2..128 (default: config global-discovery.max-players)");
+    program.add_argument("--powerup-initial-spawn-seconds")
+        .scan<'g', float>()
+        .default_value(240.0f)
+        .help("Seconds before powerups first appear (default: 240)");
+    program.add_argument("--powerup-respawn-seconds")
+        .scan<'g', float>()
+        .default_value(30.0f)
+        .help("Seconds before picked-up powerups reappear (default: 30)");
     program.add_argument("--idle-shutdown-minutes")
         .scan<'i', int>()
         .help("Minutes of idle time before automatic shutdown. Omit to run indefinitely (default)");
@@ -294,8 +308,12 @@ int main(int argc, char* argv[])
         }
     }
 
-    const MatchConfig initialMatchConfig{.killsToWin = program.get<int>("--killsToWin"),
-                                         .maxPlayers = static_cast<int>(cfg.discovery.maxPlayers)};
+    const MatchConfig initialMatchConfig{
+        .killsToWin = program.get<int>("--killsToWin"),
+        .maxPlayers = static_cast<int>(cfg.discovery.maxPlayers),
+        .powerupInitialSpawnDelaySeconds = program.get<float>("--powerup-initial-spawn-seconds"),
+        .powerupRespawnCooldownSeconds = program.get<float>("--powerup-respawn-seconds"),
+    };
     if (!game.setMatchConfig(initialMatchConfig)) {
         SDL_Log("Invalid match config: killsToWin=%d maxPlayers=%d",
                 initialMatchConfig.killsToWin,

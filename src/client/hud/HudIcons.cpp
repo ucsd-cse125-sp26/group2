@@ -223,7 +223,7 @@ void fall(HudContext& ctx, float x, float y, float size, HudColor color)
 
 void grenade(HudContext& ctx, float x, float y, float size, HudColor color)
 {
-    if (ctx.icon(HudIcon::Grenade, x, y, size, color))
+    if (ctx.icon(HudIcon::FragGrenadeIcon, x, y, size, color))
         return;
 
     const float u = size / 14.f;

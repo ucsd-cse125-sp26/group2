@@ -3,10 +3,13 @@
 
 #include "EquipmentSlots.hpp"
 
+#include "config/InputBindings.hpp"
 #include "hud/HudContext.hpp"
+#include "hud/VoidfallStyle.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <string_view>
 
 namespace
@@ -31,12 +34,106 @@ HudIcon iconForAbility(std::string_view name, bool available)
     if (!available || name == "LOCKED")
         return HudIcon::NoIcon;
     if (name == "GRAPPLE")
-        return HudIcon::Grapple;
+        return HudIcon::GrappleAbilityIcon;
     if (name == "GRAVITY")
-        return HudIcon::Gravity;
-    if (name == "DASH" || name == "RECALL")
-        return HudIcon::Tactical;
+        return HudIcon::GravityAbilityIcon;
+    if (name == "DASH")
+        return HudIcon::DashAbilityIcon;
+    if (name == "RECALL")
+        return HudIcon::RecallAbilityIcon;
     return HudIcon::NoIcon;
+}
+
+std::string compactBindingLabel(std::string label)
+{
+    if (label.empty() || label == "Unbound")
+        return "-";
+    if (label.size() == 1)
+        return label;
+
+    if (label == "Left Shift")
+        return "SHFT";
+    if (label == "Right Shift")
+        return "RSHF";
+    if (label == "Left Ctrl")
+        return "CTRL";
+    if (label == "Right Ctrl")
+        return "RCTRL";
+    if (label == "Left Alt")
+        return "ALT";
+    if (label == "Right Alt")
+        return "RALT";
+    if (label == "Space")
+        return "SPC";
+    if (label == "Return")
+        return "RET";
+    if (label == "Backspace")
+        return "BKSP";
+    if (label == "Tab")
+        return "TAB";
+    if (label == "Escape")
+        return "ESC";
+    if (label == "Mouse Left")
+        return "MB1";
+    if (label == "Mouse Right")
+        return "MB2";
+    if (label == "Mouse Middle")
+        return "MB3";
+    if (label == "Mouse X1")
+        return "M4";
+    if (label == "Mouse X2")
+        return "M5";
+    if (label == "Mouse Wheel Up")
+        return "MWU";
+    if (label == "Mouse Wheel Down")
+        return "MWD";
+    if (label == "Gamepad South")
+        return "A";
+    if (label == "Gamepad East")
+        return "B";
+    if (label == "Gamepad West")
+        return "X";
+    if (label == "Gamepad North")
+        return "Y";
+    if (label == "Gamepad Back")
+        return "BACK";
+    if (label == "Gamepad Start")
+        return "STRT";
+    if (label == "Gamepad Left Stick")
+        return "LS";
+    if (label == "Gamepad Right Stick")
+        return "RS";
+    if (label == "Gamepad Left Shoulder")
+        return "LB";
+    if (label == "Gamepad Right Shoulder")
+        return "RB";
+    if (label == "Gamepad Left Trigger")
+        return "LT";
+    if (label == "Gamepad Right Trigger")
+        return "RT";
+    if (label == "Gamepad D-Pad Up")
+        return "DU";
+    if (label == "Gamepad D-Pad Down")
+        return "DD";
+    if (label == "Gamepad D-Pad Left")
+        return "DL";
+    if (label == "Gamepad D-Pad Right")
+        return "DR";
+    if (label == "Gamepad Touchpad")
+        return "TP";
+
+    constexpr std::string_view gamepadPrefix = "Gamepad ";
+    if (label.rfind(gamepadPrefix.data(), 0) == 0)
+        label.erase(0, gamepadPrefix.size());
+
+    std::string compact;
+    for (const char ch : label) {
+        if (std::isalnum(static_cast<unsigned char>(ch)))
+            compact.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(ch))));
+        if (compact.size() >= 4)
+            break;
+    }
+    return compact.empty() ? "..." : compact;
 }
 
 Rect tunedRect(float baseX,
@@ -59,20 +156,30 @@ Rect tunedRect(float baseX,
     };
 }
 
-void drawCooldownBar(HudContext& ctx, const Rect& bar, AbilitySide side, float charge, bool flipX, bool flipY)
+void drawCooldownBar(HudContext& ctx,
+                     const Rect& bar,
+                     AbilitySide side,
+                     float charge,
+                     bool hasAbility,
+                     bool flipX,
+                     bool flipY)
 {
-    constexpr HudColor kCooldownRed{1.f, 0.f, 0.f, 1.f};
     const bool flipBarX = (side == AbilitySide::Right) != flipX;
-    const float remaining = std::clamp(1.f - charge, 0.f, 1.f);
+    const float fill = hasAbility ? std::clamp(charge, 0.f, 1.f) : 0.f;
 
     ctx.svgFlipped(HudIcon::AbilityBarBack, bar.x, bar.y, bar.w, bar.h, flipBarX, flipY);
 
-    if (remaining > 0.f) {
-        const float fillW = bar.w * remaining;
-        const float clipX = side == AbilitySide::Left ? bar.x : bar.x + bar.w - fillW;
-        ctx.pushClipRect(clipX, bar.y, fillW, bar.h);
-        ctx.svgMaskFlipped(HudIcon::AbilityBarBack, bar.x, bar.y, bar.w, bar.h, flipBarX, flipY, kCooldownRed);
-        ctx.popClipRect();
+    if (fill > 0.f) {
+        ctx.svgMaskPartialXFlipped(HudIcon::AbilityBarBack,
+                                   bar.x,
+                                   bar.y,
+                                   bar.w,
+                                   bar.h,
+                                   fill,
+                                   side == AbilitySide::Right,
+                                   flipBarX,
+                                   flipY,
+                                   voidfall::k_primary);
     }
 
     ctx.svgFlipped(HudIcon::AbilityBarFront, bar.x, bar.y, bar.w, bar.h, flipBarX, flipY);
@@ -87,11 +194,14 @@ void drawAbilityElement(HudContext& ctx,
                         float frameW,
                         float frameH,
                         float iconSize,
+                        float bindingFontSize,
                         float barW,
                         float barH,
                         float uiScale,
                         AbilitySide side,
                         HudIcon abilityIcon,
+                        bool hasAbility,
+                        const std::string& bindingLabel,
                         float charge)
 {
     const Rect frame = tunedRect(frameBaseX, frameBaseY, frameW, frameH, tuning.iconFrame, uiScale);
@@ -101,8 +211,25 @@ void drawAbilityElement(HudContext& ctx,
     const Rect bar = tunedRect(barBaseX, barBaseY, barW, barH, tuning.bar, uiScale);
 
     ctx.svg(HudIcon::AbilityIconFrame, frame.x, frame.y, frame.w, frame.h);
-    ctx.svgFlipped(abilityIcon, icon.x, icon.y, icon.w, icon.h, tuning.flipIconX, tuning.flipIconY);
-    drawCooldownBar(ctx, bar, side, charge, tuning.flipBarX, tuning.flipBarY);
+    if (abilityIcon != HudIcon::NoIcon && hasAbility && charge >= 0.999f)
+        ctx.svgMaskFlipped(abilityIcon, icon.x, icon.y, icon.w, icon.h, tuning.flipIconX, tuning.flipIconY, voidfall::k_cyan);
+    else
+        ctx.svgMaskFlipped(
+            abilityIcon, icon.x, icon.y, icon.w, icon.h, tuning.flipIconX, tuning.flipIconY, voidfall::k_textDim);
+    drawCooldownBar(ctx, bar, side, charge, hasAbility, tuning.flipBarX, tuning.flipBarY);
+
+    const float baseFs = bindingFontSize * uiScale;
+    const float labelW = ctx.measureText(bindingLabel.c_str(), baseFs);
+    const float maxLabelW = bar.w * 0.58f;
+    const float fs = labelW > maxLabelW && labelW > 0.f ? std::max(8.f * uiScale, baseFs * (maxLabelW / labelW))
+                                                         : baseFs;
+    const HudAlign bindingAlign = side == AbilitySide::Left ? HudAlign::Left : HudAlign::Right;
+    ctx.text(bindingLabel.c_str(),
+             bar.x + bar.w * 0.5f + tuning.bindingOffsetX * uiScale,
+             bar.y + (bar.h - fs) * 0.5f - fs * 0.18f + tuning.bindingOffsetY * uiScale,
+             fs,
+             voidfall::k_textBright,
+             bindingAlign);
 }
 
 } // namespace
@@ -111,17 +238,25 @@ EquipmentSlots::EquipmentSlots()
 {
     anchor = HudAnchor::BottomCenter;
     offsetX = 0.f;
-    offsetY = -40.f;
+    offsetY = -43.f;
     width = iconFrameWidth * 2.f + barWidth * 2.f + iconBarGap * 2.f + centerGap;
     height = std::max(iconFrameHeight, barHeight);
 
     abilityElements[0].bar.scale = 0.8f;
-    abilityElements[0].bar.offsetY = 9.f;
-    abilityElements[0].bar.stretchX = 1.25f;
+    abilityElements[0].bar.offsetX = -22.f;
+    abilityElements[0].bar.offsetY = -28.f;
+    abilityElements[0].bar.stretchX = 1.f;
+    abilityElements[0].bar.stretchY = 0.65f;
+    abilityElements[0].bindingOffsetX = -50.f;
+    abilityElements[0].bindingOffsetY = 2.f;
 
     abilityElements[1].bar.scale = 0.8f;
-    abilityElements[1].bar.offsetY = 17.f;
-    abilityElements[1].bar.stretchX = 1.25f;
+    abilityElements[1].bar.offsetX = 22.f;
+    abilityElements[1].bar.offsetY = -22.5f;
+    abilityElements[1].bar.stretchX = 1.f;
+    abilityElements[1].bar.stretchY = 0.65f;
+    abilityElements[1].bindingOffsetX = 50.f;
+    abilityElements[1].bindingOffsetY = -3.5f;
     abilityElements[1].flipBarY = true;
 }
 
@@ -129,6 +264,15 @@ void EquipmentSlots::update(float /*dt*/, const HudGameState& state, HudTweenPoo
 {
     state_ = state.equipment;
     visible = state.isAlive;
+    if (state.bindings) {
+        bindingLabels_[0] = compactBindingLabel(
+            InputBindings::bindingLabel(state.bindings->get(Action::Ability1, state.activeInputDevice)));
+        bindingLabels_[1] = compactBindingLabel(
+            InputBindings::bindingLabel(state.bindings->get(Action::Ability2, state.activeInputDevice)));
+    } else {
+        bindingLabels_[0] = "";
+        bindingLabels_[1] = "";
+    }
 }
 
 void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
@@ -137,6 +281,7 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
     const float frameW = iconFrameWidth * s;
     const float frameH = iconFrameHeight * s;
     const float iconSize = abilityIconSize * s;
+    const float bindingFs = bindingFontSize;
     const float barW = barWidth * s;
     const float barH = barHeight * s;
     const float gap = iconBarGap * s;
@@ -166,11 +311,14 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
                        frameW,
                        frameH,
                        iconSize,
+                       bindingFs,
                        barW,
                        barH,
                        s,
                        AbilitySide::Left,
                        iconForAbility(state_.primaryAbilityName, state_.primaryAbilityAvailable),
+                       state_.primaryAbilityAvailable,
+                       bindingLabels_[0],
                        state_.primaryAbilityCharge);
 
     drawAbilityElement(ctx,
@@ -182,10 +330,13 @@ void EquipmentSlots::draw(HudContext& ctx, float anchorX, float anchorY)
                        frameW,
                        frameH,
                        iconSize,
+                       bindingFs,
                        barW,
                        barH,
                        s,
                        AbilitySide::Right,
                        iconForAbility(state_.secondaryAbilityName, state_.secondaryAbilityAvailable),
+                       state_.secondaryAbilityAvailable,
+                       bindingLabels_[1],
                        state_.secondaryAbilityCharge);
 }

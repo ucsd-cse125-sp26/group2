@@ -29,15 +29,15 @@ void drawCircleOutline(HudContext& ctx, float cx, float cy, float radius, float 
 Minimap::Minimap()
 {
     anchor = HudAnchor::BottomLeft;
-    offsetX = 80.f;
-    offsetY = -260.f;
+    offsetX = 2.f;
+    offsetY = -298.f;
     width = 200.f;
     height = 200.f;
-    mapSize = 200.f;
-    dotSize = 12.f;
-    dotZoneRadius = 76.f;
-    dotZoneOffsetX = -0.5f;
-    dotZoneOffsetY = 3.f;
+    mapSize = 275.f;
+    dotSize = 12.25f;
+    dotZoneRadius = 109.5f;
+    dotZoneOffsetX = -1.f;
+    dotZoneOffsetY = 4.f;
 }
 
 void Minimap::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tweens*/)

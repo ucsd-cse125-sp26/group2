@@ -4,15 +4,11 @@
 
 #include "SDL3/SDL_init.h"
 #include "SDL3/SDL_timer.h"
-#include "menus/MenuTheme.hpp"
 #include "ui/LobbyUI.hpp"
 #include "util/InputCapture.hpp"
 #include "util/LocalAddress.hpp"
 
 #include <algorithm>
-#include <backends/imgui_impl_sdl3.h>
-#include <backends/imgui_impl_sdlgpu3.h>
-#include <glm/vec3.hpp>
 #include <imgui.h>
 
 bool Lobby::init(AppContext& ctx)
@@ -20,6 +16,8 @@ bool Lobby::init(AppContext& ctx)
     renderer = &ctx.renderer;
     window = &ctx.window;
     client = &ctx.client;
+    settings = &ctx.userSettings;
+    settingsPath = ctx.userSettingsPath;
 
     // Defensive: a prior Game screen should have released mouse capture in
     // its quit(), but enforcing it here means the lobby cursor is always free
@@ -33,6 +31,7 @@ bool Lobby::init(AppContext& ctx)
     }
     hostPort = ctx.hostedServer.port();
     hostLanIp = isHosting ? local_address::firstLanIPv4() : std::string{};
+    hostAddressesVisible = false;
 
     client->onLobbyState([this](const std::vector<LobbyPlayer>& snapshot, ClientId localId) {
         players = snapshot;
@@ -48,7 +47,9 @@ bool Lobby::init(AppContext& ctx)
             if (std::none_of(
                     players.begin(), players.end(), [id = update.id](const LobbyPlayer& p) { return p.id == id; }))
             {
-                players.push_back(LobbyPlayer{update.id});
+                LobbyPlayer joined{update.id};
+                joined.displayName = update.displayName;
+                players.push_back(joined);
             }
             break;
         case LobbyUpdateEvent::Type::PlayerLeft:
@@ -129,9 +130,10 @@ bool Lobby::init(AppContext& ctx)
 
 SDL_AppResult Lobby::event(SDL_Event* event)
 {
-    ImGui_ImplSDL3_ProcessEvent(event);
-    if (event->type == SDL_EVENT_QUIT)
-        return SDL_APP_SUCCESS;
+    if (const SDL_AppResult result = processCommonImguiEvent(event); result != SDL_APP_CONTINUE)
+        return result;
+
+    handleSystemMenuEvent(event, systemMenu_, settings);
     return SDL_APP_CONTINUE;
 }
 
@@ -144,10 +146,7 @@ SDL_AppResult Lobby::iterate()
         return SDL_APP_CONTINUE;
     }
 
-    ImGui_ImplSDLGPU3_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
-    menu_theme::drawBackground(renderer ? renderer->getDevice() : nullptr);
+    beginMenuFrame(renderer);
 
     updateStartCountdown();
 
@@ -164,6 +163,7 @@ SDL_AppResult Lobby::iterate()
         .isHosting = isHosting,
         .hostLanIp = hostLanIp,
         .hostPort = hostPort,
+        .hostAddressesVisible = hostAddressesVisible,
     };
 
     const auto result = lobby_ui::buildPlayerList(config);
@@ -181,11 +181,19 @@ SDL_AppResult Lobby::iterate()
     if (result.returnToHostConfigClicked) {
         returnToHostConfig = true;
     }
+    if (result.hostAddressesVisibilityToggled) {
+        hostAddressesVisible = !hostAddressesVisible;
+    }
 
-    ImGui::Render();
+    if (settings != nullptr) {
+        const SystemMenuOverlayResult menuResult = systemMenu_.render(*settings, settingsPath);
+        if (menuResult.exitToDesktop) {
+            exitRequested = true;
+        }
+    }
 
     // Default camera: lobby has no scene, so the renderer just draws sky + ImGui overlay.
-    renderer->drawFrame(glm::vec3(0.0f), 0.0f, 0.0f, 0.0f);
+    presentMenuFrame(*renderer);
     return SDL_APP_CONTINUE;
 }
 
@@ -274,5 +282,14 @@ bool Lobby::consumeServerShutdownNotice()
         return false;
 
     serverShutdownNotice = false;
+    return true;
+}
+
+bool Lobby::consumeExitRequest()
+{
+    if (!exitRequested)
+        return false;
+
+    exitRequested = false;
     return true;
 }

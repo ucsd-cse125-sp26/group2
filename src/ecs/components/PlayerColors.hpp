@@ -20,8 +20,8 @@ namespace player_colors
 /// @brief Master toggle. Flip to false to disable per-player tinting entirely.
 inline constexpr bool k_enabled = true;
 
-/// @brief Mix factor in the shader: 0 = original albedo, 1 = flat tint color.
-inline constexpr float k_blendFactor = 0.6f;
+/// @brief Mix factor in the shader: 0 = original albedo, 1 = full assigned player color.
+inline constexpr float k_blendFactor = 1.0f;
 
 /// @brief Curated palette of visually distinct hues.
 ///

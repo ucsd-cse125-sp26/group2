@@ -750,7 +750,7 @@ set(SHADER_NEW_SOURCES
         geometry_shadowed_lightmap.frag
         debug_depth.vert debug_depth.frag
         hud.vert hud.frag
-        fxaa.frag tonemap.frag
+        fxaa.frag tonemap.frag ssao.frag ssao_blur.frag ssao_composite.frag
 )
 
 foreach(SHADER_SRC ${SHADER_NEW_SOURCES})
@@ -823,12 +823,16 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/HitscanEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TeslaBeamEffect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/TeslaBeamEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/EnergyTeslaArcEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/EnergyTeslaArcEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/SmokeEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/BulletHoleDecal.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionVfxEffect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/ExplosionVfxEffect.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/DeathDissolveEffect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/DeathDissolveEffect.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfAtlas.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/sdf/SdfFont.hpp"
@@ -934,6 +938,14 @@ add_executable(group2
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/KdaCounter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquipmentSlots.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/LevelBarWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/LevelBarWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MiniScoreboardWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/MiniScoreboardWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquippedWeaponsWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EquippedWeaponsWidget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ScreenDecalWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/ScreenDecalWidget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EnemyWorldHealthBar.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/EnemyWorldHealthBar.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/client/hud/widgets/PickupNotification.cpp"
@@ -1077,6 +1089,8 @@ add_executable(group2
         src/ecs/components/ViewmodelConfig.hpp
         src/ecs/components/GripPose.hpp
         src/ecs/components/GripPose.cpp
+        src/ecs/components/WeaponHoldPose.hpp
+        src/ecs/components/WeaponHoldPose.cpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
         src/ecs/components/Explosion.hpp
@@ -1128,15 +1142,32 @@ add_executable(group2
         src/client/app/AppContext.hpp
         src/client/app/App.hpp
         src/client/app/App.cpp
+        src/client/IScreen.hpp
+        src/client/IScreen.cpp
         src/client/menus/lobby/Lobby.hpp
         src/client/menus/lobby/Lobby.cpp
         src/client/menus/lobby/ui/LobbyUI.hpp
         src/client/menus/lobby/ui/LobbyUI.cpp
+        src/client/menus/loading/LoadingScreen.hpp
+        src/client/menus/loading/LoadingScreen.cpp
+        src/client/menus/postmatch/PostMatchResult.hpp
+        src/client/menus/postmatch/PostMatchScoreboard.hpp
+        src/client/menus/postmatch/PostMatchScoreboard.cpp
+        src/client/menus/title/TitleScreen.hpp
+        src/client/menus/title/TitleScreen.cpp
+        src/client/menus/title/ui/TitleScreenUI.hpp
+        src/client/menus/title/ui/TitleScreenUI.cpp
         src/client/renderer-new/RendererTypes.hpp
-        src/client/menus/home/Home.hpp
-        src/client/menus/home/Home.cpp
-        src/client/menus/home/ui/HomeUI.hpp
-        src/client/menus/home/ui/HomeUI.cpp
+        src/client/menus/main/MainMenu.hpp
+        src/client/menus/main/MainMenu.cpp
+        src/client/menus/main/ui/MainMenuUI.hpp
+        src/client/menus/main/ui/MainMenuUI.cpp
+        src/client/menus/settings/SettingsEditor.hpp
+        src/client/menus/settings/SettingsEditor.cpp
+        src/client/menus/settings/SystemMenuOverlay.hpp
+        src/client/menus/settings/SystemMenuOverlay.cpp
+        src/client/menus/settings/SettingsScreen.hpp
+        src/client/menus/settings/SettingsScreen.cpp
         src/client/menus/MenuTheme.hpp
         src/client/menus/MenuTheme.cpp
         src/ecs/components/PowerupSpawner.hpp
@@ -1271,6 +1302,11 @@ target_precompile_headers(group2 PRIVATE
 # PCH_NO_TIMESTAMP_TARGETS — see note near top of file.
 if(PCH_NO_TIMESTAMP_FLAG)
     target_compile_options(group2 PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+if(MSVC)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/client/game/Game.cpp"
+        PROPERTIES COMPILE_OPTIONS "/bigobj")
 endif()
 
 # Copy assets (models, textures, …) next to the binary so the renderer can
@@ -1414,6 +1450,8 @@ add_executable(server
         src/ecs/components/ViewmodelConfig.hpp
         src/ecs/components/GripPose.hpp
         src/ecs/components/GripPose.cpp
+        src/ecs/components/WeaponHoldPose.hpp
+        src/ecs/components/WeaponHoldPose.cpp
         src/ecs/components/Health.hpp
         src/ecs/systems/WeaponSystem.cpp
         src/network/ShotEvent.hpp
@@ -2063,6 +2101,25 @@ endif()
 set_compiler_warnings(explosion_vfx_tests)
 enable_sanitizers(explosion_vfx_tests)
 add_test(NAME explosion_vfx_tests COMMAND explosion_vfx_tests)
+
+add_executable(energy_tesla_arc_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/energy_tesla_arc_tests.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client/particles/effects/EnergyTeslaArcEffect.cpp"
+)
+target_include_directories(energy_tesla_arc_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/client"
+)
+target_link_libraries(energy_tesla_arc_tests PRIVATE
+    EnTT::EnTT
+    glm::glm
+)
+if(MSVC AND PCH_NO_TIMESTAMP_FLAG)
+    target_compile_options(energy_tesla_arc_tests PRIVATE ${PCH_NO_TIMESTAMP_FLAG})
+endif()
+set_compiler_warnings(energy_tesla_arc_tests)
+enable_sanitizers(energy_tesla_arc_tests)
+add_test(NAME energy_tesla_arc_tests COMMAND energy_tesla_arc_tests)
 
 add_executable(hud_svg_raster_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/hud_svg_raster_tests.cpp"

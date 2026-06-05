@@ -55,11 +55,11 @@ SDL_GPUColorTargetInfo makeColorTargetLoad(SDL_GPUTexture* texture)
     return target;
 }
 
-SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture, Uint8 layer, bool store)
+SDL_GPUDepthStencilTargetInfo makeDepthTarget(SDL_GPUTexture* texture, Uint8 layer, bool store,bool reverseZ)
 {
     SDL_GPUDepthStencilTargetInfo target{};
     target.texture = texture;
-    target.clear_depth = 1.0f;
+    target.clear_depth = reverseZ ? 0.0f : 1.0f;
     target.load_op = SDL_GPU_LOADOP_CLEAR;
     target.store_op = store ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
     target.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
@@ -193,7 +193,7 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device, Pipe
     pipelineInfo.target_info.has_depth_stencil_target = pipelineDesc.depthTest || pipelineDesc.depthWrite;
     pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
 
-    pipelineInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+    pipelineInfo.depth_stencil_state.compare_op = pipelineDesc.reverseZ ?SDL_GPU_COMPAREOP_GREATER : SDL_GPU_COMPAREOP_LESS;
     pipelineInfo.depth_stencil_state.enable_depth_test = pipelineDesc.depthTest;
     pipelineInfo.depth_stencil_state.enable_depth_write = pipelineDesc.depthWrite;
 
@@ -208,6 +208,25 @@ SDL_GPUGraphicsPipeline* createGraphicsDepthPipeline(SDL_GPUDevice* device, Pipe
 }
 SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
                                                 SDL_GPUTextureFormat& colorFormat,
+                                                SDL_GPUShaderFormat shaderFormat,
+                                                const ShaderInfo& vertexShaderInfo,
+                                                const ShaderInfo& fragmentShaderInfo,
+                                                const VertexInputLayout& vertexInputLayout,
+                                                bool enableDepth,
+                                                bool overBlending)
+{
+    return createGraphicsPipeline(device,
+                                  std::vector<SDL_GPUTextureFormat>{colorFormat},
+                                  shaderFormat,
+                                  vertexShaderInfo,
+                                  fragmentShaderInfo,
+                                  vertexInputLayout,
+                                  enableDepth,
+                                  overBlending);
+}
+
+SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
+                                                const std::vector<SDL_GPUTextureFormat>& colorFormats,
                                                 SDL_GPUShaderFormat shaderFormat,
                                                 const ShaderInfo& vertexShaderInfo,
                                                 const ShaderInfo& fragmentShaderInfo,
@@ -230,8 +249,10 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
     vertexInputState.num_vertex_attributes = static_cast<Uint32>(vertexInputLayout.attributes.size());
     vertexInputState.vertex_attributes = vertexInputLayout.attributes.data();
 
-    SDL_GPUColorTargetDescription colorTarget{};
-    colorTarget.format = colorFormat;
+    std::vector<SDL_GPUColorTargetDescription> colorTargets(colorFormats.size());
+    for (size_t i = 0; i < colorFormats.size(); ++i)
+        colorTargets[i].format = colorFormats[i];
+
     if (overBlending) {
         SDL_GPUColorTargetBlendState overBlendState{};
         overBlendState.enable_blend = true;
@@ -246,7 +267,7 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
 
         overBlendState.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
 
-        colorTarget.blend_state = overBlendState;
+        colorTargets.front().blend_state = overBlendState;
     }
 
     SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
@@ -254,8 +275,8 @@ SDL_GPUGraphicsPipeline* createGraphicsPipeline(SDL_GPUDevice* device,
     pipelineInfo.fragment_shader = fragmentShader;
     pipelineInfo.vertex_input_state = vertexInputState;
     pipelineInfo.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-    pipelineInfo.target_info.color_target_descriptions = &colorTarget;
-    pipelineInfo.target_info.num_color_targets = 1;
+    pipelineInfo.target_info.color_target_descriptions = colorTargets.data();
+    pipelineInfo.target_info.num_color_targets = static_cast<Uint32>(colorTargets.size());
     pipelineInfo.target_info.has_depth_stencil_target = enableDepth;
     pipelineInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
 
@@ -550,7 +571,7 @@ SDL_GPUTexture* createDepthTexture(SDL_GPUDevice* device, Uint32 width, Uint32 h
     info.layer_count_or_depth = 1;
     info.num_levels = 1;
     info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
     SDL_GPUTexture* texture = SDL_CreateGPUTexture(device, &info);
     if (!texture)
@@ -592,7 +613,7 @@ SDL_GPUSampler* createLinearRepeatSampler(SDL_GPUDevice* device,bool nearest)
     return SDL_CreateGPUSampler(device, &samplerInfo);
 }
 
-SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device, SDL_GPUFilter filterMode)
+SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device, SDL_GPUFilter filterMode,bool reverseZ)
 {
     SDL_GPUSamplerCreateInfo samplerInfo{};
     samplerInfo.min_filter = filterMode;
@@ -603,7 +624,7 @@ SDL_GPUSampler* createLinearComparisonSampler(SDL_GPUDevice* device, SDL_GPUFilt
     samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 
     samplerInfo.enable_compare = true;
-    samplerInfo.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+    samplerInfo.compare_op = reverseZ ? SDL_GPU_COMPAREOP_GREATER: SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
 
     return SDL_CreateGPUSampler(device, &samplerInfo);
 }

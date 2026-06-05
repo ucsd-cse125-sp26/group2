@@ -85,8 +85,17 @@ public:
     /// @param rig  Source rig (used for joint names + rest poses).
     /// @param id   Which slot the clip occupies.
     /// @param path Absolute path to the FBX file.
+    /// @param useRigRestTranslations  Rotation-only retargeting. When true,
+    ///        every bone's translation/scale comes from the rig's own rest
+    ///        pose and ONLY rotations are taken from the clip. Use when the
+    ///        clip and rig are different-proportioned (or different up-axis)
+    ///        skeletons: the rig keeps its own bone lengths and stays
+    ///        grounded instead of inheriting the clip's hip height. Defaults
+    ///        to false (verbatim translations) so same-character rigs keep
+    ///        their authored root motion / vertical bob.
     /// @return True on success; false logs and leaves the slot empty.
-    bool loadClipFromFBX(const CharacterRig& rig, ClipId id, const std::string& path);
+    bool loadClipFromFBX(const CharacterRig& rig, ClipId id, const std::string& path,
+                         bool useRigRestTranslations = false);
 
     /// @brief True if a clip has been loaded for @p id.
     [[nodiscard]] bool has(ClipId id) const;

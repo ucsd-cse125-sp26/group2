@@ -35,6 +35,7 @@
 #include "ecs/components/Position.hpp"
 #include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/PowerupState.hpp"
+#include "ecs/components/Ragdoll.hpp"
 #include "ecs/components/Renderable.hpp"
 #include "ecs/components/RespawnPoint.hpp"
 #include "ecs/components/RespawnTimer.hpp"
@@ -60,8 +61,8 @@
 #include "ecs/systems/KillzoneSystem.hpp"
 #include "ecs/systems/MatchSystem.hpp"
 #include "ecs/systems/MovementSystem.hpp"
-#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PickupGeometry.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 #include "ecs/systems/PowerupSpawnerSystem.hpp"
 #include "ecs/systems/PowerupSystem.hpp"
 #include "ecs/systems/RagdollSystem.hpp"
@@ -82,9 +83,9 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdlib>
 #include <cstring>
 #include <glm/geometric.hpp>
+#include <random>
 
 namespace
 {
@@ -99,14 +100,10 @@ std::vector<AbilityType> chooseTwoAbilities(const std::array<AbilityType, N>& po
         return choices;
     }
 
-    std::vector<AbilityType> selected;
-    selected.reserve(kAbilityChoicesPerTier);
-    for (std::size_t i = 0; i < kAbilityChoicesPerTier; ++i) {
-        const auto idx = static_cast<std::size_t>(std::rand()) % choices.size();
-        selected.push_back(choices[idx]);
-        choices.erase(choices.begin() + static_cast<std::ptrdiff_t>(idx));
-    }
-    return selected;
+    static thread_local std::mt19937 rng{std::random_device{}()};
+    std::shuffle(choices.begin(), choices.end(), rng);
+    choices.resize(kAbilityChoicesPerTier);
+    return choices;
 }
 
 AbilityState resetAbilityProgressForMatchStart(const AbilityState& current)
@@ -241,13 +238,17 @@ void ServerGame::run()
 
         const entt::entity spawner = registry.create();
         registry.emplace<PowerupSpawner>(
-            spawner, PowerupSpawner{.type = config.type, .spawnCooldown = config.spawnCooldown, .hasPowerup = false});
-        CollisionShape shape{.halfExtents = {32.0f, 32.0f, 32.0f}};
+            spawner,
+            PowerupSpawner{
+                .type = config.type,
+                .spawnCooldown = matchController.getMatchConfig().powerupInitialSpawnDelaySeconds,
+                .hasPowerup = false,
+            });
+        CollisionShape shape{.halfExtents = k_powerupPickupHalfExtents};
         glm::vec3 centeredPos = pos + glm::vec3{0.0f, shape.halfExtents.y, 0.0f};
 
         registry.emplace<Position>(spawner, centeredPos);
         registry.emplace<CollisionShape>(spawner, shape);
-        registry.emplace<CollisionShape>(spawner);
     }
 
     // Jump pads — invisible AABB triggers placed in Blender that launch
@@ -401,7 +402,10 @@ void ServerGame::eventHandler(const Event& event)
             deletePlayerEntity(event.clientId);
             break;
         }
-        lobbyManager.addPlayer(event.clientId);
+        const char* joinedDisplayName = "";
+        if (const auto* playerName = registry.try_get<PlayerName>(clientEntities[event.clientId]))
+            joinedDisplayName = playerName->c_str();
+        lobbyManager.addPlayer(event.clientId, joinedDisplayName);
         server->sendMatchConfigToClient(event.clientId, matchController.getMatchConfig());
         // Lobby updates already cover joins before the match starts. Once the
         // match is active, send a lightweight roster popup event instead.
@@ -542,6 +546,7 @@ void ServerGame::eventHandler(const Event& event)
         if (isHost(event.clientId) && matchController.setMatchConfig(event.matchConfig)) {
             const MatchConfig config = matchController.getMatchConfig();
             server->setMaxPlayers(config.maxPlayers);
+            systems::applyPowerupSpawnerConfig(registry, config);
             if (matchConfigUpdatedFn_)
                 matchConfigUpdatedFn_(config);
             server->broadcastMatchConfig(config);
@@ -784,7 +789,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     {
         // Phase 13: age out ragdolls so gameplay can fade / despawn corpses.
         GROUP2_PROF_SCOPE("ragdolls");
-        systems::runRagdolls(registry, dt);
+        if (kRagdollsEnabled)
+            systems::runRagdolls(registry, dt);
     }
     {
         GROUP2_PROF_SCOPE("explosion");
@@ -816,7 +822,8 @@ void ServerGame::tick(float dt, Uint64 nextTick)
     }
     {
         GROUP2_PROF_SCOPE("PowerupSpawners");
-        systems::runPowerupSpawners(registry, dt);
+        if (matchController.getCurrentPhase() == MatchPhase::IN_PROGRESS)
+            systems::runPowerupSpawners(registry, dt, matchController.getMatchConfig(), particleEvents);
     }
     {
         GROUP2_PROF_SCOPE("jumpPads");
@@ -862,6 +869,16 @@ void ServerGame::tick(float dt, Uint64 nextTick)
                 selectMatchAbilityPool();
                 server->resetAppliedInputTicks();
                 resetPlayersForCountdown();
+            }
+            if (previousPhase != MatchPhase::IN_PROGRESS &&
+                matchController.getCurrentPhase() == MatchPhase::IN_PROGRESS)
+            {
+                systems::resetPowerupSpawnersForMatch(registry, matchController.getMatchConfig());
+            }
+            if (previousPhase == MatchPhase::IN_PROGRESS &&
+                matchController.getCurrentPhase() != MatchPhase::IN_PROGRESS)
+            {
+                systems::resetPowerupSpawnersForMatch(registry, matchController.getMatchConfig());
             }
             if (previousPhase != MatchPhase::LOBBY && matchController.getCurrentPhase() == MatchPhase::LOBBY)
                 lobbyManager.resetReadyStatuses();
@@ -1062,12 +1079,6 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
         .currentMagAmmo = rifleConfig.magazineSize,
         .fireCooldown = 0.0f,
     };
-    getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
-        .type = WeaponType::RailGun,
-        .totalAmmo = railConfig.defaultAmmoCapacity,
-        .currentMagAmmo = railConfig.magazineSize,
-        .fireCooldown = 0.0f,
-    };
     registry.emplace<WeaponState>(player, weaponState);
     registry.emplace<GrenadeState>(player, makeDefaultGrenadeState());
 
@@ -1119,9 +1130,13 @@ void ServerGame::initAnimation()
 {
     const char* base = SDL_GetBasePath();
     const std::string assetsDir = std::string(base ? base : "") + "assets/animations/";
-    const std::string rigPath = assetsDir + "standard_walk.fbx";
+    const std::string rigPath = assetsDir + "character_rigged_new.glb";
 
-    if (!serverRig_.loadFromFBX(rigPath)) {
+    // Match the client's rig orientation fix (see Game.cpp) so server-side
+    // hitbox capsules line up with the rendered, re-oriented body. Normals are
+    // irrelevant server-side, so no flip needed here.
+    const glm::quat rigOrientationFix = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    if (!serverRig_.loadFromFBX(rigPath, rigOrientationFix)) {
         SDL_Log("[server] WARNING: rig load failed — skeleton hitboxes disabled, falling back to AABB");
         return;
     }
@@ -1149,13 +1164,28 @@ void ServerGame::initAnimation()
                 static_cast<double>(rigScale_));
     }
 
-    // Load animation clips.
+    // Load animation clips with full (unit-scaled) translations to match the
+    // client (see Game.cpp) so server hitbox poses track the rendered body,
+    // including crouch/slide vertical motion.
     for (uint8_t i = 0; i < static_cast<uint8_t>(ClipId::_Count); ++i) {
         const ClipId id = static_cast<ClipId>(i);
         const std::string clipPath = assetsDir + clipFile(id);
         if (!serverAnimLibrary_.loadClipFromFBX(serverRig_, id, clipPath)) {
             SDL_Log("[server] WARNING: failed to load clip '%s'", clipName(id));
             continue;
+        }
+    }
+
+    // Ground hitboxes off the IDLE pose, not the T-pose bind (matches the
+    // client; see Game.cpp) so capsules track the rendered, grounded body.
+    {
+        const float groundedMinY =
+            computeIdleGroundedMinY(serverRig_, serverAnimLibrary_, rigOrientationFix, rigMeshMinY_);
+        if (groundedMinY != rigMeshMinY_) {
+            SDL_Log("[server] rig grounding: idle-referenced minY %.3f -> %.3f",
+                    static_cast<double>(rigMeshMinY_),
+                    static_cast<double>(groundedMinY));
+            rigMeshMinY_ = groundedMinY;
         }
     }
 
@@ -1426,6 +1456,7 @@ bool ServerGame::setMatchConfig(const MatchConfig& config)
 
     if (server)
         server->setMaxPlayers(matchController.getMatchConfig().maxPlayers);
+    systems::applyPowerupSpawnerConfig(registry, matchController.getMatchConfig());
     if (matchConfigUpdatedFn_)
         matchConfigUpdatedFn_(matchController.getMatchConfig());
     return true;
@@ -1485,12 +1516,6 @@ void ServerGame::resetPlayersForCountdown()
                 .currentMagAmmo = rifleConfig.magazineSize,
                 .fireCooldown = 0.0f,
             };
-            getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
-                .type = WeaponType::RailGun,
-                .totalAmmo = railConfig.defaultAmmoCapacity,
-                .currentMagAmmo = railConfig.magazineSize,
-                .fireCooldown = 0.0f,
-            };
 
             registry.emplace_or_replace<WeaponState>(player, weaponState);
             registry.emplace_or_replace<GrenadeState>(player, makeDefaultGrenadeState());
@@ -1509,11 +1534,10 @@ void ServerGame::resetPlayersForCountdown()
 bool ServerGame::isGameplayInputAllowed(MatchPhase phase) const
 {
     switch (phase) {
-    case MatchPhase::COUNTDOWN:
-    case MatchPhase::FINISHED:
-        return false;
-    default:
+    case MatchPhase::IN_PROGRESS:
         return true;
+    default:
+        return false;
     }
 }
 
