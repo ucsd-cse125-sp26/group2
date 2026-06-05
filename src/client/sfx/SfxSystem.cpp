@@ -9,9 +9,11 @@
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
 #include "ecs/components/Position.hpp"
+#include "ecs/components/RespawnTimer.hpp"
 #include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/WorldData.hpp"
+#include "ecs/systems/PlayerStatusSystem.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -231,13 +233,11 @@ bool SfxSystem::init()
     loadClip(SfxId::MolotovExplosion, "Weapons/Grenade/Explosion_Molotov.wav", SfxCategory::Impacts, 1.0f, 0.20f);
     loadClip(SfxId::HEExplosion, "Weapons/Grenade/Explosion_HE.wav", SfxCategory::Impacts, 1.0f, 0.20f);
 
-    loadClip(SfxId::DamageTaken, "damage.mp3", SfxCategory::Player, 0.8f, 0.30f);
+    loadClip(SfxId::DamageTaken, "damage.mp3", SfxCategory::Player, 0.8f, 0.85f);
     loadClip(SfxId::ArmorBreak, "Voicy_Fortnite Shield Break.mp3", SfxCategory::Player, 0.9f, 1.00f);
-    loadClip(SfxId::Death, "Voicy_Minecraft Death Sound.mp3", SfxCategory::Player, 1.0f, 2.00f);
-    loadClip(SfxId::Respawn, "Voicy_totem of undying sfx .mp3", SfxCategory::Player, 0.8f, 2.00f);
+    loadClip(SfxId::Death, "Death.wav", SfxCategory::Player, 1.0f, 2.00f);
     loadClip(SfxId::KillConfirm, "Voicy_Pilot Killed Indicator SFX.mp3", SfxCategory::Player, 0.9f, 0.30f);
-    loadClip(SfxId::Healing, "Voicy_Syringe SFX .mp3", SfxCategory::Player, 0.5f, 1.00f);
-    loadClip(SfxId::ShieldRecharge, "Voicy_Halo Shield Recharge.mp3", SfxCategory::Player, 0.5f, 1.00f);
+    loadClip(SfxId::Healing, "Health.wav", SfxCategory::Player, 0.35f, 1.00f);
     loadClip(SfxId::PowerupPickup, "csgo-case-open.mp3", SfxCategory::Player, 0.75f, 0.15f);
 
     synthesizeClip(SfxId::FootstepLight, SfxCategory::Footsteps, 0.40f, 0.06f);
@@ -734,6 +734,15 @@ void SfxSystem::update(float dt)
 
     {
         std::lock_guard lock(mixerMutex_);
+        constexpr float kMuffleFadeRate = 7.0f;
+        const float muffleAlpha = 1.0f - std::exp(-std::max(dt, 0.0f) * kMuffleFadeRate);
+        deathMuffleAmount_ += (deathMuffleTarget_ - deathMuffleAmount_) * muffleAlpha;
+        if (deathMuffleAmount_ < 0.001f) {
+            deathMuffleAmount_ = 0.0f;
+            deathMuffleStateL_ = 0.0f;
+            deathMuffleStateR_ = 0.0f;
+        }
+
         for (Source& source : sources_) {
             if (!source.active)
                 continue;
@@ -750,6 +759,13 @@ void SfxSystem::update(float dt)
 
 void SfxSystem::update(float dt, const Registry& registry)
 {
+    const auto localDeadView = registry.view<const LocalPlayer, const RespawnTimer>();
+    const bool localPlayerDead = localDeadView.begin() != localDeadView.end();
+    {
+        std::lock_guard lock(mixerMutex_);
+        deathMuffleTarget_ = localPlayerDead ? 1.0f : 0.0f;
+    }
+
     update(dt);
 
     if (!mixStream_)
@@ -783,6 +799,10 @@ void SfxSystem::update(float dt, const Registry& registry)
                 postAudioEvent("player.healing");
                 healingSoundCooldown_ = 1.0f;
             }
+            const bool finishedHealing =
+                h.health >= systems::healthMax - 0.001f && h.armor >= systems::armorMax - 0.001f;
+            if (finishedHealing)
+                stop(SfxId::Healing);
         }
 
         if (stats.kills > prevKills_)
@@ -1439,8 +1459,19 @@ void SfxSystem::mixIntoStream(SDL_AudioStream* stream, int additionalAmount)
             const float wetL = reverbDelayL_[readA] * 0.34f + reverbDelayR_[readB] * 0.16f;
             const float wetR = reverbDelayR_[readA] * 0.34f + reverbDelayL_[readB] * 0.16f;
             const std::size_t out = static_cast<std::size_t>(frame) * 2u;
-            mix[out] = softClip(mix[out] + wetL);
-            mix[out + 1u] = softClip(mix[out + 1u] + wetR);
+            float finalL = mix[out] + wetL;
+            float finalR = mix[out + 1u] + wetR;
+            if (deathMuffleAmount_ > 0.001f) {
+                const float amount = std::clamp(deathMuffleAmount_, 0.0f, 1.0f);
+                const float lowPass = 1.0f + (0.045f - 1.0f) * amount;
+                const float roomGain = 1.0f + (0.58f - 1.0f) * amount;
+                deathMuffleStateL_ += lowPass * (finalL - deathMuffleStateL_);
+                deathMuffleStateR_ += lowPass * (finalR - deathMuffleStateR_);
+                finalL = (finalL + (deathMuffleStateL_ - finalL) * amount) * roomGain;
+                finalR = (finalR + (deathMuffleStateR_ - finalR) * amount) * roomGain;
+            }
+            mix[out] = softClip(finalL);
+            mix[out + 1u] = softClip(finalR);
             const float send = reverbSend[static_cast<std::size_t>(frame)];
             reverbDelayL_[reverbWrite_] = send + wetL * 0.22f;
             reverbDelayR_[reverbWrite_] = send + wetR * 0.22f;

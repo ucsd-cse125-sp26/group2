@@ -1503,11 +1503,23 @@ void ServerGame::resetPlayersForCountdown()
             PlayerVisState& vis,
             PlayerSimState& sim,
             CollisionShape&) {
-            const systems::SpawnResolution spawn = systems::chooseAndResolveSpawnPosition(registry, player);
-            pos.value = spawn.center;
+            // Only relocate dead players: live players keep the position they
+            // were standing at during warmup so the countdown transition isn't
+            // a sudden teleport. Dead players still need a spawn point picked
+            // because their corpse position isn't a valid stand-up location.
+            const bool wasDead = registry.all_of<RespawnTimer>(player) || vis.isDead;
+            float resetYaw = 0.0f;
+            if (const auto* existingInput = registry.try_get<InputSnapshot>(player))
+                resetYaw = existingInput->yaw;
+
+            if (wasDead) {
+                const systems::SpawnResolution spawn = systems::chooseAndResolveSpawnPosition(registry, player);
+                pos.value = spawn.center;
+                resetYaw = spawn.yaw;
+            }
             vel = Velocity{};
             vis = PlayerVisState{};
-            vis.spawnViewYaw = spawn.yaw; // client snaps local view here on the dead→alive edge.
+            vis.spawnViewYaw = resetYaw; // client snaps local view here on the dead→alive edge.
             sim = PlayerSimState{};
 
             systems::destroyRagdoll(registry, player);
@@ -1516,9 +1528,10 @@ void ServerGame::resetPlayersForCountdown()
             if (auto* renderable = registry.try_get<Renderable>(player)) {
                 renderable->visible = true;
             }
-            // Face the spawn point's authored direction.
+            // Preserve facing across the transition for live players; dead
+            // players face the spawn point's authored direction.
             InputSnapshot freshInput{};
-            freshInput.yaw = spawn.yaw;
+            freshInput.yaw = resetYaw;
             registry.emplace_or_replace<InputSnapshot>(player, freshInput);
             registry.emplace_or_replace<Health>(player, Health{});
 

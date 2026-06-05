@@ -111,9 +111,6 @@
 namespace
 {
 constexpr float kMinFootstepIntervalSeconds = 0.14f;
-constexpr std::array<const char*, 2> kOptionalTestModelFilenames{{"test_model.glb", "test model.glb"}};
-constexpr glm::vec3 kOptionalTestModelRifleSpawnerOffset{0.0f, 50.0f, 0.0f};
-constexpr float kOptionalTestModelLoadScale = 10.0f;
 constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponNames{
     "Rifle", "Rocket", "RailGun", "EnergyGun", "Shotgun"};
 constexpr std::array<const char*, kRenderableWeaponTypeCount> kRenderableWeaponDisplayNames{
@@ -166,34 +163,6 @@ int addAssetDefinition(AssetRegistry& assets, const AssetDefinition& def)
 {
     return assets.add(
         def.name, def.filename, def.role, def.renderScale, def.renderTranslation, def.renderRotationDegrees);
-}
-
-std::filesystem::path assetPathFor(const char* filename)
-{
-    const char* const base = SDL_GetBasePath();
-    std::filesystem::path path = base ? base : "";
-    path /= ASSETS_DIR;
-    path /= filename;
-    return path;
-}
-
-const char* findExistingOptionalTestModelFilename()
-{
-    for (const char* filename : kOptionalTestModelFilenames) {
-        std::error_code ec;
-        if (std::filesystem::exists(assetPathFor(filename), ec))
-            return filename;
-    }
-    return nullptr;
-}
-
-std::optional<glm::vec3> findOptionalTestModelPosition()
-{
-    for (const gamemap::WeaponSpawner& spawner : gamemap::weaponSpawner_) {
-        if (spawner.type == WeaponType::Rifle)
-            return spawner.pos + kOptionalTestModelRifleSpawnerOffset;
-    }
-    return std::nullopt;
 }
 
 WeaponSpawnerModelParams defaultSpawnerModelParams(WeaponType type)
@@ -1008,29 +977,6 @@ bool Game::init(AppContext& ctx)
         }
     }
 
-    // Optional art-check GLB. Drop assets/test_model.glb into the copied assets
-    // directory to see it 50 units above the authored rifle spawner.
-    if (const char* testModelFilename = findExistingOptionalTestModelFilename(); testModelFilename != nullptr) {
-        if (const std::optional<glm::vec3> testModelPos = findOptionalTestModelPosition(); testModelPos.has_value()) {
-            const int id = assets_.add("test_model", testModelFilename, AssetRole::Prop);
-            const int modelIdx =
-                renderer->loadSceneModel(testModelFilename, *testModelPos, kOptionalTestModelLoadScale, false);
-            assets_.setModelIndex(id, modelIdx);
-            if (modelIdx >= 0) {
-                renderer->setModelScenePass(modelIdx, true);
-                SDL_Log("[client] test model '%s' loaded at (%.1f, %.1f, %.1f)",
-                        testModelFilename,
-                        static_cast<double>(testModelPos->x),
-                        static_cast<double>(testModelPos->y),
-                        static_cast<double>(testModelPos->z));
-            } else {
-                SDL_Log("[client] WARNING: test model '%s' failed to load", testModelFilename);
-            }
-        } else {
-            SDL_Log("[client] test model '%s' present, but no rifle spawner was loaded", testModelFilename);
-        }
-    }
-
     // ── Load props (render + collision) ───────────────────────────────────
     // These are standalone GLB models placed at fixed world positions.
     // Both visual and collision are loaded so players/projectiles interact.
@@ -1349,7 +1295,7 @@ bool Game::init(AppContext& ctx)
             // Local player: 10 units ahead of the right palm along the view dir
             // (muzzleFlashOrigin). Remote players: the shot's muzzle origin.
             const glm::vec3 flashPos = (evt.source == localPlayer) ? muzzleFlashOrigin(evtOrigin) : evtOrigin;
-            spawnMuzzleFlashLight(flashPos);
+            spawnMuzzleFlashLight(flashPos, evt.weaponType);
         }
 
         switch (evt.effectType) {
@@ -2271,7 +2217,7 @@ glm::vec3 Game::muzzleFlashLightPosition(const glm::vec3& muzzleOrigin) const
            right * muzzleFlashLightOffset_.z;
 }
 
-void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
+void Game::spawnMuzzleFlashLight(const glm::vec3& pos, WeaponType weaponType)
 {
     // Respect the "Muzzle Flash" setting — skip spawning when disabled. Lights
     // already in flight keep fading out naturally.
@@ -2280,10 +2226,10 @@ void Game::spawnMuzzleFlashLight(const glm::vec3& pos)
 
     TransientVfxLight flash;
     flash.position = pos;
-    // Warm orange-white muzzle flash. Intensity is in the same scale as the
-    // scene's static point lights (shader attenuation is pure 1/r²), so it
-    // needs to be large to noticeably light nearby surfaces.
-    flash.color = glm::vec3(1.0f, 0.65f, 0.30f);
+    // Warm orange-white for ballistic/rocket weapons, cool blue for energy-style shots.
+    flash.color = (weaponType == WeaponType::RailGun || weaponType == WeaponType::EnergyGun)
+                      ? glm::vec3(0.25f, 0.65f, 1.0f)
+                      : glm::vec3(1.0f, 0.65f, 0.30f);
     flash.intensity = 4500.0f;
     flash.age = 0.0f;
     // ~200 ms total: a ~20 ms ease-in to full brightness then a gradual ~180 ms
@@ -3197,6 +3143,16 @@ SDL_AppResult Game::iterate()
                 });
             }
 
+            // Dead players don't fire — server stops processing fire input on
+            // death, so the local prediction must mirror that or VFX/SFX/recoil
+            // continue client-side while the corpse "shoots".
+            bool localDead = false;
+            registry.view<LocalPlayer, PlayerVisState>().each(
+                [&](const PlayerVisState& pvs) { localDead = pvs.isDead; });
+            if (localDead) {
+                shooting = false;
+            }
+
             // Grenade throw locks out fire VFX for its wind-up, exactly like reload.
             bool grenadeThrowActive = false;
             registry.view<LocalPlayer, GrenadeState>().each([&](const GrenadeState& grenades) {
@@ -3308,7 +3264,7 @@ SDL_AppResult Game::iterate()
                 // echo of our own non-charge fire is skipped for instant local
                 // feedback — see the early return in onRawParticleEvent. Origin
                 // is 10 units ahead of the right palm along the view direction.
-                spawnMuzzleFlashLight(muzzleFlashOrigin(hip));
+                spawnMuzzleFlashLight(muzzleFlashOrigin(hip), currentEquippedType_);
 
                 // Visual recoil kick (viewmodel-only).
                 // Third-person recoil happens via the WeaponFiredEvent
@@ -3793,10 +3749,6 @@ SDL_AppResult Game::iterate()
                         if (secondaryFired && abil->secondary == AbilityType::Recall)
                             post("ability.recall", 1.0f);
                     }
-
-                    // Respawn: dead → alive.
-                    if (tracked.isDead && !vis.isDead)
-                        post("player.respawn", 1.0f);
 
                     tracked.grounded = vis.grounded;
                     tracked.isDead = vis.isDead;

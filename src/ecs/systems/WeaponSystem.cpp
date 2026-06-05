@@ -683,6 +683,7 @@ inline void handleFire(Registry& registry,
         if (auto* lockState = registry.try_get<BeamLockState>(shooter)) {
             lockState->target = entt::null; // reload breaks the lock / resets ramp
             lockState->duration = 0.0f;
+            lockState->graceTimer = 0.0f;
         }
         return;
     }
@@ -734,14 +735,26 @@ inline void handleFire(Registry& registry,
             beam.origin = eye;
             beam.guidePoint = eye + direction * maxRange;
 
+            // Forgiveness window: if the cone scan briefly fails to find the
+            // current target (strafing, peek, micro-jitter), keep the lock and
+            // ramp for up to this many seconds before fully resetting.
+            constexpr float k_lockGracePeriod = 0.35f;
+
             if (lock.target != entt::null && registry.valid(lock.target)) {
-                // Maintain or (re)acquire: any target change resets the ramp.
+                // Maintain or (re)acquire. On a true target switch (a different
+                // valid target while still within the grace window) preserve
+                // half the existing duration so chaining targets doesn't punish
+                // the player as hard as a full reset.
                 if (lock.target == lockState.target) {
                     lockState.duration += dt;
+                } else if (lockState.target != entt::null && lockState.graceTimer < k_lockGracePeriod) {
+                    lockState.target = lock.target;
+                    lockState.duration *= 0.5f;
                 } else {
                     lockState.target = lock.target;
                     lockState.duration = 0.0f;
                 }
+                lockState.graceTimer = 0.0f;
 
                 // Ramp DPS from base (`dps`) to `dpsMax` over `dpsRampTime`.
                 float dps = config.dps;
@@ -761,13 +774,25 @@ inline void handleFire(Registry& registry,
 
                 beam.hitPoint = lock.point;
                 beam.locked = 1;
-                beam.lockStrength =
-                    (config.dpsRampTime > 0.0f) ? std::clamp(lockState.duration / config.dpsRampTime, 0.0f, 1.0f)
-                                                : 1.0f;
+                beam.lockStrength = (config.dpsRampTime > 0.0f)
+                                        ? std::clamp(lockState.duration / config.dpsRampTime, 0.0f, 1.0f)
+                                        : 1.0f;
+            } else if (lockState.target != entt::null && registry.valid(lockState.target) &&
+                       lockState.graceTimer < k_lockGracePeriod)
+            {
+                // Brief lock loss: hold the ramp, no damage this tick, beam
+                // sprays forward visually. Grace expires → full reset next tick.
+                lockState.graceTimer += dt;
+                beam.hitPoint = beam.guidePoint;
+                beam.locked = 0;
+                beam.lockStrength = (config.dpsRampTime > 0.0f)
+                                        ? std::clamp(lockState.duration / config.dpsRampTime, 0.0f, 1.0f)
+                                        : 1.0f;
             } else {
-                // No valid lock: ramp resets; beam sprays forward to the cap.
+                // No valid lock and grace expired: ramp resets; beam sprays forward to the cap.
                 lockState.target = entt::null;
                 lockState.duration = 0.0f;
+                lockState.graceTimer = 0.0f;
                 beam.hitPoint = beam.guidePoint;
                 beam.locked = 0;
                 beam.lockStrength = 0.0f;
@@ -1094,9 +1119,26 @@ void runWeapon(Registry& registry,
                   WeaponState& weapon,
                   GrenadeState& grenades,
                   const PlayerVisState& vis) {
-        // Dead players cannot fire or interact with weapons.
-        if (registry.all_of<RespawnTimer>(shooter))
+        // Dead players cannot fire or interact with weapons. Check both
+        // RespawnTimer (server-authoritative) and PlayerVisState.isDead
+        // (replicated to clients) so client-side prediction matches —
+        // otherwise the client keeps predicting fire/beam state for the
+        // corpse until the server snapshot overwrites it.
+        if (registry.all_of<RespawnTimer>(shooter) || vis.isDead) {
+            // Force-clear any active beam so the visuals stop the tick we die.
+            if (auto* beam = registry.try_get<BeamState>(shooter)) {
+                beam->active = false;
+                beam->locked = 0;
+                beam->lockStrength = 0.0f;
+                beam->guidePoint = beam->hitPoint;
+            }
+            if (auto* lockState = registry.try_get<BeamLockState>(shooter)) {
+                lockState->target = entt::null;
+                lockState->duration = 0.0f;
+                lockState->graceTimer = 0.0f;
+            }
             return;
+        }
 
         handleSwitch(input, weapon);
         handleCooldown(weapon, dt);

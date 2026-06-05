@@ -803,7 +803,7 @@ private:
     std::vector<TransientVfxLight> transientVfxLights_;
 
     /// @brief Spawn a transient muzzle-flash point light at @p pos.
-    void spawnMuzzleFlashLight(const glm::vec3& pos);
+    void spawnMuzzleFlashLight(const glm::vec3& pos, WeaponType weaponType);
 
     /// @brief Spawn a transient explosion point light at @p pos.
     void spawnExplosionFlashLight(const glm::vec3& pos, WeaponType weaponType, float radius);

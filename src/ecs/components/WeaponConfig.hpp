@@ -206,14 +206,14 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isBeam = true,
-            .dps = 16.0f, // ramp floor, -60% (was 35) — Tesla Cannon, low until lock-on ramps up
+            .dps = 32.0f, // ramp floor — starting DPS before lock ramp
             .ammoPerSecond = 20.0f,
             .autoLockBeam = true,
-            .maxRange = 200.0f,
-            .coneHalfAngleDeg = 30.0f,      // wide, forgiving — true no-aim
-            .dpsMax = 19.6f,                // ramp ceiling = floor +40% (was 2× base) after dpsRampTime
+            .maxRange = 350.0f,
+            .coneHalfAngleDeg = 48.0f,      // very wide cone — strafing/jukes still hold lock
+            .dpsMax = 42.0f,                // ramp ceiling after dpsRampTime of held lock
             .dpsRampTime = 2.0f,            // seconds of continuous lock to reach dpsMax
-            .shieldDamageMultiplier = 0.5f, // energy-vs-energy: barely chips shields
+            .shieldDamageMultiplier = 0.7f, // energy-vs-energy, slightly more bite than before
             .reloadTime = 2.0f,
         },                                  // EnergyGun
         WeaponConfig{

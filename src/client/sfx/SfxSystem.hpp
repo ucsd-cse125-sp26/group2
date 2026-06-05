@@ -195,6 +195,10 @@ private:
     std::array<float, 48000> reverbDelayL_{};
     std::array<float, 48000> reverbDelayR_{};
     std::size_t reverbWrite_ = 0;
+    float deathMuffleTarget_ = 0.0f;
+    float deathMuffleAmount_ = 0.0f;
+    float deathMuffleStateL_ = 0.0f;
+    float deathMuffleStateR_ = 0.0f;
     mutable std::mutex mixerMutex_;
 
     /// @brief Per-SfxId countdown to next allowed play (seconds remaining).

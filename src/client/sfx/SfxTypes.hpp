@@ -38,8 +38,7 @@ enum class SfxId : uint8_t
     // Player feedback
     DamageTaken, ///< damage.mp3
     ArmorBreak,  ///< Voicy_Fortnite Shield Break.mp3
-    Death,       ///< Voicy_Minecraft Death Sound.mp3
-    Respawn,     ///< Voicy_totem of undying sfx .mp3
+    Death,       ///< Death.wav
     KillConfirm, ///< Voicy_Pilot Killed Indicator SFX.mp3
 
     // Charge rifle
@@ -49,10 +48,9 @@ enum class SfxId : uint8_t
     // Energy beam
     EnergyBeamLoop, ///< Weapons/EnergyWeapon/Energy_Shooting.wav (play while beam active)
 
-    // Healing / Shield
-    Healing,        ///< Voicy_Syringe SFX .mp3
-    ShieldRecharge, ///< Voicy_Halo Shield Recharge.mp3
-    PowerupPickup,  ///< Configurable filler pickup sound.
+    // Healing / pickups
+    Healing,       ///< Health.wav
+    PowerupPickup, ///< Configurable filler pickup sound.
 
     // Movement / equipment placeholders. FootstepLight/Heavy still back simple impact fallbacks.
     FootstepLight,
@@ -205,8 +203,6 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "ArmorBreak";
     case SfxId::Death:
         return "Death";
-    case SfxId::Respawn:
-        return "Respawn";
     case SfxId::KillConfirm:
         return "KillConfirm";
     case SfxId::ChargeRifleLoad:
@@ -217,8 +213,6 @@ inline const char* sfxIdName(SfxId id) noexcept
         return "EnergyBeamLoop";
     case SfxId::Healing:
         return "Healing";
-    case SfxId::ShieldRecharge:
-        return "ShieldRecharge";
     case SfxId::PowerupPickup:
         return "PowerupPickup";
     case SfxId::FootstepLight:
