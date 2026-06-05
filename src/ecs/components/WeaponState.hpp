@@ -18,6 +18,7 @@ enum class WeaponType : uint8_t
     HEGrenade, ///< Bouncy grenade with 3s fuse, lethal explosion + big knockback
     Molotov,   ///< Impact-detonate, leaves a fire field (damage over time)
     Sticky,    ///< Sticks to first surface or player; guaranteed kill when stuck to a player
+    None,      ///< No weapon in this slot
 };
 
 inline constexpr std::size_t kRenderableWeaponTypeCount = static_cast<std::size_t>(WeaponType::Shotgun) + 1;
@@ -37,7 +38,7 @@ enum class WeaponSlot : uint8_t
 /// @brief Struct that defines this weapon's type, cooldown, and ammo.
 struct GunInstance
 {
-    WeaponType type = WeaponType::Rifle;
+    WeaponType type = WeaponType::None;
     int totalAmmo = 0;
     int currentMagAmmo = 0;
     float fireCooldown = 0.f;
@@ -79,4 +80,14 @@ inline GunInstance& getEquippedGun(WeaponState& w)
 inline const GunInstance& getEquippedGun(const WeaponState& w)
 {
     return getSlot(w, w.current);
+}
+
+inline GunInstance* findSlotWithType(WeaponState& w, WeaponType type)
+{
+    for (auto& slot : w.slots) {
+        if (slot.type == type) {
+            return &slot;
+        }
+    }
+    return nullptr;
 }

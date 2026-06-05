@@ -77,6 +77,10 @@ void handleSwitch(const InputSnapshot& input, WeaponState& weapon)
         gun.recoilIdleTime = 0.0f;
         weapon.current = WeaponSlot::PRIMARY;
     } else if (input.switchToSecondary && weapon.current != WeaponSlot::SECONDARY) {
+        if (getSlot(weapon, WeaponSlot::SECONDARY).type == WeaponType::None) {
+            return;
+        }
+
         auto& gun = getEquippedGun(weapon);
         gun.isReloading = false;
         gun.reloadTime = 0.0f;

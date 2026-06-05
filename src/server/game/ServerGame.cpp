@@ -1063,12 +1063,6 @@ void ServerGame::initNewPlayerEntity(ClientId clientId)
         .currentMagAmmo = rifleConfig.magazineSize,
         .fireCooldown = 0.0f,
     };
-    getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
-        .type = WeaponType::RailGun,
-        .totalAmmo = railConfig.defaultAmmoCapacity,
-        .currentMagAmmo = railConfig.magazineSize,
-        .fireCooldown = 0.0f,
-    };
     registry.emplace<WeaponState>(player, weaponState);
     registry.emplace<GrenadeState>(player, makeDefaultGrenadeState());
 
@@ -1503,12 +1497,6 @@ void ServerGame::resetPlayersForCountdown()
                 .type = WeaponType::Rifle,
                 .totalAmmo = rifleConfig.defaultAmmoCapacity,
                 .currentMagAmmo = rifleConfig.magazineSize,
-                .fireCooldown = 0.0f,
-            };
-            getSlot(weaponState, WeaponSlot::SECONDARY) = GunInstance{
-                .type = WeaponType::RailGun,
-                .totalAmmo = railConfig.defaultAmmoCapacity,
-                .currentMagAmmo = railConfig.magazineSize,
                 .fireCooldown = 0.0f,
             };
 
