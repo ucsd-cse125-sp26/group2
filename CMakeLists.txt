@@ -129,6 +129,9 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(tinyexr)
+if(TARGET tinyexr)
+    target_compile_options(tinyexr PRIVATE -Wno-poison-system-directories)
+endif()
 
 
 # SDL3 — window, input, GPU pipeline (Vulkan/Metal/DX12) + OpenGL context
