@@ -19,7 +19,7 @@ layout(set = 3, binding = 1) uniform MaterialFlags {
     uint useTexture;
     uint useNormalTexture;
     uint useMetallicRoughnessTexture;
-    uint _pad0;
+    uint useTint;
 } materialFlags;
 
 // Just a single directional light for now...
@@ -39,6 +39,9 @@ void main()
     }
 
     vec4 albedo = materialFlags.useTexture != 0 ? texture(tex, frag_vt) : material.diffuse;
+    if (materialFlags.useTint != 0) {
+        albedo.rgb = mix(albedo.rgb, material.diffuse.rgb, material.diffuse.a);
+    }
     vec2 mr = materialFlags.useMetallicRoughnessTexture != 0
         ? texture(metallicRoughnessTex, frag_vt).gb
         : vec2(1.0, 0.0);

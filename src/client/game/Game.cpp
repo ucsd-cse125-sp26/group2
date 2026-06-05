@@ -227,6 +227,8 @@ WeaponSpawnerModelParams defaultPowerupModelParams(PowerupType type)
     };
 }
 
+constexpr glm::vec4 kShieldPowerupModelTint{0.02f, 0.10f, 0.62f, 1.0f};
+
 bool isRenderableGunType(WeaponType type)
 {
     return static_cast<std::size_t>(type) < kWeaponAssets.size();
@@ -4587,10 +4589,9 @@ SDL_AppResult Game::iterate()
             world *= glm::mat4_cast(rend.orientation);
             world = glm::scale(world, rend.scale);
 
-            // Projectile entities carry a per-grenade tint (HE = green,
-            // Molotov = orange, Sticky = blue). Non-projectile entities use
-            // the default white tint (no recolor).
-            glm::vec4 tint{1.0f};
+            // Projectile entities carry a per-grenade tint; other entities use
+            // their Renderable tint.
+            glm::vec4 tint = rend.tint;
             if (const auto* proj = registry.try_get<Projectile>(e)) {
                 tint = glm::vec4(proj->tint, 1.0f);
             }
@@ -7193,6 +7194,7 @@ void Game::refreshRemotePowerupRenderables()
 
             rend.modelIndex = powerupIndex;
             rend.scale = params.scale;
+            rend.tint = spawner.type == PowerupType::Shield ? kShieldPowerupModelTint : glm::vec4{1.0f};
             if (spawner.hasPowerup) {
                 static constexpr float k_twoPi = 6.28318530718f;
                 rend.translation = params.translation +

@@ -17,5 +17,6 @@ struct Renderable
     glm::vec3 translation{0.0f};       ///< Local-space translation offset applied before rotation/scale.
     glm::vec3 scale{1.0f};             ///< Per-entity scale override.
     glm::quat orientation{1, 0, 0, 0}; ///< Per-entity rotation override (identity by default).
+    glm::vec4 tint{1.0f};              ///< RGB tint color, alpha = blend factor. White = no tint.
     bool visible = true;               ///< False to skip rendering without removing the component.
 };

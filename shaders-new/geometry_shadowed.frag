@@ -217,7 +217,7 @@ layout(set = 3, binding = 1) uniform MaterialFlags {
     uint useTexture;
     uint useNormalTexture;
     uint useMetallicRoughnessTexture;
-    uint _pad0;
+    uint useTint;
 } materialFlags;
 
 layout(set = 3, binding = 2) uniform lightBlock{
@@ -256,6 +256,9 @@ void main()
 
     vec4 albedo = materialFlags.useTexture != 0 ? texture(tex, frag_vt) : material.diffuse;
     albedo.rgb = pow(albedo.rgb,vec3(2.2f));
+    if (materialFlags.useTint != 0) {
+        albedo.rgb = mix(albedo.rgb, pow(material.diffuse.rgb, vec3(2.2f)), material.diffuse.a);
+    }
     vec2 mr = materialFlags.useMetallicRoughnessTexture != 0
         ? texture(metallicRoughnessTex, frag_vt).gb
         : vec2(1.0, 0.0);

@@ -461,6 +461,7 @@ bool NewRenderer::createEntityChamsPipeline()
     Boilerplate::ShaderInfo fragmentShaderInfo{};
     fragmentShaderInfo.path = "shaders-new/chams.frag";
     fragmentShaderInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+    fragmentShaderInfo.uniformBufferCount = 1;
 
     SDL_GPUShader* vertexShader = Boilerplate::loadShader(device_, vertexShaderInfo, shaderFormat_);
     SDL_GPUShader* fragmentShader = Boilerplate::loadShader(device_, fragmentShaderInfo, shaderFormat_);
@@ -1287,13 +1288,11 @@ void NewRenderer::drawEntityModels(SDL_GPURenderPass* renderPass,
         if (static_cast<size_t>(entityCmd.modelIndex) >= Asset::modelInstances_.size())
             continue;
         ModelIdInt modelId = Asset::modelInstances_.at(static_cast<size_t>(entityCmd.modelIndex)).modelId_;
-        // TODO(graphics): pass entityCmd.tint into the per-mesh material UBO
-        // so tinted entities (e.g. team colors, hit flashes) render correctly.
 
         if (depth) {
             drawModelDepth(modelId, entityCmd.worldTransform, renderPass, cmd, frustumPlanes);
         } else {
-            drawModel(modelId, entityCmd.worldTransform, renderPass, cmd, frustumPlanes);
+            drawModel(modelId, entityCmd.worldTransform, renderPass, cmd, frustumPlanes, entityCmd.tint);
         }
     }
 }
@@ -1324,6 +1323,10 @@ void NewRenderer::drawEntityChams(SDL_GPURenderPass* renderPass,
             if (!inFrustum(mesh.aabb_, frustumPlanes, modelElementMatrix))
                 continue;
 
+            glm::vec4 silhouetteTint = entityCmd.tint;
+            if (silhouetteTint == glm::vec4{1.0f})
+                silhouetteTint = glm::vec4{0.95f, 0.04f, 0.04f, 1.0f};
+            SDL_PushGPUFragmentUniformData(cmd, 0, &silhouetteTint, sizeof(silhouetteTint));
             SDL_PushGPUVertexUniformData(cmd, 1, &modelElementMatrix, sizeof(glm::mat4));
             drawMesh(renderPass, mesh);
         }
@@ -1336,7 +1339,8 @@ void NewRenderer::drawModel(ModelIdInt modelId,
                             const glm::mat4& modelTransform,
                             SDL_GPURenderPass* renderPass,
                             SDL_GPUCommandBuffer* cmd,
-                            const FrustumPlanes& frustumPlanes)
+                            const FrustumPlanes& frustumPlanes,
+                            glm::vec4 tint)
 {
     Asset::Model& model = Asset::models_.at(modelId);
     for (auto& element : model.modelElements_) {
@@ -1383,18 +1387,21 @@ void NewRenderer::drawModel(ModelIdInt modelId,
         glm::vec4 materialDiffuse{0.8f, 0.8f, 0.8f, 1.0f};
         if (material != nullptr)
             materialDiffuse = glm::vec4(material->kDiffuse_, 1.0f);
+        const bool useTint = tint.a > 0.0f && (tint.r != 1.0f || tint.g != 1.0f || tint.b != 1.0f || tint.a != 1.0f);
         struct MaterialFlags
         {
             Uint32 useTexture;
             Uint32 useNormalTexture;
             Uint32 useMetallicRoughnessTexture;
-            Uint32 _pad0;
+            Uint32 useTint;
         } materialFlags{
             useTexture ? 1u : 0u,
             normalTexture != texture_ ? 1u : 0u,
             metallicRoughnessTexture != texture_ ? 1u : 0u,
-            0u,
+            useTint ? 1u : 0u,
         };
+        if (materialFlags.useTint != 0u)
+            materialDiffuse = tint;
         SDL_PushGPUFragmentUniformData(cmd, 0, &materialDiffuse, sizeof(materialDiffuse));
         SDL_PushGPUFragmentUniformData(cmd, 1, &materialFlags, sizeof(materialFlags));
 

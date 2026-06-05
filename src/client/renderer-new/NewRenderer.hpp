@@ -467,7 +467,8 @@ private:
                    const glm::mat4& modelTransform,
                    SDL_GPURenderPass* renderPass,
                    SDL_GPUCommandBuffer* cmd,
-                   const FrustumPlanes& frustumPlanes);
+                   const FrustumPlanes& frustumPlanes,
+                   glm::vec4 tint = glm::vec4{1.0f});
 
     void drawModelDepth(ModelIdInt modelId,
                         const glm::mat4& modelTransform,
