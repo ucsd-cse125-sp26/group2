@@ -22,6 +22,8 @@ struct HealthArmorBar : HudWidget
 private:
     int maxHealth_ = 100;
     int maxArmor_ = 100;
+    int maxOverShield_ = 200;
     float healthFill_ = 1.f;
     float armorFill_ = 0.f;
+    float overShieldFill_ = 0.f;
 };
