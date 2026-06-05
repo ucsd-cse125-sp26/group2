@@ -153,6 +153,12 @@ bool App::init()
         return false;
     }
 
+    if (!sfxSystem.init()) {
+        SDL_Log("[client] SfxSystem init failed (non-fatal — music and sound effects disabled)");
+    }
+    applyAudioSettings();
+    previousAudioCounter_ = SDL_GetPerformanceCounter();
+
     // Developer skip
     if (developerConfig.skipLobby) {
         const NetworkAddress clientNet = networkConfig.clientNetwork;
@@ -184,6 +190,8 @@ bool App::init()
         current = Screen::TitleScreen;
     }
 
+    updateBackgroundMusic();
+
     return true;
 }
 
@@ -191,6 +199,8 @@ SDL_AppResult App::event(SDL_Event* event)
 {
     if (!screen_)
         return SDL_APP_FAILURE;
+    if (event)
+        sfxSystem.handleEvent(*event);
     return screen_->event(event);
 }
 
@@ -198,6 +208,18 @@ SDL_AppResult App::iterate()
 {
     if (!screen_)
         return SDL_APP_FAILURE;
+
+    const Uint64 now = SDL_GetPerformanceCounter();
+    const Uint64 frequency = SDL_GetPerformanceFrequency();
+    const float audioDt = previousAudioCounter_ != 0 && frequency != 0
+                              ? static_cast<float>(now - previousAudioCounter_) / static_cast<float>(frequency)
+                              : 0.0f;
+    previousAudioCounter_ = now;
+    applyAudioSettings();
+    updateBackgroundMusic();
+    if (current != Screen::InGame)
+        sfxSystem.update(audioDt);
+
     const SDL_AppResult result = screen_->iterate();
     if (result != SDL_APP_CONTINUE)
         return result;
@@ -614,6 +636,8 @@ void App::transitionTo(Screen next)
     default:
         break;
     }
+
+    updateBackgroundMusic();
 }
 
 void App::cleanup()
@@ -629,6 +653,8 @@ void App::cleanup()
         shutdownHostedServerGracefully();
     }
     client.shutdown();
+    sfxSystem.stopMusic();
+    sfxSystem.quit();
     menu_theme::releaseBackground(renderer.getDevice());
     renderer.quit();
     if (screen_) {
@@ -655,6 +681,7 @@ AppContext App::screenContext()
         .window = *window,
         .renderer = renderer,
         .client = client,
+        .sfxSystem = sfxSystem,
         .hostedServer = hostedServer,
         .hostConfigState = hostConfigState,
         .networkConfig = networkConfig,
@@ -663,6 +690,29 @@ AppContext App::screenContext()
         .userSettingsPath = userSettingsPath,
         .currentServerName = currentServerName,
     };
+}
+
+void App::applyAudioSettings()
+{
+    if (!sfxSystem.isInitialized())
+        return;
+
+    sfxSystem.setCategoryVolume(SfxCategory::Music, userSettings.musicVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::Weapons, userSettings.sfxVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::Impacts, userSettings.sfxVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::Player, userSettings.sfxVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::Footsteps, userSettings.sfxVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::Voice, userSettings.sfxVolume);
+    sfxSystem.setCategoryVolume(SfxCategory::UI, userSettings.sfxVolume);
+}
+
+void App::updateBackgroundMusic()
+{
+    if (!sfxSystem.isInitialized())
+        return;
+
+    const SfxId desiredMusic = current == Screen::InGame ? SfxId::GameMusic : SfxId::MenuMusic;
+    sfxSystem.playMusic(desiredMusic);
 }
 
 void App::showMainMenuPopupMessage(const std::string& message)

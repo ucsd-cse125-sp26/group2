@@ -29,6 +29,7 @@ inline const AssetDefinition kMapAsset{
     .filename = "maps/map1.glb",
     .role = AssetRole::Map,
     .loadScale = 39.3701f,
+    .flipUVs = true,
 };
 
 inline const std::array<AssetDefinition, 0> kPropAssets{};

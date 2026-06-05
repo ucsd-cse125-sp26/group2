@@ -12,6 +12,7 @@
 #include "network/Client.hpp"
 #include "network/NetworkConfig.hpp"
 #include "renderer-new/NewRenderer.hpp"
+#include "sfx/SfxSystem.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -70,6 +71,7 @@ private:
     UserSettings userSettings;       ///< User-specific input and gameplay settings.
     std::string userSettingsPath;    ///< Path used to load and save user settings.
     std::string currentServerName;   ///< Display name for the connected server, if known.
+    SfxSystem sfxSystem;             ///< Shared audio system for menus, music, and gameplay sounds.
     Client client;                   ///< Network client connected to the authoritative server when in a session.
     HostedServer hostedServer;       ///< Optional local server process launched by the host screen.
     HostConfigState hostConfigState{
@@ -101,12 +103,19 @@ private:
 
     std::future<JoinAttemptResult> joinAttempt_; ///< Background direct/global join attempt, if active.
     std::string joinAttemptLabel_;               ///< Target label displayed by the main menu while joining.
+    Uint64 previousAudioCounter_ = 0;             ///< Performance counter used to tick menu audio.
 
     /// @brief Destroy all subsystems without asserting on partial-init state.
     void cleanup();
 
     /// @brief Build a borrowed context for screen initialisation.
     AppContext screenContext();
+
+    /// @brief Push saved volume settings into the shared audio system.
+    void applyAudioSettings();
+
+    /// @brief Start the correct looping background music for the active screen.
+    void updateBackgroundMusic();
 
     /// @brief Show a modal message on the active main menu screen, if it is active.
     void showMainMenuPopupMessage(const std::string& message);

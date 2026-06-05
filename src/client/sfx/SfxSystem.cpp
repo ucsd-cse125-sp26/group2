@@ -3,9 +3,13 @@
 
 #include "SfxSystem.hpp"
 
+#include "ecs/components/FireField.hpp"
+#include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/LocalPlayer.hpp"
 #include "ecs/components/PlayerMatchStats.hpp"
+#include "ecs/components/Position.hpp"
+#include "ecs/components/WeaponState.hpp"
 #include "ecs/physics/Raycast.hpp"
 #include "ecs/physics/WorldData.hpp"
 
@@ -64,6 +68,56 @@ float softClip(float value) noexcept
     return std::clamp(value / (1.0f + std::fabs(value) * 0.35f), -1.0f, 1.0f);
 }
 
+std::string_view reloadEventForWeapon(WeaponType type) noexcept
+{
+    switch (type) {
+    case WeaponType::Rifle:
+        return "weapon.rifle.reload";
+    case WeaponType::Rocket:
+        return "weapon.rocket.reload";
+    case WeaponType::RailGun:
+        return "weapon.railgun.reload";
+    case WeaponType::EnergyGun:
+        return "weapon.energy.reload";
+    case WeaponType::Shotgun:
+        return "weapon.shotgun.reload";
+    case WeaponType::HEGrenade:
+    case WeaponType::Molotov:
+    case WeaponType::Sticky:
+    case WeaponType::None:
+        return {};
+    }
+    return {};
+}
+
+std::string_view explosionEventForWeapon(WeaponType type) noexcept
+{
+    switch (type) {
+    case WeaponType::Rocket:
+        return "explosion.rocket";
+    case WeaponType::Molotov:
+        return "explosion.molotov";
+    case WeaponType::HEGrenade:
+    case WeaponType::Sticky:
+        return "explosion.he";
+    case WeaponType::Rifle:
+    case WeaponType::RailGun:
+    case WeaponType::EnergyGun:
+    case WeaponType::Shotgun:
+    case WeaponType::None:
+        return "explosion";
+    }
+    return "explosion";
+}
+
+audio::AudioObjectId sfxAudioObjectForEntity(entt::entity entity) noexcept
+{
+    audio::StableId value = audio::stableHash("sfx.entity") ^ static_cast<audio::StableId>(entt::to_integral(entity));
+    if (value == 0)
+        value = 1;
+    return audio::AudioObjectId{value};
+}
+
 } // namespace
 
 bool SfxSystem::init()
@@ -85,18 +139,27 @@ bool SfxSystem::init()
     categoryVolumes_.fill(1.0f);
     cooldowns_.fill(0.0f);
 
-    loadClip(SfxId::RifleFire, "Weapons/Rifle_Shooting.wav", SfxCategory::Weapons, 0.8f, 0.10f);
-    loadClip(SfxId::RocketFire, "Weapons/Rocket_Shooting.wav", SfxCategory::Weapons, 0.7f, 0.80f);
-    loadClip(SfxId::RailGunFire, "Weapons/Railgun_Shooting.wav", SfxCategory::Weapons, 0.8f, 0.20f);
-    loadClip(SfxId::EnergyGunFire, "Weapons/Energy_Shooting_Start.wav", SfxCategory::Weapons, 0.7f, 0.0f);
-    loadClip(SfxId::ShotgunFire, "Weapons/Shotgun_Shooting.wav", SfxCategory::Weapons, 0.85f, 0.20f);
-    loadClip(SfxId::ChargeRifleLoad, "charge-rifle-load.wav", SfxCategory::Weapons, 0.9f, 0.0f);
+    loadClip(SfxId::RifleFire, "Weapons/Rifle/Rifle_Shooting.wav", SfxCategory::Weapons, 0.8f, 0.10f);
+    loadClip(SfxId::RocketFire, "Weapons/Rocket/Rocket_Shooting.wav", SfxCategory::Weapons, 0.7f, 0.80f);
+    loadClip(SfxId::RailGunFire, "Weapons/Railgun/Railgun_Shooting.wav", SfxCategory::Weapons, 0.8f, 0.20f);
+    loadClip(SfxId::EnergyGunFire, "Weapons/EnergyWeapon/Energy_Shooting_Start.wav", SfxCategory::Weapons, 0.7f, 0.0f);
+    loadClip(SfxId::ShotgunFire, "Weapons/Shotgun/Shotgun_Shooting.wav", SfxCategory::Weapons, 0.85f, 0.20f);
+    loadClip(SfxId::RifleReload, "Weapons/Rifle/Rifle_Reloading.wav", SfxCategory::Weapons, 0.78f, 0.0f);
+    loadClip(SfxId::RocketReload, "Weapons/Rocket/Rocket_Reloading.wav", SfxCategory::Weapons, 0.8f, 0.0f);
+    loadClip(SfxId::RailGunReload, "Weapons/Railgun/Railgun_Reloading.wav", SfxCategory::Weapons, 0.78f, 0.0f);
+    loadClip(SfxId::EnergyReload, "Weapons/EnergyWeapon/Energy_Reloading.wav", SfxCategory::Weapons, 0.78f, 0.0f);
+    loadClip(SfxId::ShotgunReload, "Weapons/Shotgun/Shotgun_Reloading.wav", SfxCategory::Weapons, 0.82f, 0.0f);
+    loadClip(SfxId::RailGunCharge, "Weapons/Railgun/Railgun_Charge.wav", SfxCategory::Weapons, 0.9f, 0.0f);
+    loadClip(SfxId::ChargeRifleLoad, "Weapons/Railgun/Railgun_Charge.wav", SfxCategory::Weapons, 0.9f, 0.0f);
     loadClip(SfxId::ChargeRifleShoot, "charge-rifle-shoot.wav", SfxCategory::Weapons, 1.0f, 0.20f);
-    loadClip(SfxId::EnergyBeamLoop, "Weapons/Energy_Shooting.wav", SfxCategory::Weapons, 0.6f, 0.0f);
+    loadClip(SfxId::EnergyBeamLoop, "Weapons/EnergyWeapon/Energy_Shooting.wav", SfxCategory::Weapons, 0.6f, 0.0f);
 
     loadClip(SfxId::FleshHit, "Voicy_Flesh Bullet Impact SFX.mp3", SfxCategory::Impacts, 0.7f, 0.08f);
     loadClip(SfxId::Headshot, "Voicy_Headshot Rapid SFX.mp3", SfxCategory::Impacts, 0.8f, 0.08f);
     loadClip(SfxId::Explosion, "Voicy_Minecraft TNT Explosion.mp3", SfxCategory::Impacts, 1.0f, 0.30f);
+    loadClip(SfxId::RocketExplosion, "Weapons/Rocket/Explosion_Rocket.wav", SfxCategory::Impacts, 1.0f, 0.20f);
+    loadClip(SfxId::MolotovExplosion, "Weapons/Grenade/Explosion_Molotov.wav", SfxCategory::Impacts, 1.0f, 0.20f);
+    loadClip(SfxId::HEExplosion, "Weapons/Grenade/Explosion_HE.wav", SfxCategory::Impacts, 1.0f, 0.20f);
 
     loadClip(SfxId::DamageTaken, "Voicy_roblox ooof.mp3", SfxCategory::Player, 0.8f, 0.30f);
     loadClip(SfxId::ArmorBreak, "Voicy_Fortnite Shield Break.mp3", SfxCategory::Player, 0.9f, 1.00f);
@@ -144,9 +207,11 @@ bool SfxSystem::init()
     synthesizeClip(SfxId::GravityFlipSfx, SfxCategory::Player, 0.7f, 0.10f);
     synthesizeClip(SfxId::GrappleSfx, SfxCategory::Player, 0.7f, 0.10f);
     synthesizeClip(SfxId::RecallSfx, SfxCategory::Player, 0.7f, 0.10f);
-    synthesizeClip(SfxId::GrenadeThrow, SfxCategory::Weapons, 0.45f, 0.12f);
+    loadClip(SfxId::GrenadeThrow, "Weapons/Grenade/Grenade_Throw.wav", SfxCategory::Weapons, 0.45f, 0.12f);
     synthesizeClip(SfxId::VoiceStart, SfxCategory::Voice, 0.20f, 0.05f);
     synthesizeClip(SfxId::VoiceStop, SfxCategory::Voice, 0.14f, 0.05f);
+    loadClip(SfxId::MenuMusic, "Music/Gamesong1.wav", SfxCategory::Music, 0.8f, 0.0f);
+    loadClip(SfxId::GameMusic, "Music/Gamesong2.wav", SfxCategory::Music, 0.8f, 0.0f);
 
     convertClipsToMixer();
 
@@ -192,6 +257,8 @@ void SfxSystem::quit()
         for (Source& source : sources_)
             source = Source{};
         voiceSources_.clear();
+        musicHandle_ = kInvalidSource;
+        currentMusic_ = SfxId::_Count;
     }
 
     SDL_DestroyAudioStream(mixStream_);
@@ -250,7 +317,32 @@ void SfxSystem::stopSource(SourceHandle handle)
         return;
     if (source->voiceStream)
         voiceSources_.erase(source->speaker.value);
+    if (handle == musicHandle_) {
+        musicHandle_ = kInvalidSource;
+        currentMusic_ = SfxId::_Count;
+    }
     *source = Source{};
+}
+
+void SfxSystem::playMusic(SfxId id, float gain)
+{
+    {
+        std::lock_guard lock(mixerMutex_);
+        if (currentMusic_ == id && findSource(musicHandle_))
+            return;
+    }
+
+    stopMusic();
+    musicHandle_ = startLoop(id, false, glm::vec3{0.0f}, gain, 2.0f);
+    currentMusic_ = musicHandle_ == kInvalidSource ? SfxId::_Count : id;
+}
+
+void SfxSystem::stopMusic()
+{
+    if (musicHandle_ != kInvalidSource)
+        stopSource(musicHandle_);
+    musicHandle_ = kInvalidSource;
+    currentMusic_ = SfxId::_Count;
 }
 
 void SfxSystem::setListener(const audio::ListenerState& listener)
@@ -443,7 +535,7 @@ void SfxSystem::onExplosion(const ExplosionEvent& e)
 {
     const audio::AudioObjectId object = audio::objectId("event.explosion");
     setAudioObjectTransform(object, e.pos);
-    postAudioEvent("explosion", object, std::clamp(e.blastRadius / 220.0f, 0.75f, 1.8f));
+    postAudioEvent(explosionEventForWeapon(e.weaponType), object, std::clamp(e.blastRadius / 220.0f, 0.75f, 1.8f));
 }
 
 void SfxSystem::handleEvent(const SDL_Event& event)
@@ -462,7 +554,7 @@ void SfxSystem::handleEvent(const SDL_Event& event)
 #endif
 }
 
-void SfxSystem::update(float dt, const Registry& registry)
+void SfxSystem::update(float dt)
 {
     if (pendingReopen_) {
         pendingReopen_ = false;
@@ -493,6 +585,14 @@ void SfxSystem::update(float dt, const Registry& registry)
             source.busGain = audioRuntime_.busGain(source.bus);
         }
     }
+}
+
+void SfxSystem::update(float dt, const Registry& registry)
+{
+    update(dt);
+
+    if (!mixStream_)
+        return;
 
     for (const auto entity : registry.view<const LocalPlayer, const Health, const PlayerMatchStats>()) {
         const auto& h = registry.get<const Health>(entity);
@@ -532,6 +632,69 @@ void SfxSystem::update(float dt, const Registry& registry)
         prevDeaths_ = stats.deaths;
         prevKills_ = stats.kills;
         break;
+    }
+
+    for (const auto entity : registry.view<const LocalPlayer, const WeaponState>()) {
+        const auto& weapon = registry.get<const WeaponState>(entity);
+        const GunInstance& gun = getEquippedGun(weapon);
+
+        const bool justStartedReload = gun.isReloading && !prevLocalReloading_;
+        if (justStartedReload) {
+            const std::string_view eventName = reloadEventForWeapon(gun.type);
+            if (!eventName.empty())
+                postLocalAudioEvent(eventName, sfxAudioObjectForEntity(entity));
+        }
+
+        const bool railgunCharging = gun.type == WeaponType::RailGun && gun.chargeTime > 0.0f && !gun.isReloading;
+        if (railgunCharging && !prevLocalRailgunCharging_)
+            postLocalAudioEvent("weapon.railgun.charge_start", sfxAudioObjectForEntity(entity));
+
+        prevLocalReloading_ = gun.isReloading;
+        prevLocalRailgunCharging_ = railgunCharging;
+        break;
+    }
+
+    std::vector<entt::entity> liveGrenadeOwners;
+    liveGrenadeOwners.reserve(prevGrenadeCooldowns_.size());
+    registry.view<const GrenadeState>().each([&](entt::entity entity, const GrenadeState& grenades) {
+        liveGrenadeOwners.push_back(entity);
+        const float prevCooldown = prevGrenadeCooldowns_[entity];
+        if (grenades.cooldown > 0.0f && prevCooldown <= 0.0f) {
+            const bool isLocal = registry.all_of<LocalPlayer>(entity);
+            const audio::AudioObjectId object = sfxAudioObjectForEntity(entity);
+            if (const auto* pos = registry.try_get<Position>(entity))
+                setAudioObjectTransform(object, pos->value);
+
+            if (isLocal)
+                postLocalAudioEvent("weapon.grenade.throw", object);
+            else
+                postAudioEvent("weapon.grenade.throw", object);
+        }
+        prevGrenadeCooldowns_[entity] = grenades.cooldown;
+    });
+    for (auto it = prevGrenadeCooldowns_.begin(); it != prevGrenadeCooldowns_.end();) {
+        if (std::find(liveGrenadeOwners.begin(), liveGrenadeOwners.end(), it->first) == liveGrenadeOwners.end())
+            it = prevGrenadeCooldowns_.erase(it);
+        else
+            ++it;
+    }
+
+    std::vector<entt::entity> liveFireFields;
+    liveFireFields.reserve(knownFireFields_.size());
+    registry.view<const FireField>().each([&](entt::entity entity, const FireField& field) {
+        liveFireFields.push_back(entity);
+        if (!knownFireFields_.contains(entity)) {
+            const audio::AudioObjectId object = sfxAudioObjectForEntity(entity);
+            setAudioObjectTransform(object, field.position);
+            postAudioEvent("explosion.molotov", object, 1.0f);
+            knownFireFields_[entity] = true;
+        }
+    });
+    for (auto it = knownFireFields_.begin(); it != knownFireFields_.end();) {
+        if (std::find(liveFireFields.begin(), liveFireFields.end(), it->first) == liveFireFields.end())
+            it = knownFireFields_.erase(it);
+        else
+            ++it;
     }
 }
 
