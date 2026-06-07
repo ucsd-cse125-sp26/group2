@@ -268,7 +268,8 @@ inline void handleDeath(entt::entity& player,
                         entt::entity& killer,
                         Registry& registry,
                         std::vector<NetKillEvent>& killEvents,
-                        BodyRegion hitRegion)
+                        BodyRegion hitRegion,
+                        int weaponId)
 {
     if (playerHealth.health <= 0) {
         // Drop the player's two weapons at their current position.
@@ -331,6 +332,7 @@ inline void handleDeath(entt::entity& player,
             .killerId = killerId,
             .victimId = registry.get<ClientId>(player),
             .killerHealth = killerHealth,
+            .weaponId = weaponId,
             .hitRegion = hitRegion,
             .isHeadshot = (hitRegion == BodyRegion::Head),
         };
@@ -413,6 +415,7 @@ float applyDamage(float damage,
                   Registry& registry,
                   std::vector<NetKillEvent>& killEvents,
                   BodyRegion hitRegion,
+                  int weaponId,
                   float shieldMultiplier)
 {
     // If player is dead, ignore damage
@@ -442,7 +445,7 @@ float applyDamage(float damage,
     if (remainingDamage > 0.0f) {
         if (playerHealth.health <= remainingDamage) {
             playerHealth.health = 0.0f;
-            handleDeath(player, playerHealth, killer, registry, killEvents, hitRegion);
+            handleDeath(player, playerHealth, killer, registry, killEvents, hitRegion, weaponId);
         } else {
             playerHealth.health -= remainingDamage;
         }

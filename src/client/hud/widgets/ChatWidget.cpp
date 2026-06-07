@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace
 {
@@ -46,7 +47,7 @@ ChatWidget::ChatWidget()
     anchor = HudAnchor::CenterLeft;
     offsetX = 45.f;
     offsetY = 0.f;
-    width = 400.f;
+    width = 346.f;
     height = 172.f;
 }
 
@@ -66,11 +67,11 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
 
     const float s = uiScale_;
     const float w = width * s;
-    const float lineH = 18.f * s;
-    const float font = 12.f * s;
+    const float lineH = 22.f * s;
+    const float font = 16.f * s;
     const float pad = 10.f * s;
     const int maxLines = chat_.open ? 8 : 4;
-    const float inputH = chat_.open ? 26.f * s : 0.f;
+    const float inputH = chat_.open ? 32.f * s : 0.f;
     const float panelH = pad * 2.f + lineH * static_cast<float>(maxLines) + inputH;
     const float panelY = y - panelH;
 
@@ -80,32 +81,33 @@ void ChatWidget::draw(HudContext& ctx, float x, float y)
         ctx.rectOutline(x, panelY, w, panelH, 1.f, k_lineDim);
 
     const auto& messages = chat_.messages;
-    int visibleMessages = 0;
-    for (auto it = messages.rbegin(); it != messages.rend() && visibleMessages < maxLines; ++it) {
-        if (!chat_.open && it->ageSeconds > 7.0f)
+    std::vector<const HudChatMessage*> visibleMessages;
+    visibleMessages.reserve(static_cast<std::size_t>(maxLines));
+    for (const auto& message : messages) {
+        if (!chat_.open && message.ageSeconds > 7.0f)
             continue;
-        ++visibleMessages;
+        visibleMessages.push_back(&message);
+        if (static_cast<int>(visibleMessages.size()) > maxLines)
+            visibleMessages.erase(visibleMessages.begin());
     }
 
-    float cursorY = panelY + pad + (static_cast<float>(maxLines - visibleMessages) * lineH);
-    int drawn = 0;
-    for (auto it = messages.rbegin(); it != messages.rend() && drawn < visibleMessages; ++it) {
-        if (!chat_.open && it->ageSeconds > 7.0f)
-            continue;
-
-        const float fade = chat_.open ? 1.0f : std::clamp(1.0f - (it->ageSeconds - 5.5f) / 1.5f, 0.0f, 1.0f);
-        const HudColor nameColor = it->fromLocal ? withAlpha(k_cyan, fade) : withAlpha(k_amber, fade);
+    const int visibleCount = static_cast<int>(visibleMessages.size());
+    float cursorY = panelY + pad + (static_cast<float>(maxLines - visibleCount) * lineH);
+    for (const HudChatMessage* messageEntry : visibleMessages) {
+        const HudChatMessage& messageData = *messageEntry;
+        const float fade =
+            chat_.open ? 1.0f : std::clamp(1.0f - (messageData.ageSeconds - 5.5f) / 1.5f, 0.0f, 1.0f);
+        const HudColor nameColor = messageData.fromLocal ? withAlpha(k_cyan, fade) : withAlpha(k_amber, fade);
         const HudColor textColor = withAlpha(k_text, fade);
 
-        const float nameW = ctx.measureText(it->senderName.c_str(), font);
+        const float nameW = ctx.measureText(messageData.senderName.c_str(), font);
         const float messageX = x + pad + nameW + 8.f * s;
-        const std::string message = elideToWidth(ctx, it->message, font, x + w - pad - messageX);
-        ctx.text(it->senderName.c_str(), x + pad, cursorY, font, nameColor, HudAlign::Left);
+        const std::string message = elideToWidth(ctx, messageData.message, font, x + w - pad - messageX);
+        ctx.text(messageData.senderName.c_str(), x + pad, cursorY, font, nameColor, HudAlign::Left);
         ctx.text(":", x + pad + nameW, cursorY, font, withAlpha(k_textDim, fade), HudAlign::Left);
         ctx.text(message.c_str(), messageX, cursorY, font, textColor, HudAlign::Left);
 
         cursorY += lineH;
-        ++drawn;
     }
 
     if (!speakers_.empty()) {

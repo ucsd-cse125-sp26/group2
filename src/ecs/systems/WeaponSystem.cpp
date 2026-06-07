@@ -769,6 +769,7 @@ inline void handleFire(Registry& registry,
                             registry,
                             killEvents,
                             lock.region,
+                            static_cast<int>(gun.type),
                             config.shieldDamageMultiplier);
                 applyBulletSlow(lock.target, registry);
 
@@ -829,7 +830,13 @@ inline void handleFire(Registry& registry,
         // Apply DPS-based damage with body-region multiplier.
         if (hit.entity != entt::null && registry.valid(hit.entity)) {
             const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
-            applyDamage(config.dps * dt * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+            applyDamage(config.dps * dt * multiplier,
+                        hit.entity,
+                        shooter,
+                        registry,
+                        killEvents,
+                        hit.region,
+                        static_cast<int>(gun.type));
             applyBulletSlow(hit.entity, registry);
         }
 
@@ -910,7 +917,8 @@ inline void handleFire(Registry& registry,
 
             auto outGoingDamage =
                 (config.damage + (config.chargeDamage * (gun.chargeTime / config.maxChargeTime))) * multiplier;
-            chargeDealtDamage = applyDamage(outGoingDamage, hit.entity, shooter, registry, killEvents, hit.region);
+            chargeDealtDamage = applyDamage(
+                outGoingDamage, hit.entity, shooter, registry, killEvents, hit.region, static_cast<int>(gun.type));
             applyBulletSlow(hit.entity, registry);
             if (hit.region == BodyRegion::Head && combatLogEnabled()) {
                 SDL_Log("[weapon] HEADSHOT! charge weapon hit %d in head for %.0f damage",
@@ -989,8 +997,13 @@ inline void handleFire(Registry& registry,
             float dealtDamage = 0.f;
             if (hit.entity != entt::null && registry.valid(hit.entity)) {
                 const float multiplier = defaultDamageProfile().multipliers[static_cast<size_t>(hit.region)];
-                dealtDamage =
-                    applyDamage(config.damage * multiplier, hit.entity, shooter, registry, killEvents, hit.region);
+                dealtDamage = applyDamage(config.damage * multiplier,
+                                          hit.entity,
+                                          shooter,
+                                          registry,
+                                          killEvents,
+                                          hit.region,
+                                          static_cast<int>(gun.type));
                 applyBulletSlow(hit.entity, registry);
                 if (hit.region == BodyRegion::Head && combatLogEnabled()) {
                     SDL_Log("[weapon] HEADSHOT! %d hit %d for %.0f damage (base %.0f x %.1f)",

@@ -417,6 +417,7 @@ void writeWidgetParamsJson(std::ostream& out, const HudWidget& widget)
         writeFloatParam(out, first, "entryPadding", feed->entryPadding);
         writeFloatParam(out, first, "entryLifetime", feed->entryLifetime);
         writeFloatParam(out, first, "fontSize", feed->fontSize);
+        // writeFloatParam(out, first, "iconSize", feed->iconSize);
         writeFloatParam(out, first, "fadeOutDuration", feed->fadeOutDuration);
         writeIntParam(out, first, "maxEntries", feed->maxEntries);
     } else if (const auto* level = dynamic_cast<const LevelBarWidget*>(&widget)) {
@@ -675,6 +676,7 @@ void editWidgetSpecific(HudWidget& widget)
         editFloat("Entry Padding", feed->entryPadding, 0.5f, 0.0f, 80.0f);
         editFloat("Entry Lifetime", feed->entryLifetime, 0.1f, 0.1f, 60.0f);
         editFloat("Font Size", feed->fontSize, 0.5f, 4.0f, 96.0f);
+        // editFloat("Icon Size", feed->iconSize, 0.5f, 4.0f, 96.0f);
         editFloat("Fade Out Duration", feed->fadeOutDuration, 0.05f, 0.0f, 20.0f);
         ImGui::DragInt("Max Entries", &feed->maxEntries, 0.1f, 1, 40);
     } else if (auto* level = dynamic_cast<LevelBarWidget*>(&widget)) {

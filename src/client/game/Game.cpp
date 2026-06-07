@@ -1366,11 +1366,14 @@ bool Game::init(AppContext& ctx)
         case ParticleEffectType::PowerupPickup:
             if (sfxSystem->isInitialized()) {
                 const audio::AudioObjectId object = audio::objectId("event.powerup.pickup");
+                const std::string_view eventName = evt.powerupType == PowerupType::Shield
+                                                       ? "powerup.overshield_pickup"
+                                                       : "powerup.damage_pickup";
                 sfxSystem->setAudioObjectTransform(object, evt.pos1);
                 if (evt.source == localPlayer)
-                    sfxSystem->postLocalAudioEvent("powerup.pickup", object, 1.0f);
+                    sfxSystem->postLocalAudioEvent(eventName, object, 1.0f);
                 else
-                    sfxSystem->postAudioEvent("powerup.pickup", object, 1.0f);
+                    sfxSystem->postAudioEvent(eventName, object, 1.0f);
             }
             break;
         }
@@ -1387,8 +1390,10 @@ bool Game::init(AppContext& ctx)
     client->onKillEvent([this](const NetKillEvent& evt) {
         killFeed.insert(killFeed.begin(),
                         KillFeedEvent{
-                            evt.killerId,
-                            evt.victimId,
+                            .killerId = evt.killerId,
+                            .victimId = evt.victimId,
+                            .weaponId = evt.weaponId,
+                            .isHeadshot = evt.isHeadshot,
                         });
 
         // TODO: Specific handling for local player deaths (display enemy health)
@@ -6154,6 +6159,8 @@ SDL_AppResult Game::iterate()
                     entry.victimName = "You";
                 else
                     entry.victimName = lookupPlayerName(registry, evt.victimId, nameBuf, sizeof(nameBuf));
+                entry.weaponId = evt.weaponId;
+                entry.isHeadshot = evt.isHeadshot;
                 hudKillEntries.push_back(entry);
             }
         }
@@ -6503,19 +6510,16 @@ SDL_AppResult Game::iterate()
         });
 
         // ── Voidfall HUD: pickup notifications (slide-in) ──
-        // Detect new weapons or ammo growth on the local player vs. the
+        // Detect new weapons on the local player vs. the
         // previous frame's snapshot.  This means picking up a Rifle from a
         // spawner — or any other source that mutates a WeaponState slot —
         // surfaces in the right-side feed.
         {
             int curPrim = -1;
             int curSec = -1;
-            int curReserve = 0;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
                 curPrim = static_cast<int>(getSlot(ws, WeaponSlot::PRIMARY).type);
                 curSec = static_cast<int>(getSlot(ws, WeaponSlot::SECONDARY).type);
-                const GunInstance& gun = getEquippedGun(ws);
-                curReserve = gun.currentMagAmmo + gun.totalAmmo;
             });
 
             auto pushPickup = [&](const std::string& label, int qty) {
@@ -6532,12 +6536,8 @@ SDL_AppResult Game::iterate()
                 const char* nm = (curSec >= 0 && curSec < 4) ? names[curSec] : "WEAPON";
                 pushPickup(nm, 1);
             }
-            if (prevAmmoReserve_ >= 0 && curReserve > prevAmmoReserve_ + 5) {
-                pushPickup("AMMO", curReserve - prevAmmoReserve_);
-            }
             prevPrimaryWeaponType_ = curPrim;
             prevSecondaryWeaponType_ = curSec;
-            prevAmmoReserve_ = curReserve;
 
             // Ship the pending list and drain — each notification is a
             // one-shot event; the widget owns its lifetime.

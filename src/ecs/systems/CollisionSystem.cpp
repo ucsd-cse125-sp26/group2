@@ -75,7 +75,7 @@ void detonateGrenade(Registry& registry, const Projectile& projectile, glm::vec3
                        projectile.type);
         break;
     case GrenadeDetonationKind::FireField:
-        spawnFireField(registry, position, cfg.fireRadius, cfg.fireDuration, cfg.fireDps, projectile.owner);
+        spawnFireField(registry, position, cfg.fireRadius, cfg.fireDuration, cfg.fireDps, projectile.owner, projectile.type);
         break;
     }
 }

@@ -96,6 +96,7 @@ inline void checkForPlayers(Registry& registry,
             outEvents.push_back(NetParticleEvent{
                 .source = player,
                 .effectType = ParticleEffectType::PowerupPickup,
+                .powerupType = spawner.type,
                 .pos1 = spawnerPos.value,
             });
 

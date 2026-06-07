@@ -7,19 +7,9 @@
 #include "hud/VoidfallStyle.hpp"
 
 #include <algorithm>
-#include <cstring>
 
 namespace
 {
-
-/// @brief Map weapon ID to a four-letter mil-spec callsign for the kill feed.
-const char* weaponCallsign(int /*weaponId*/)
-{
-    // The HudKillFeedEntry currently only carries a numeric weaponId; we don't
-    // have a typed map yet.  Default to "ARC-9" until the feed payload grows
-    // to include weapon names — same fallback as the prototype.
-    return "ARC-9";
-}
 
 bool nameMatchesYou(const std::string& s)
 {
@@ -31,8 +21,8 @@ bool nameMatchesYou(const std::string& s)
 KillFeed::KillFeed()
 {
     anchor = HudAnchor::TopRight;
-    offsetX = -80.f;
-    offsetY = 28.f;
+    offsetX = -144.f;
+    offsetY = 148.f;
 }
 
 void KillFeed::update(float dt, const HudGameState& state, HudTweenPool& /*tweens*/)
@@ -78,18 +68,17 @@ void KillFeed::draw(HudContext& ctx, float anchorX, float y)
     const float ep = entryPadding * s;
     const float padX = 8.f * s;
     const float gap = 7.f * s;
+    const float diamond = diamondSize * s;
 
     float curY = y;
     for (const auto& e : entries_) {
         const float alpha = (e.permanent ? 1.f : std::min(e.timer / fadeOutDuration, 1.f)) * e.slideIn;
         const float slideOff = (1.f - e.slideIn) * 16.f * s;
 
-        const char* weapon = weaponCallsign(0);
         const float killerW = ctx.measureText(e.killerName.c_str(), fs);
-        const float weaponW = ctx.measureText(weapon, fs);
         const float victimW = ctx.measureText(e.victimName.c_str(), fs);
         const float hsW = e.isHeadshot ? (10.f * s + gap) : 0.f;
-        const float contentW = killerW + gap + weaponW + hsW + gap + victimW;
+        const float contentW = killerW + gap + diamond + hsW + gap + victimW;
         const float pillW = contentW + padX * 2.f;
         const float pillH = eh;
 
@@ -110,9 +99,14 @@ void KillFeed::draw(HudContext& ctx, float anchorX, float y)
         ctx.text(e.killerName.c_str(), cursorX, textY, fs, killerColor, HudAlign::Left);
         cursorX += killerW + gap;
 
-        // Weapon abbreviation in amber.
-        ctx.text(weapon, cursorX, textY, fs, withAlpha(k_amber, alpha), HudAlign::Left);
-        cursorX += weaponW + gap;
+        // Generic kill marker.
+        ctx.rotatedRect(cursorX + diamond * 0.5f,
+                        pillY + pillH * 0.5f,
+                        diamond,
+                        diamond,
+                        45.f,
+                        withAlpha(k_amber, alpha));
+        cursorX += diamond + gap;
 
         // Headshot glyph: small red diamond.
         if (e.isHeadshot) {

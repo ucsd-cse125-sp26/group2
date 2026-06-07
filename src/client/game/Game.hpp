@@ -487,11 +487,9 @@ private:
     /// notification ("+1 RIFLE") so the side feed reflects what just changed.
     int prevPrimaryWeaponType_ = -1;
     int prevSecondaryWeaponType_ = -1;
-    int prevAmmoReserve_ = -1; ///< Drives "+N <weapon> AMMO" reserve-grow notifications.
 
     /// @brief Pickup notifications queued for the next HUD frame.  Emitted
-    /// when the local player's WeaponState gains a new weapon type or their
-    /// reserve ammo grows beyond the previous frame's reading.
+    /// when the local player's WeaponState gains a new weapon type.
     std::vector<HudPickupNotification> pendingPickupNotifications_;
 
     /// @brief Generic popup notifications queued for the next HUD frame.

@@ -22,7 +22,13 @@ constexpr float k_tickPeriod = 0.25f;     ///< Apply damage at 4 Hz to keep numb
 constexpr float k_selfDamageScale = 0.4f; ///< Same self-damage philosophy as rockets.
 } // namespace
 
-void spawnFireField(Registry& registry, glm::vec3 position, float radius, float duration, float dps, entt::entity owner)
+void spawnFireField(Registry& registry,
+                    glm::vec3 position,
+                    float radius,
+                    float duration,
+                    float dps,
+                    entt::entity owner,
+                    WeaponType weaponType)
 {
     const entt::entity field = registry.create();
     registry.emplace<FireField>(field,
@@ -31,7 +37,8 @@ void spawnFireField(Registry& registry, glm::vec3 position, float radius, float 
                                           .remaining = duration,
                                           .dps = dps,
                                           .tickAccumulator = 0.0f,
-                                          .owner = owner});
+                                          .owner = owner,
+                                          .weaponType = weaponType});
 }
 
 void runFireField(Registry& registry, float dt, std::vector<NetKillEvent>& killEvents)
@@ -70,7 +77,13 @@ void runFireField(Registry& registry, float dt, std::vector<NetKillEvent>& killE
                 if (killer == entt::null || !registry.valid(killer)) {
                     killer = player;
                 }
-                applyDamage(damage, player, killer, registry, killEvents);
+                applyDamage(damage,
+                            player,
+                            killer,
+                            registry,
+                            killEvents,
+                            BodyRegion::UpperTorso,
+                            static_cast<int>(field.weaponType));
             }
         }
 
