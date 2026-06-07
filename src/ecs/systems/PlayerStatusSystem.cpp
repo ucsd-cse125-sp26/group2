@@ -311,7 +311,7 @@ inline void handleDeath(entt::entity& player,
         registry.get_or_emplace<Velocity>(player) = Velocity{};
         registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = false; });
         registry.remove<HitboxInstance>(player);
-        registry.emplace_or_replace<RespawnTimer>(player, RespawnTimer{.timeRemaining = 5.0f});
+        registry.emplace_or_replace<RespawnTimer>(player, RespawnTimer{.timeRemaining = 4.0f});
         registry.patch<PlayerMatchStats>(player, [&](PlayerMatchStats& stats) { stats.deaths++; });
 
         // Clear input so dead players don't continue shooting/moving.
