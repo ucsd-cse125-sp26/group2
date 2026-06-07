@@ -472,11 +472,11 @@ void runPlayerStatus(Registry& registry, float dt)
         if (registry.all_of<RespawnTimer>(e)) {
             auto& respawnTimer = registry.get<RespawnTimer>(e);
 
-            // Allow skipping the respawn timer early by pressing space.
-            if (snap.skipRespawn) {
-                snap.skipRespawn = false;
-                respawnTimer.timeRemaining = 0.0f;
-            }
+            // DEBUG: Allow skipping the respawn timer early by pressing space.
+            // if (snap.skipRespawn) {
+            //     snap.skipRespawn = false;
+            //     respawnTimer.timeRemaining = 0.0f;
+            // }
 
             respawnTimer.timeRemaining -= dt;
             if (respawnTimer.timeRemaining <= 0) {

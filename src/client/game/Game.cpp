@@ -5673,7 +5673,7 @@ SDL_AppResult Game::iterate()
             else
                 killerName = lookupPlayerName(registry, deathInfo.killerId, killerBuf, sizeof(killerBuf));
 
-            char line1[64], line2[96], line3[48];
+            char line1[64], line2[96];
             std::snprintf(line1, sizeof(line1), "Killed by: %s", killerName);
             std::snprintf(line2,
                           sizeof(line2),
@@ -5681,7 +5681,6 @@ SDL_AppResult Game::iterate()
                           static_cast<double>(deathInfo.killerHealth.health),
                           static_cast<double>(deathInfo.killerHealth.armor),
                           std::ceil(static_cast<double>(respawnTimer.timeRemaining)));
-            std::snprintf(line3, sizeof(line3), "Press SPACE to skip");
 
             int winW = 0, winH = 0;
             SDL_GetWindowSizeInPixels(window, &winW, &winH);
@@ -5695,7 +5694,7 @@ SDL_AppResult Game::iterate()
             static constexpr float k_marginB = 16.0f;
             static constexpr float k_lineGap = 4.0f;
 
-            const float boxH = fs * 3.0f + k_lineGap * 2.0f + k_padY * 2.0f;
+            const float boxH = fs * 2.0f + k_lineGap + k_padY * 2.0f;
             const float boxW = static_cast<float>(winW) * 0.4f;
             const float x = (static_cast<float>(winW) - boxW) * 0.5f;
             const float y = static_cast<float>(winH) - boxH - k_marginB;
@@ -5703,12 +5702,10 @@ SDL_AppResult Game::iterate()
             const ImU32 bg = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.65f));
             const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
             const ImU32 fg2 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.85f, 0.85f, 0.85f, 0.85f));
-            const ImU32 fg3 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.6f, 0.9f, 0.6f, 0.9f));
 
             dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 4.0f);
             dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY), fg, line1);
             dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs + k_lineGap), fg2, line2);
-            dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs * 2.0f + k_lineGap * 2.0f), fg3, line3);
         }
     }
 
