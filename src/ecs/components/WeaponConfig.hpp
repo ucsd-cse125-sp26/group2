@@ -149,10 +149,10 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
 {
     static constexpr std::array<WeaponConfig, 9> k_kWeaponConfigs{{
         WeaponConfig{
-            .fireCooldown = 0.10f,
+            .fireCooldown = 0.125f,
             .magazineSize = 50,
             .defaultAmmoCapacity = 500,
-            .damage = 15.0f,
+            .damage = 18.0f,
             .hitscan = true,
             .hitscanRadius =
                 11.2f, // -30% cylinder hitreg (was 16.0); player capsules are ~2.5–6.5u radius in world space.
@@ -175,8 +175,8 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
         WeaponConfig{
             .fireCooldown = 1.0f,
             .magazineSize = 4,
-            .defaultAmmoCapacity = 12,
-            .damage = 250.0f, // Buffed from 200 — heavier direct hit.
+            .defaultAmmoCapacity = 8,
+            .damage = 200.0f,
             .hitscan = false,
             .initialProjectileSpeed = 3000.0f,
             .explosive = true,
@@ -213,18 +213,14 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .coneHalfAngleDeg = 48.0f,      // very wide cone — strafing/jukes still hold lock
             .dpsMax = 42.0f,                // ramp ceiling after dpsRampTime of held lock
             .dpsRampTime = 2.0f,            // seconds of continuous lock to reach dpsMax
-            .shieldDamageMultiplier = 0.7f, // energy-vs-energy, slightly more bite than before
+            .shieldDamageMultiplier = 0.9f, // energy-vs-energy, slightly more bite than before
             .reloadTime = 2.0f,
         },                                  // EnergyGun
         WeaponConfig{
-            // Peacekeeper-style pump shotgun: hitscan multi-pellet star spread.
-            // The fire path in WeaponSystem.cpp checks `type == Shotgun` and loops
-            // 9 raycasts in an asterisk pattern (1 center + 8 outer). Per-pellet
-            // damage is `damage` below (so max body damage = 9 * damage).
-            .fireCooldown = 0.225f, // 4× firerate (was 0.9)
+            .fireCooldown = 0.9f,
             .magazineSize = 6,
-            .defaultAmmoCapacity = 36,
-            .damage = 10.0f,       // per-pellet; 11 pellets → 110 body max, ~165 head.
+            .defaultAmmoCapacity = 18,
+            .damage = 16.0f,
             .hitscan = true,
             .hitscanRadius = 4.2f, // -30% cylinder hitreg (was 6.0); still tighter than rifle since the 11 pellets
                                    // compound close-range damage.
