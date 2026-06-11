@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSE_125_GROUP_02 // FINAL_REPORT</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&family=Work+Sans:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="backdrop" id="backdrop"></div>
+
+  <header class="topbar">
+    <div class="brand">CSE_125_GROUP_02</div>
+
+    <nav class="top-nav" aria-label="Primary navigation">
+      <a href="../index.html" class="active">Overview</a>
+      <a href="../docs/index.html">Docs</a>
+      <a href="../archive.html">Archive</a>
+    </nav>
+
+    <div class="topbar-right">
+      <div class="status-chip">
+        <span class="status-label">System_Status</span>
+        <span class="status-value">Complete</span>
+      </div>
+      <a href="https://github.com/ucsd-cse125-sp26/group2" target="_blank" rel="noopener noreferrer" class="button button--ghost">GitHub_Link</a>
+      <button class="mobile-toggle" id="mobileToggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle navigation menu">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+    </div>
+  </header>
+
+  <aside class="sidebar" id="sidebar" aria-label="Sidebar navigation">
+    <div class="operator-card">
+      <div class="operator-row">
+        <div class="operator-icon">
+          <span class="material-symbols-outlined">person</span>
+        </div>
+        <div>
+          <p class="operator-name">TERMINAL_01</p>
+          <p class="operator-status">Status: Online</p>
+        </div>
+      </div>
+    </div>
+
+    <nav class="side-nav">
+      <a class="nav-link" href="../index.html">
+        <span class="material-symbols-outlined">terminal</span>
+        <span>Home</span>
+      </a>
+      <a class="nav-link" href="../spec.html">
+        <span class="material-symbols-outlined">deployed_code</span>
+        <span>Project_Specs</span>
+      </a>
+      <a class="nav-link" href="../reports.html">
+        <span class="material-symbols-outlined">article</span>
+        <span>Weekly_Reports</span>
+      </a>
+      <a class="nav-link active" href="final.html">
+        <span class="material-symbols-outlined">task_alt</span>
+        <span>Final Report</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <a href="https://github.com/ucsd-cse125-sp26/group2" target="_blank" rel="noopener noreferrer" class="button button--primary" style="display:block; text-align: center;">GitHub_Link</a>
+    </div>
+  </aside>
+
+  <main class="page">
+    <div class="content">
+      <section class="reports-shell final-report-shell" aria-label="Final report">
+        <div class="reports-bg-word" aria-hidden="true">FINAL</div>
+
+        <header class="reports-header">
+          <div>
+            <h1><span aria-hidden="true"></span> Final_Report // 2026.06.12</h1>
+            <p>Metal: Orbital Arena // Project review and course retrospective</p>
+          </div>
+          <div class="reports-signal" aria-label="Report signal">
+            <small>Archive Status</small>
+            <div class="reports-signal-bars">
+              <i></i><i></i><i></i><i></i><i class="low"></i>
+            </div>
+          </div>
+        </header>
+
+        <section class="section" aria-label="Final report summary">
+          <div class="final-summary-grid">
+            <article class="panel inset">
+              <p class="card-title">Mission_Summary</p>
+              <p class="body-copy">
+                After 10 long yet short weeks, group 2's sprint has come to an end! It was so much fun working on such an ambitious project with the awesome people of group 2. To wrap up the quarter, here is our final report and retrospective.
+              </p>
+            </article>
+
+            <article class="panel final-metrics" aria-label="Final report metrics">
+              <div>
+                <p>Source_Lines</p>
+                <strong>74K+</strong>
+                <span>C++, headers, GLSL counted with tokei</span>
+              </div>
+              <div>
+                <p>Core_Language</p>
+                <strong>C++</strong>
+                <span>SDL, EnTT, Dear ImGui, custom systems</span>
+              </div>
+              <div>
+                <p>GitHub_Commits</p>
+                <strong>1,580+</strong>
+                <span>220+ closed pull requests. </span>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" aria-label="Project review questions and answers">
+          <h2 class="section-title">01_PROJECT_REVIEW</h2>
+
+          <div class="final-qa-grid final-project-review-grid">
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_01</p>
+              <h3>Game concept: To what extent did your game concept change from initial concept to what you implemented? If it did change, how did it change and why?</h3>
+              <div class="final-answer">
+                <p>We originally planned to have the gravity flip ability be a core feature of the game, but as we began designing the map we realized it would be hard to center the map around this feature. Instead, we decided to create an ability system and include the gravity flip as an ability. </p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_02</p>
+              <h3>Design: How does your final project design compare to the initial design, and what are the reasons for the differences, if any?</h3>
+              <div class="final-answer">
+                <p>The gameplay evolved with the addition of things like abilities, powerups, and grenades. The movement, however, stayed mostly true to the vision we had for it. We were able to create a bunnyhop and wallrun system that is incredibly satisfying.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_03</p>
+              <h3>Schedule: How does your final schedule compare with your projected schedule, and what are the reasons for the differences, if any?</h3>
+              <div class="final-answer">
+                <p>We more or less followed the schedule. There were several delays due to refactors of some systems, and we could not finish all the assets we wanted for the game in time.</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" aria-label="Final screenshots">
+          <h2 class="section-title">02_FINAL_SCREENSHOTS</h2>
+
+          <div class="final-screenshot-grid">
+            <figure class="panel final-screenshot-card">
+              <img src="../img/screenshots/38_lobby.png" alt="Project Accelerate lobby screen." />
+            </figure>
+
+            <figure class="panel final-screenshot-card">
+              <img src="../img/screenshots/39_map.png" alt="Project Accelerate game map." />
+            </figure>
+
+            <figure class="panel final-screenshot-card">
+              <img src="../img/screenshots/40_point_light.png" alt="Point light test in the game map." />
+            </figure>
+
+            <figure class="panel final-screenshot-card">
+              <img src="../img/screenshots/41_lighting.png" alt="Final lighting pass in Project Accelerate." />
+          </div>
+        </section>
+
+        <section class="section" aria-label="Development process questions and answers">
+          <h2 class="section-title">03_DEVELOPMENT_PROCESS</h2>
+
+          <div class="final-qa-grid">
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_04</p>
+              <h3>Describe your development environment. What tools did you use? What was your build workflow? How did you support multiple platforms, and what tips would you give future groups?</h3>
+              <div class="final-answer">
+                <p>We used CMake, Ninja, Doxygen, and SDL. The build workflow was CMake presets followed by build. SDL supports all platforms, but there are different constraints for graphics across different backends. About half the team used CLion and the other half used VScode for their IDE.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_05</p>
+              <h3>What group mechanics decisions worked out well, and which ones, if any, did not? Why?</h3>
+              <div class="final-answer">
+                <p><strong>[Jacob]</strong> We had two people in charge of each category. I think this worked out well because it meant we always had at least one person present who could represent that part of the project. Our consensus system for decision making did not work too well. At times it became hard to get opinions from the group, which resulted in me making decisions for the team. One thing that I should have done was go to each person on the team individually and give them a chance to voice their concerns to me. I kinda just trusted that if anyone had any concerns they would just come forward with them, but that didnt always happen.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_06</p>
+              <h3>Which aspects of the implementation were more difficult than you expected, and which were easier? Why?</h3>
+              <div class="final-answer">
+                <p><strong>[Jacob]</strong> We decided to use the ECS library EnTT, which made game state management incredibly easy for us. It still took time to walk through and implement each gameplay component, but the state management was always a breeze.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_07</p>
+              <h3>Which aspects of the project are you particularly proud of? Why?</h3>
+              <div class="final-answer">
+                <p><strong>[Jacob]</strong> I am proud of how well the guns turned out. They are really fun to use. I worked on a lot of the backend for the guns, Jolina made the models, and my brother helped with the sounds. All of these came together to make the guns feel good to use.</p>
+                <p><strong>[Cedric]</strong> I am proud of setting up the self-hosting system. I got to revisit concepts from CSE 120 and 123 and see how I could apply them.</p>
+                <p><strong>[Jolina]</strong> I’m proud of the progress achieved with the map layout, seeing it go from grey boxes to more detailed rooms with working colliders was pretty rewarding. </p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_08</p>
+              <h3>What was the most difficult software problem you faced, and how did you overcome it?</h3>
+              <div class="final-answer">
+                <p><strong>[Cedric]</strong> Refactoring the client to decouple networking from ECS. Originally, the client required the registry to be passed into the poll to apply snapshot bytes directly into components. When we added menus, they needed the same Client to receive match state and lobby events, but had no registry to pass. Instead of overloading poll, we opted to use a pub/sub pattern. The client exposed callbacks for certain packet types, which let menus and the game loop register the actions they needed while the client focused on transport and routing.</p>
+                <p><strong>[Jacob]</strong> Architecting the initial structure for the game server and its event handling was quite tricky. I had never worked on a project like this before, so it took some time to find the best approach for us.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_09</p>
+              <h3>Detail your tool chain for modeling, exporting, and loading meshes, textures, and animations. What tools did you use, what steps mattered, and what would you avoid?</h3>
+              <div class="final-answer">
+                <p><strong>[Jolina]</strong> We used Blender for both modeling and texture painting in the end. At a later point into the project, there was an attempt to pivot to Adobe’s Substance Painter for texturing the map, however we ran into an issue with some triangles of the uv mesh imported from Blender to Substance Painter being too small to be rendered into view, leaving holes in the imported model. Something I’d recommend to someone working with a map layout like ours is to texture room by room and keeping the faces of the mesh as separate from one another as possible so that it’s easier to choose which ones to join together to apply vertex paint to later on. Vertex painting is helpful if you’re using Substance Painter because it automatically creates a mask for each part that is colored different, so that you don’t accidentally paint over parts of the object you don’t want to. Despite the issues we faced with it, I think Substance Painter is still worth looking into if possible. As for Blender, it’s a reliable software for 3D modeling, and if it’s something you’re planning to use I’d recommend getting familiar with the keyboard shortcuts. As for using it to texture paint, it’s pretty limited so I mostly relied on shader nodes to generate texture in the models. Make sure to test out exporting and re-importing the model to make sure the colors/textures look correct because an issue we had early on was the inability to export a translucent mesh from blender. </p>
+                <p>One major lesson was to record the process for one asset and repeat it consistently for all assets, because coordinate spaces are inconsistent between editors and manual in-game adjustments are annoying.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_10</p>
+              <h3>Which networking, physics, audio, or GUI libraries did you use, and would you use them again?</h3>
+              <div class="final-answer">
+                <p><strong>[Cedric]</strong> We used Dear ImGui for our GUI. It helped us wire up simple interfaces early, and later we created a separate class for visual presets similar to a CSS file. Overall, I would highly recommend ImGui for quickly integrating and iterating on UI.</p>
+                <p><strong>[Cedric]</strong> SDL Net was useful for providing a cross-platform socket interface. I would recommend it for multi-platform support, though during development there was no official 3.x release and I had to update the interface to support NODELAY and return port numbers.</p>
+                <p><strong>[Daniil]</strong> Physics and collisions were made by us, without libraries. It would have been easier to work with collisions if we used brushes like cubes in Blender instead of planes.</p>
+                <p><strong>[Daniil]</strong> Networking was essentially made from scratch, using SDL Net for platform-agnostic socket access. We started with TCP-based networking, then built UDP-based networking so the game could handle latency jitter and lag compensation properly.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_11</p>
+              <h3>If you used an LLM as part of your development process, what did you use it for? How well did it work, and what advice would you give students?</h3>
+              <div class="final-answer">
+                <p><strong>[Cedric]</strong> I used Claude Code and Codex for planning features, styling UI, and fixing bugs. It was a massive time saver because it could scan the codebase and determine what needed to be created, modified, or wired. For UI, it helps to have a clear visual idea in mind, because LLMs are better at functional interfaces than visually appealing ones. Be specific and concise with prompts, and learn to minimize token usage.</p>
+                <p><strong>[Daniil]</strong> I used Claude Code in various harnesses, GPT Codex, and other open source models. They were beneficial for the amount of work we could do in limited time, but you need to fully specify API, architecture, and behavior in detail. Do preliminary research before formulating a task. LLMs are not suitable for artwork yet.</p>
+                <p><strong>[Scott]</strong> I used standard Claude Code when needed. It was especially useful for quickly summarizing changes in parts of the codebase I had not been tracking closely, and for implementing bug fixes near the deadline without scanning very long files.</p>
+                <p><strong>[Jacob]</strong> I used Codex for summarizing changes, helping plan architectural decisions, and helping arrange the HUD elements. I think it was very helpful, especially given how large our code base ended up being. However, I started the quarter telling myself that I would not rely on it too much, but by the last week I found myself using it a lot. I think the use of AI by others incentivises you to use AI to keep up with the amount of work they complete. I recommend that future students create strong boundaries for what is and is not permitted with AI.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_12</p>
+              <h3>If you used an implementation language other than C++, describe the environments, libraries, and tools you used. Would you recommend that language in the future?</h3>
+              <div class="final-answer">
+                <p>We used C++. Many of us used CLion as an IDE, which provided a super efficient working environment.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_13</p>
+              <h3>How many lines of code did you write for your project? Do not include library source. State how you counted.</h3>
+              <div class="final-answer">
+                <p>In total, we have 55k lines of C++, 15k lines of C++ headers, and 4k lines of GLSL files, which is about 74,000 lines total. We counted with tokei. The repository has 85,000 lines including the other languages.</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" aria-label="Retrospective questions and answers">
+          <h2 class="section-title">04_RETROSPECTIVE</h2>
+
+          <div class="final-qa-grid">
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_14</p>
+              <h3>What lessons about group dynamics did you learn from working in such a large group over an extended period of time on a challenging project?</h3>
+              <div class="final-answer">
+                <p><strong>[Josh]</strong> Plan hard, plan soft. Plan the core game engine features solidly, but keep the game flexible throughout. Ideally have your artist and graphics people work closely together or be the same person. You don’t need to implement realtime shadows and glossy materials if your art  is not going to be able to take advantage of it. Once you get to implementing the game and all the core game engine components are in, then flexibility and fun can take over. But for ease of implementation, the more you can plan out the better. How are things going to be organized, what are the large systems we are going to have and what are their interfaces. For example, actually sit down and plan out how the renderer is going to connect to the game loop. There is just going to be one “render” method to call. Nice! But how are you going to pass over the updated game objects to the renderer every frame? Will it be the responsibility of the game loop to send that information to the renderer every frame or will it be the responsibility of the renderer to iterate through all the renderable objects and get their updated information. Another example, the loading of assets, who is in charge of what? Okay, the renderer can load player models, but what about the map and everything that has collisions. Should that be the render system? Physics? Or a whole system just for loading that all the other systems tap into? These are the things you should “plan hard” so work isn’t doubled up and confusion can be avoided.</p>
+                <p><strong>[Jolina]</strong> Communication is definitely crucial, particularly about what is feasible and what isn’t within the provided scope of the class. Establishing file formats for assets.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_15</p>
+              <h3>Looking back over the past 10 weeks, is there anything you would do differently, and what would you do again in the same situation?</h3>
+              <div class="final-answer">
+                <p><strong>[Cedric]</strong> If we had a situation where one person vibe-coded an entire section and other people wanted more ownership, I would get rid of the vibe-coded section entirely. This is a group project that people may want to show off, and people should feel proud of the code they wrote. I also wish we had a uniform place to manage tasks. Keeping a running list on Discord was useful, but it became hard to know who was currently implementing a feature or who had already finished one during crunch time.</p>
+                <p><strong>[Jolina]</strong> For art specifically, figuring out a more concrete overarching timeline along with the weekly milestones, to help get a better idea of what the MVP for art looks like. The other thing I think I would have done differently was the testing of textures in the actual game itself because the default lighting of the blender scenes differed quite a bit from that of the actual game. I think spending some time to replicate the game’s lighting in the texture painting software you’re using, if possible, would be helpful for producing the most accurate results.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_16</p>
+              <h3>Which courses at UCSD do you think best prepared you for CSE 125?</h3>
+              <div class="final-answer">
+                <p><strong>[Cedric]</strong> CSE 120, 122, and 124. CSE 120 was useful for systems knowledge like threads, processes, and forking. CSE 124 helped with tailoring application payloads. CSE 122 helped apply networking knowledge to real systems, especially when setting up the echo servers for this class.</p>
+                <p><strong>[Scott]</strong> CSE 120 and CSE 124 were useful for general systems background knowledge, and CSE 110 was good experience for working with larger groups.</p>
+                <p><strong>[Jacob]</strong> CSE 120 and 124 provided knowledge for navigating systems and distributed applications.</p>
+                <p><strong>[Jolina]</strong> VIS 134 was helpful for both hard surface and organic 3D modeling.</p>
+                <p><strong>[Josh]</strong> CSE 167 probably? Honestly only applied concepts from there rather than actual things we did in the class. Other than that I think it was simple documentation reading and programming which depending on how you look at it either no class or every class prepares you for.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_17</p>
+              <h3>What were the most valuable things that you learned in the class?</h3>
+              <div class="final-answer">
+                <p><strong>[Jacob]</strong> I learned that group dynamics can be tricky. The more structure you define for the group's workflow in the beginning, the less trouble you will have later on. I also learned that AI is incredibly powerful but, in many cases, is a trap that can ultimatly lead to a sub-par result.</p>
+                <p><strong>[Josh]</strong> frioendship</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_18</p>
+              <h3>For the pizza celebration after the demos, what did you think about having it in the B270 lab so people can play each other's games? Should we do it again?</h3>
+              <div class="final-answer">
+                <p>It was super fun! It was a great opportunity to play the other groups' finished games. It definitly needs to be done next year.</p>
+                <p>I think it was fine. It worked out cause I was more hungry than anything.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_19</p>
+              <h3>What advice, tips, or suggestions would you give students who will take the course next year?</h3>
+              <div class="final-answer">
+                <p>Make sure the gameplay is paced with the art, otherwise the work you do might not end up showcased or used.</p>
+                <p>As a group, hard define rules for AI usage. In my opinion, the less allowed the better your overall experience will be.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_20</p>
+              <h3>Do you have any suggestions for improving the course?</h3>
+              <div class="final-answer">
+                <p>I would recommend banning the use of AI agents. Agents open up the door for you to be less involved in the actual code, reducing the challenge and the amount you actually learn about distributed systems.</p>
+              </div>
+            </article>
+
+            <article class="panel final-qa-card">
+              <p class="final-question-index">Question_21</p>
+              <h3>Any other comments or feedback?</h3>
+              <div class="final-answer">
+                <p>This was a super fun class, I had a blast! And to all the future students reading this, make sure you are having fun at the end of the day.</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        
+      </section>
+    </div>
+  </main>
+
+  <div class="status-hud" aria-label="Status HUD">
+    <div class="meta">
+      <span class="label">Date</span><span class="value" id="hudDate">----</span>
+      <span class="label">Time</span><span class="value" id="hudTime">--:--:--</span>
+      <span class="label">Latency</span><span class="value" id="hudLatency">18ms</span>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div>&copy; 1999 Group_02. All Rights Reserved.</div>
+    <nav class="footer-nav" aria-label="Footer navigation">
+      <a class="foot-link" href="../img/gag/no-privacy.jpg">Privacy_Protocols</a>
+      <a class="foot-link" href="../img/gag/lost.png">System_Status</a>
+      <a class="foot-link" href="../img/gag/lost.png">Support_Comms</a>
+    </nav>
+    <div class="footer-build">Project_Accelerate</div>
+  </footer>
+  <script src="../script.js"></script>
+</body>
+</html>

@@ -2055,6 +2055,178 @@
       letter-spacing: 0.04em;
     }
 
+    .final-report-shell {
+      max-width: 1120px;
+    }
+
+    .final-summary-grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .final-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      padding: 0;
+      background: rgba(10, 16, 7, 0.98);
+    }
+
+    .final-metrics div {
+      position: relative;
+      z-index: 1;
+      padding: 18px 16px;
+      background: linear-gradient(180deg, rgba(27, 33, 23, 0.98), rgba(18, 24, 14, 0.98));
+      min-height: 138px;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+    }
+
+    .final-metrics p,
+    .final-question-index {
+      margin: 0;
+      color: rgba(251, 228, 52, 0.74);
+      font-family: "Space Grotesk", Arial, sans-serif;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 800;
+    }
+
+    .final-metrics strong {
+      color: var(--white);
+      font-family: "Space Grotesk", Arial, sans-serif;
+      font-size: clamp(20px, 2.2vw, 30px);
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .final-metrics span {
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .final-qa-grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .final-project-review-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .final-qa-card {
+      display: grid;
+      gap: 13px;
+      align-content: start;
+      min-height: 100%;
+    }
+
+    .final-qa-card h3 {
+      position: relative;
+      z-index: 1;
+      margin: 0;
+      color: var(--white);
+      font-family: "Space Grotesk", Arial, sans-serif;
+      font-size: clamp(12px, 1.45vw, 18px);
+      line-height: 1.16;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      font-weight: 800;
+    }
+
+    .final-answer {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 10px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(75, 71, 51, 0.5);
+    }
+
+    .final-answer p {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.58;
+    }
+
+    .final-answer strong {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .final-answer-note,
+    .final-answer-empty p {
+      color: rgba(205, 199, 172, 0.58);
+      font-family: "Space Grotesk", Arial, sans-serif;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .final-answer-empty {
+      border-top-color: rgba(104, 100, 74, 0.34);
+    }
+
+    .final-screenshot-grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .final-screenshot-card {
+      margin: 0;
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+
+    .final-screenshot-card img {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      object-fit: cover;
+      display: block;
+      background: rgba(10, 16, 7, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+    }
+
+    .final-screenshot-card figcaption {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 5px;
+    }
+
+    .final-screenshot-card strong {
+      color: var(--yellow);
+      font-family: "Space Grotesk", Arial, sans-serif;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .final-screenshot-card span {
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
     @media (max-width: 940px) {
       .reports-header {
         align-items: flex-start;
@@ -2071,6 +2243,16 @@
 
       .reports-hud-grid {
         grid-template-columns: 1fr;
+      }
+
+      .final-summary-grid,
+      .final-qa-grid,
+      .final-screenshot-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .final-metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
     }
 
@@ -2096,10 +2278,16 @@
       .report-link {
         margin-left: 0;
       }
+
+      .final-metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .final-metrics div {
+        min-height: auto;
+      }
     }
 
     .report-header {
       font-size: 18px;
     }
-
-
