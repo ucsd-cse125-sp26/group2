@@ -196,10 +196,69 @@
         }, rotationMs);
       }
 
+      function initFinalScreenshotDecks() {
+        const decks = document.querySelectorAll('[data-final-screenshot-deck]');
+        if (!decks.length) return;
+
+        decks.forEach(function (deck) {
+          const slides = Array.from(deck.querySelectorAll('[data-final-slide]')).map(function (slide) {
+            return {
+              src: slide.getAttribute('data-src') || '',
+              title: slide.getAttribute('data-title') || '',
+              caption: slide.getAttribute('data-caption') || '',
+              alt: slide.getAttribute('data-alt') || ''
+            };
+          }).filter(function (slide) {
+            return slide.src;
+          });
+
+          if (!slides.length) return;
+
+          const image = deck.querySelector('[data-final-slide-image]');
+          const title = deck.querySelector('[data-final-slide-title]');
+          const caption = deck.querySelector('[data-final-slide-caption]');
+          const current = deck.querySelector('[data-final-slide-current]');
+          const total = deck.querySelector('[data-final-slide-total]');
+          const previousButton = deck.querySelector('[data-final-slide-prev]');
+          const nextButton = deck.querySelector('[data-final-slide-next]');
+          let currentIndex = 0;
+
+          function formatIndex(index) {
+            return String(index + 1).padStart(2, '0');
+          }
+
+          function renderSlide(index) {
+            currentIndex = (index + slides.length) % slides.length;
+            const slide = slides[currentIndex];
+
+            if (image) {
+              image.src = slide.src;
+              image.alt = slide.alt;
+            }
+
+            if (title) title.textContent = slide.title;
+            if (caption) caption.textContent = slide.caption;
+            if (current) current.textContent = formatIndex(currentIndex);
+          }
+
+          if (total) total.textContent = String(slides.length).padStart(2, '0');
+          renderSlide(0);
+
+          previousButton?.addEventListener('click', function () {
+            renderSlide(currentIndex - 1);
+          });
+
+          nextButton?.addEventListener('click', function () {
+            renderSlide(currentIndex + 1);
+          });
+        });
+      }
+
       updateHudClock();
       updateLatency();
       animateReportsHud();
       initHomeHeroRotation();
+      initFinalScreenshotDecks();
       setInterval(updateHudClock, 1000);
       setInterval(updateLatency, 2500);
 

@@ -2186,6 +2186,102 @@
       gap: 18px;
     }
 
+    .final-screenshot-deck {
+      position: relative;
+      z-index: 1;
+      padding: 16px 58px 44px;
+      display: grid;
+      align-items: center;
+      min-height: 0;
+    }
+
+    .final-screenshot-stage {
+      position: relative;
+      z-index: 1;
+      margin: 0;
+      display: grid;
+      gap: 12px;
+    }
+
+    .final-screenshot-stage img {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: cover;
+      display: block;
+      background: rgba(10, 16, 7, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
+    }
+
+    .final-screenshot-stage figcaption {
+      display: grid;
+      gap: 5px;
+    }
+
+    .final-screenshot-stage strong {
+      color: var(--yellow);
+      font-family: "Space Grotesk", Arial, sans-serif;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .final-screenshot-stage span {
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .final-slide-control {
+      position: absolute;
+      z-index: 2;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 40px;
+      height: 64px;
+      border: 0;
+      display: grid;
+      place-items: center;
+      color: var(--yellow);
+      background: linear-gradient(180deg, rgba(37, 44, 33, 0.98), rgba(16, 22, 12, 0.98));
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), 0 12px 22px rgba(0, 0, 0, 0.22);
+      cursor: pointer;
+      transition: transform 160ms ease, background 160ms ease, color 160ms ease;
+    }
+
+    .final-slide-control:hover {
+      color: #fff268;
+      background: linear-gradient(180deg, rgba(52, 60, 46, 0.98), rgba(22, 29, 18, 0.98));
+      transform: translateY(-50%) scale(1.04);
+    }
+
+    .final-slide-control .material-symbols-outlined {
+      font-size: 28px;
+    }
+
+    .final-slide-control--prev {
+      left: 12px;
+    }
+
+    .final-slide-control--next {
+      right: 12px;
+    }
+
+    .final-slide-counter {
+      position: absolute;
+      z-index: 2;
+      right: 18px;
+      bottom: 14px;
+      display: inline-flex;
+      gap: 6px;
+      color: rgba(251, 228, 52, 0.8);
+      font-family: "Space Grotesk", Arial, sans-serif;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 800;
+    }
+
     .final-screenshot-card {
       margin: 0;
       padding: 14px;
@@ -2285,6 +2381,31 @@
 
       .final-metrics div {
         min-height: auto;
+      }
+
+      .final-screenshot-deck {
+        padding: 12px 12px 54px;
+      }
+
+      .final-slide-control {
+        top: auto;
+        bottom: 12px;
+        width: 42px;
+        height: 34px;
+        transform: none;
+      }
+
+      .final-slide-control:hover {
+        transform: scale(1.04);
+      }
+
+      .final-slide-control--prev {
+        left: 12px;
+      }
+
+      .final-slide-control--next {
+        left: 60px;
+        right: auto;
       }
     }
 

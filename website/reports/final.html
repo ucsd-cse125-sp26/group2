@@ -150,21 +150,42 @@
         <section class="section" aria-label="Final screenshots">
           <h2 class="section-title">02_FINAL_SCREENSHOTS</h2>
 
-          <div class="final-screenshot-grid">
-            <figure class="panel final-screenshot-card">
-              <img src="../img/screenshots/38_lobby.png" alt="Project Accelerate lobby screen." />
+          <div class="panel final-screenshot-deck" data-final-screenshot-deck>
+            <button class="final-slide-control final-slide-control--prev" type="button" data-final-slide-prev aria-label="Previous screenshot">
+              <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+            </button>
+
+            <figure class="final-screenshot-stage" aria-live="polite">
+              <img data-final-slide-image src="../img/screenshots/53_ambient_2.png" alt="Ambient arena lighting in Project Accelerate." />
+              <figcaption>
+                <strong data-final-slide-title>Screenshot_01 // Ambient_02</strong>
+                <span data-final-slide-caption>Final arena atmosphere and lighting pass.</span>
+              </figcaption>
             </figure>
 
-            <figure class="panel final-screenshot-card">
-              <img src="../img/screenshots/39_map.png" alt="Project Accelerate game map." />
-            </figure>
+            <button class="final-slide-control final-slide-control--next" type="button" data-final-slide-next aria-label="Next screenshot">
+              <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+            </button>
 
-            <figure class="panel final-screenshot-card">
-              <img src="../img/screenshots/40_point_light.png" alt="Point light test in the game map." />
-            </figure>
+            <div class="final-slide-counter" aria-label="Screenshot position">
+              <span data-final-slide-current>01</span>
+              <span>/</span>
+              <span data-final-slide-total>08</span>
+            </div>
 
-            <figure class="panel final-screenshot-card">
-              <img src="../img/screenshots/41_lighting.png" alt="Final lighting pass in Project Accelerate." />
+            <ul class="final-slide-data" hidden>
+              <li data-final-slide data-src="../img/screenshots/53_ambient_2.png" data-title="Screenshot_01 // Ambient_02" data-caption="Final arena atmosphere and lighting pass." data-alt="Ambient arena lighting."></li>
+              <li data-final-slide data-src="../img/screenshots/43_rocket_fight.png" data-title="Screenshot_02 // Rocket_Fight" data-caption="Rocket combat in the final game." data-alt="Rocket fight gameplay."></li>
+              <li data-final-slide data-src="../img/screenshots/48_railgun.png" data-title="Screenshot_03 // Railgun" data-caption="Railgun gameplay with final weapon effects." data-alt="Railgun weapon gameplay."></li>
+              <li data-final-slide data-src="../img/screenshots/50_energygun.png" data-title="Screenshot_04 // Energygun" data-caption="Energy weapon action during a match." data-alt="Energy gun gameplay."></li>
+              <li data-final-slide data-src="../img/screenshots/51_grenade_kill.png" data-title="Screenshot_05 // Grenade_Kill" data-caption="Grenade combat and explosive feedback." data-alt="Grenade kill gameplay."></li>
+              <li data-final-slide data-src="../img/screenshots/52_ambient.png" data-title="Screenshot_06 // Ambient" data-caption="Arena environment with final mood lighting." data-alt="Ambient arena scene"></li>
+              <li data-final-slide data-src="../img/screenshots/46_rifle_fight.png" data-title="Screenshot_07 // Browser" data-caption="Rifle combat in game." data-alt="Rifle combat image."></li>
+              <li data-final-slide data-src="../img/screenshots/49_gravity.png" data-title="Screenshot_08 // Browser" data-caption="Player using gravity ability." data-alt="Gravity ability in use."></li>
+              <li data-final-slide data-src="../img/screenshots/47_wall_run.png" data-title="Screenshot_09 // Browser" data-caption="Player wall running across pit." data-alt="Player on the wall."></li>
+              <li data-final-slide data-src="../img/screenshots/45_lobby.png" data-title="Screenshot_10 // Lobby" data-caption="Lobby and match setup interface." data-alt="lobby screen."></li>
+              <li data-final-slide data-src="../img/screenshots/44_browser.png" data-title="Screenshot_11 // Browser" data-caption="Server browser and multiplayer entry flow." data-alt="server browser screen."></li>
+            </ul>
           </div>
         </section>
 
@@ -365,6 +386,6 @@
     </nav>
     <div class="footer-build">Project_Accelerate</div>
   </footer>
-  <script src="../script.js"></script>
+  <script src="../script.js?v=final-screenshot-deck"></script>
 </body>
 </html>
