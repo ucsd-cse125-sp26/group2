@@ -197,7 +197,7 @@
               <p class="final-question-index">Question_04</p>
               <h3>Describe your development environment. What tools did you use? What was your build workflow? How did you support multiple platforms, and what tips would you give future groups?</h3>
               <div class="final-answer">
-                <p>We used CMake, Ninja, Doxygen, and SDL. The build workflow was CMake presets followed by build. SDL supports all platforms, but there are different constraints for graphics across different backends. About half the team used CLion and the other half used VScode for their IDE.</p>
+                <p>We used cmake, ninja, doxygen, SDL. Build workflow is cmake preset and build. SDL supports all platforms, but there are different constraints for graphics for different backends (Metal vs Vulkan vs DX12). Individual CI pipelines for MacOS, Linux, and Windows.</p>
               </div>
             </article>
 
@@ -222,7 +222,7 @@
               <h3>Which aspects of the project are you particularly proud of? Why?</h3>
               <div class="final-answer">
                 <p><strong>[Jacob]</strong> I am proud of how well the guns turned out. They are really fun to use. I worked on a lot of the backend for the guns, Jolina made the models, and my brother helped with the sounds. All of these came together to make the guns feel good to use.</p>
-                <p><strong>[Cedric]</strong> I am proud of setting up the self-hosting system. I got to revisit concepts from CSE 120 and 123 and see how I could apply them.</p>
+                <p><strong>[Cedric]</strong> I am proud of setting up the self-hosting system. I got to revisit concepts from CSE 120 and 123 and see how I could apply them. I’m also proud of seeing how we went from having basic shooter mechanics to a fleshed out game loop.</p>
                 <p><strong>[Jolina]</strong> I’m proud of the progress achieved with the map layout, seeing it go from grey boxes to more detailed rooms with working colliders was pretty rewarding. </p>
               </div>
             </article>
@@ -294,7 +294,8 @@
               <h3>What lessons about group dynamics did you learn from working in such a large group over an extended period of time on a challenging project?</h3>
               <div class="final-answer">
                 <p><strong>[Josh]</strong> Plan hard, plan soft. Plan the core game engine features solidly, but keep the game flexible throughout. Ideally have your artist and graphics people work closely together or be the same person. You don’t need to implement realtime shadows and glossy materials if your art  is not going to be able to take advantage of it. Once you get to implementing the game and all the core game engine components are in, then flexibility and fun can take over. But for ease of implementation, the more you can plan out the better. How are things going to be organized, what are the large systems we are going to have and what are their interfaces. For example, actually sit down and plan out how the renderer is going to connect to the game loop. There is just going to be one “render” method to call. Nice! But how are you going to pass over the updated game objects to the renderer every frame? Will it be the responsibility of the game loop to send that information to the renderer every frame or will it be the responsibility of the renderer to iterate through all the renderable objects and get their updated information. Another example, the loading of assets, who is in charge of what? Okay, the renderer can load player models, but what about the map and everything that has collisions. Should that be the render system? Physics? Or a whole system just for loading that all the other systems tap into? These are the things you should “plan hard” so work isn’t doubled up and confusion can be avoided.</p>
-                <p><strong>[Jolina]</strong> Communication is definitely crucial, particularly about what is feasible and what isn’t within the provided scope of the class. Establishing file formats for assets.</p>
+                <p><strong>[Jolina]</strong> Communication is definitely crucial, particularly about what is feasible and what isn’t within the provided scope of the class. Establishing file formats (glb  vs fbx vs obj) for exporting assets,  early on and testing to make sure it works in game is probably a good idea. Spending sometime as a team to establish the theme for the game will also help with asset later down the road. In summary, having a solid plan to build on will help.</p>
+                <p><strong>[Cedric]</strong> Get to know your team and be comfortable working with them early on. I noticed we could iterate on features a lot quicker once we knew each other better. I felt like I was able to get a better sense of how the game worked and what people were expecting when I felt more comfortable with the team.</p>
               </div>
             </article>
 
@@ -304,6 +305,7 @@
               <div class="final-answer">
                 <p><strong>[Cedric]</strong> If we had a situation where one person vibe-coded an entire section and other people wanted more ownership, I would get rid of the vibe-coded section entirely. This is a group project that people may want to show off, and people should feel proud of the code they wrote. I also wish we had a uniform place to manage tasks. Keeping a running list on Discord was useful, but it became hard to know who was currently implementing a feature or who had already finished one during crunch time.</p>
                 <p><strong>[Jolina]</strong> For art specifically, figuring out a more concrete overarching timeline along with the weekly milestones, to help get a better idea of what the MVP for art looks like. The other thing I think I would have done differently was the testing of textures in the actual game itself because the default lighting of the blender scenes differed quite a bit from that of the actual game. I think spending some time to replicate the game’s lighting in the texture painting software you’re using, if possible, would be helpful for producing the most accurate results.</p>
+                <p><strong>[Josh]</strong> I think I would just change the initial planning and set more concrete plans for the game engine part of the project. With a solid engine, you can always build a good game on top. There was a point where we diverged on a major system of the game engine and I think that wasn’t a good move. It was much harder to reintegrate one of the branches than it would have been if we wrote that system from scratch in parallel with everything else rather than as its own thing.</p>
               </div>
             </article>
 
@@ -325,6 +327,7 @@
               <div class="final-answer">
                 <p><strong>[Jacob]</strong> I learned that group dynamics can be tricky. The more structure you define for the group's workflow in the beginning, the less trouble you will have later on. I also learned that AI is incredibly powerful but, in many cases, is a trap that can ultimatly lead to a sub-par result.</p>
                 <p><strong>[Josh]</strong> frioendship</p>
+                <p><strong>[Cedric]</strong> Rome wasn’t built in a day. Having a good foundation for your group dynamic and codebase management goes a long way to being successful. If you do not do it early, it will come back to haunt you as your finishing. Also prompt engineering and context management.</p>
               </div>
             </article>
 
