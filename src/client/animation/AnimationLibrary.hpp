@@ -91,8 +91,9 @@ public:
     ///        clip and rig are different-proportioned (or different up-axis)
     ///        skeletons: the rig keeps its own bone lengths and stays
     ///        grounded instead of inheriting the clip's hip height. Defaults
-    ///        to false (verbatim translations) so same-character rigs keep
-    ///        their authored root motion / vertical bob.
+    ///        to false, which still preserves animated hip translation for
+    ///        vertical bob/crouch/slide but keeps non-hip bones on the rig's
+    ///        native translations/scales to avoid stretched limbs/neck.
     /// @return True on success; false logs and leaves the slot empty.
     bool loadClipFromFBX(const CharacterRig& rig, ClipId id, const std::string& path,
                          bool useRigRestTranslations = false);

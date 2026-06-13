@@ -343,6 +343,18 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
     for (int j = 0; j < numJoints; ++j) {
         auto& track = raw.tracks[static_cast<size_t>(j)];
         const std::string jointName(jointNames[static_cast<size_t>(j)]);
+        const bool isHipJoint = jointName.find("Hips") != std::string::npos;
+
+        auto pushRigRestTranslationAndScale = [&]() {
+            auto rpIt = restPoses.find(jointName);
+            if (rpIt != restPoses.end()) {
+                track.translations.push_back({0.f, rpIt->second.translation});
+                track.scales.push_back({0.f, rpIt->second.scale});
+            } else {
+                track.translations.push_back({0.f, ozz::math::Float3{0, 0, 0}});
+                track.scales.push_back({0.f, ozz::math::Float3{1, 1, 1}});
+            }
+        };
 
         auto chIt = channels.find(jointName);
         if (chIt != channels.end()) {
@@ -353,29 +365,32 @@ bool AnimationLibrary::loadClipFromFBX(const CharacterRig& rig, ClipId id, const
             // clip drive rotation only. Keeps a different-proportioned rig
             // grounded instead of inheriting the clip's hip height/root motion.
             if (useRigRestTranslations) {
-                auto rpIt = restPoses.find(jointName);
-                if (rpIt != restPoses.end()) {
-                    track.translations.push_back({0.f, rpIt->second.translation});
-                    track.scales.push_back({0.f, rpIt->second.scale});
-                } else {
-                    track.translations.push_back({0.f, ozz::math::Float3{0, 0, 0}});
-                    track.scales.push_back({0.f, ozz::math::Float3{1, 1, 1}});
-                }
+                pushRigRestTranslationAndScale();
             } else {
-                track.translations.reserve(ch->mNumPositionKeys);
-                for (unsigned k = 0; k < ch->mNumPositionKeys; ++k) {
-                    const auto& key = ch->mPositionKeys[k];
-                    const float t = static_cast<float>(key.mTime / ticksPerSec);
-                    track.translations.push_back(
-                        {t,
-                         ozz::math::Float3{key.mValue.x * clipScale, key.mValue.y * clipScale, key.mValue.z * clipScale}});
-                }
+                // Clip-local translations on non-root bones are source-rig bone
+                // lengths, not gameplay motion. Importing them lets a movement
+                // FBX with a different neck/head offset stretch our character.
+                // Preserve hip Y motion for bob/crouch/slide, but keep every
+                // other bone on this rig's native proportions. Scale keys are
+                // always ignored for the same reason.
+                if (isHipJoint) {
+                    track.translations.reserve(ch->mNumPositionKeys);
+                    for (unsigned k = 0; k < ch->mNumPositionKeys; ++k) {
+                        const auto& key = ch->mPositionKeys[k];
+                        const float t = static_cast<float>(key.mTime / ticksPerSec);
+                        track.translations.push_back(
+                            {t,
+                             ozz::math::Float3{
+                                 key.mValue.x * clipScale, key.mValue.y * clipScale, key.mValue.z * clipScale}});
+                    }
 
-                track.scales.reserve(ch->mNumScalingKeys);
-                for (unsigned k = 0; k < ch->mNumScalingKeys; ++k) {
-                    const auto& key = ch->mScalingKeys[k];
-                    const float t = static_cast<float>(key.mTime / ticksPerSec);
-                    track.scales.push_back({t, ozz::math::Float3{key.mValue.x, key.mValue.y, key.mValue.z}});
+                    auto rpIt = restPoses.find(jointName);
+                    if (rpIt != restPoses.end())
+                        track.scales.push_back({0.f, rpIt->second.scale});
+                    else
+                        track.scales.push_back({0.f, ozz::math::Float3{1, 1, 1}});
+                } else {
+                    pushRigRestTranslationAndScale();
                 }
             }
 
