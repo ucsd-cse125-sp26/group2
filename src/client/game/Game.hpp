@@ -782,6 +782,9 @@ private:
     /// when available; fall back to the old palm-derived point for untagged guns.
     [[nodiscard]] glm::vec3 muzzleFlashOrigin(const glm::vec3& fallback) const;
 
+    /// @brief Camera-relative railgun beam start used while scoped.
+    [[nodiscard]] glm::vec3 scopedRailgunBeamOrigin() const;
+
     /// @brief Offset a muzzle point to the actual transient point-light position.
     ///
     /// `muzzleFlashLightOffset_` uses camera/viewmodel basis units:

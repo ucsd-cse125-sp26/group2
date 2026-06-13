@@ -59,7 +59,7 @@ void applyHeal(float amount, Health& playerHealth)
 }
 
 /// @brief Cooldown duration set on a spawn point after a player spawns there.
-inline constexpr float k_spawnPointCooldown = 5.0f;
+inline constexpr float k_spawnPointCooldown = 3.0f;
 inline constexpr float k_spawnPushback = 0.03125f;
 
 inline float standingHalfHeight(const CollisionShape& shape)

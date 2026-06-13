@@ -153,6 +153,27 @@ CameraBasis buildCameraBasis(float yaw, float pitch, float roll)
     return {.forward = forward, .right = right, .up = up};
 }
 
+CameraBasis buildCameraBasisFromForward(glm::vec3 forward, float roll)
+{
+    if (glm::length(forward) < 1e-4f || !std::isfinite(forward.x) || !std::isfinite(forward.y) ||
+        !std::isfinite(forward.z))
+    {
+        forward = {0.0f, 0.0f, 1.0f};
+    } else {
+        forward = glm::normalize(forward);
+    }
+
+    constexpr glm::vec3 worldUp{0.0f, 1.0f, 0.0f};
+    const glm::vec3 rightRaw = glm::cross(forward, worldUp);
+    const float rightLen = glm::length(rightRaw);
+    const glm::vec3 preRollRight = (rightLen > 1e-4f) ? (rightRaw / rightLen) : glm::vec3{1.0f, 0.0f, 0.0f};
+    const glm::vec3 preRollUp = glm::normalize(glm::cross(preRollRight, forward));
+    const glm::vec3 up = preRollUp * std::cos(roll) + preRollRight * std::sin(roll);
+    const glm::vec3 right = glm::normalize(glm::cross(forward, up));
+
+    return {.forward = forward, .right = right, .up = up};
+}
+
 // (kThirdPersonWeaponPitchMax was used by the removed buildThirdPersonWeaponAttachment;
 // the bone-parented weapon path doesn't pitch-clamp the weapon — the spine bend
 // max-pitch in CharacterAnimator handles that.)
@@ -1282,10 +1303,18 @@ bool Game::init(AppContext& ctx)
         // viewmodel muzzle position so the lightning comes from the gun.
         glm::vec3 evtOrigin = evt.pos1;
         if (evt.source == localPlayer && evt.effectType == ParticleEffectType::HitscanBeam) {
+            bool scopedRailgun = false;
+            registry.view<LocalPlayer, InputSnapshot, WeaponState>().each(
+                [&](const InputSnapshot& input, const WeaponState& weapon) {
+                    scopedRailgun = input.scoped && getEquippedGun(weapon).type == WeaponType::RailGun;
+                });
+
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
             const float cs = cachedGravFlipped_ ? -1.0f : 1.0f;
             evtOrigin = cachedEye_ + right * (cs * 15.f) - glm::vec3{0, 1, 0} * (cs * 8.f) + cachedCamFwd_ * 5.f;
-            if (cachedMuzzleValid_) {
+            if (scopedRailgun) {
+                evtOrigin = scopedRailgunBeamOrigin();
+            } else if (cachedMuzzleValid_) {
                 evtOrigin = cachedMuzzleWorld_;
             }
         }
@@ -2207,6 +2236,14 @@ glm::vec3 Game::muzzleFlashOrigin(const glm::vec3& fallback) const
         muzzleOrigin = cachedRightPalmWorld_ + cachedCamFwd_ * k_muzzleFlashForward;
     }
     return muzzleFlashLightPosition(muzzleOrigin);
+}
+
+glm::vec3 Game::scopedRailgunBeamOrigin() const
+{
+    constexpr float k_forwardOffset = 8.0f;
+    constexpr float k_downOffset = 12.0f;
+    const CameraBasis basis = buildCameraBasisFromForward(cachedCamFwd_, currentCameraRoll_);
+    return cachedEye_ + basis.forward * k_forwardOffset - basis.up * k_downOffset;
 }
 
 glm::vec3 Game::muzzleFlashLightPosition(const glm::vec3& muzzleOrigin) const
