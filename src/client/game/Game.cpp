@@ -1809,6 +1809,8 @@ void Game::clearGameplayInputForChat()
     systems::prevAbilitySelectRight = false;
     systems::prevGamepadAbilitySelectLeft = false;
     systems::prevGamepadAbilitySelectRight = false;
+    systems::pendingAbilitySelectLeft = false;
+    systems::pendingAbilitySelectRight = false;
     pendingScrollSwitch_ = 0;
 
     registry.view<InputSnapshot, LocalPlayer>().each([](InputSnapshot& snap) {
@@ -2751,6 +2753,8 @@ SDL_AppResult Game::iterate()
     bool throwGrenadeThisFrame = false;
     bool grenadeCycleNextThisFrame = false;
     bool grenadeCyclePrevThisFrame = false;
+    bool abilitySelectLeftThisFrame = false;
+    bool abilitySelectRightThisFrame = false;
     int emoteRequestThisFrame = -1;
 
     if (accumulator >= k_physicsDt) {
@@ -2759,6 +2763,8 @@ SDL_AppResult Game::iterate()
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
         grenadeCycleNextThisFrame = systems::consumePendingGrenadeCycleNext();
         grenadeCyclePrevThisFrame = systems::consumePendingGrenadeCyclePrev();
+        abilitySelectLeftThisFrame = systems::consumePendingAbilitySelectLeft();
+        abilitySelectRightThisFrame = systems::consumePendingAbilitySelectRight();
         emoteRequestThisFrame = systems::consumePendingEmote();
         // Predict the emote locally for instant third-person feedback; the
         // server confirms it for everyone else via PlayerVisState/AnimSnapshot.
@@ -2866,6 +2872,8 @@ SDL_AppResult Game::iterate()
                 snap.throwGrenade = false;
                 snap.grenadeCycleNext = false;
                 snap.grenadeCyclePrev = false;
+                snap.abilitySelectLeft = false;
+                snap.abilitySelectRight = false;
             });
             registry.view<LocalPlayer, InputSnapshot>().each(
                 [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
@@ -2895,11 +2903,18 @@ SDL_AppResult Game::iterate()
         // ticks are pulled from `Client::inputRing_` (which the
         // sendInputSnapshot path appends to internally).
         registry.view<LocalPlayer, InputSnapshot>().each(
-            [this, throwGrenadeThisFrame, grenadeCycleNextThisFrame, grenadeCyclePrevThisFrame, emoteRequestThisFrame](
-                InputSnapshot& snap) {
+            [this,
+             throwGrenadeThisFrame,
+             grenadeCycleNextThisFrame,
+             grenadeCyclePrevThisFrame,
+             abilitySelectLeftThisFrame,
+             abilitySelectRightThisFrame,
+             emoteRequestThisFrame](InputSnapshot& snap) {
                 snap.throwGrenade = throwGrenadeThisFrame;
                 snap.grenadeCycleNext = grenadeCycleNextThisFrame;
                 snap.grenadeCyclePrev = grenadeCyclePrevThisFrame;
+                snap.abilitySelectLeft = abilitySelectLeftThisFrame;
+                snap.abilitySelectRight = abilitySelectRightThisFrame;
                 snap.emoteRequest = static_cast<std::int8_t>(emoteRequestThisFrame);
                 // Local prediction: cancel the emote the moment the player moves
                 // or fights, matching the server's break condition.
@@ -2912,6 +2927,8 @@ SDL_AppResult Game::iterate()
             snap.throwGrenade = false;
             snap.grenadeCycleNext = false;
             snap.grenadeCyclePrev = false;
+            snap.abilitySelectLeft = false;
+            snap.abilitySelectRight = false;
             snap.emoteRequest = -1;
         });
 
