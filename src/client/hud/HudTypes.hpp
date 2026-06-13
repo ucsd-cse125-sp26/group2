@@ -371,6 +371,7 @@ struct HudGameState
     int health = 100, maxHealth = 100;
     int armor = 0, maxArmor = 100;
     int overShield = 0, maxOverShield = 200;
+    float damagePowerupProgress = 0.f; ///< Damage powerup time remaining as 0..1.
     float abilityLevelProgress = 0.f; ///< accumDamage / systems::dmgThreshold, clamped 0..1.
     int abilityLevel = 0;
     int ammoClip = 30, ammoReserve = 90;
@@ -407,6 +408,7 @@ struct HudGameState
     // Minimap.
     float localPlayerX = 0.f, localPlayerZ = 0.f;
     float localPlayerYaw = 0.f;       ///< Player facing direction (radians, 0 = +Z, CW).
+    bool localGravityFlipped = false; ///< True when the local player's gravity is inverted.
     std::span<const HudMinimapDot> enemyDots;
     float minimapWorldRange = 4000.f; ///< World units visible in each direction from center.
 

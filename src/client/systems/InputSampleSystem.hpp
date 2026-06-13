@@ -43,6 +43,9 @@ inline bool pendingGrenadeCyclePrev = false;
 inline bool prevAbilitySelectLeft = false;
 /// @brief Tracks previous-frame Alt+RMB state for ability choice edge detection.
 inline bool prevAbilitySelectRight = false;
+/// @brief Latched ability choice requests, consumed once per sent input batch.
+inline bool pendingAbilitySelectLeft = false;
+inline bool pendingAbilitySelectRight = false;
 /// @brief Tracks previous-frame gamepad left ability-select chord for edge detection.
 inline bool prevGamepadAbilitySelectLeft = false;
 /// @brief Tracks previous-frame gamepad right ability-select chord for edge detection.
@@ -147,6 +150,22 @@ inline int consumePendingEmote()
     const int emote = pendingEmoteRequest;
     pendingEmoteRequest = -1;
     return emote;
+}
+
+/// @brief Consume and clear the queued left ability-choice request.
+inline bool consumePendingAbilitySelectLeft()
+{
+    const bool requested = pendingAbilitySelectLeft;
+    pendingAbilitySelectLeft = false;
+    return requested;
+}
+
+/// @brief Consume and clear the queued right ability-choice request.
+inline bool consumePendingAbilitySelectRight()
+{
+    const bool requested = pendingAbilitySelectRight;
+    pendingAbilitySelectRight = false;
+    return requested;
 }
 
 /// @brief Resolve `emoteWheelSelection` from a pointing input.
@@ -349,6 +368,10 @@ inline void runWeaponKeys(Registry& registry, const InputBindings& bindings)
     const bool selectRightEdge = selectRightNow && !prevAbilitySelectRight;
     prevAbilitySelectLeft = selectLeftNow;
     prevAbilitySelectRight = selectRightNow;
+    if (selectLeftEdge)
+        pendingAbilitySelectLeft = true;
+    if (selectRightEdge)
+        pendingAbilitySelectRight = true;
 
     // Grenade: discrete keys. Press CycleGrenade (H) to advance to the next
     // grenade type with ammo; press ThrowGrenade (G) to throw the selected one.
@@ -378,8 +401,8 @@ inline void runWeaponKeys(Registry& registry, const InputBindings& bindings)
         snap.reload = bindings.pressed(Action::Reload, kKeys, mouse);
         snap.pickup = bindings.pressed(Action::Pickup, kKeys, mouse);
         snap.abilitySelectHeld = abilityMenuHeld;
-        snap.abilitySelectLeft = selectLeftEdge;
-        snap.abilitySelectRight = selectRightEdge;
+        snap.abilitySelectLeft = false;
+        snap.abilitySelectRight = false;
     });
 }
 
@@ -647,6 +670,10 @@ inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const Inp
     const bool selectRightEdge = selectRightNow && !prevGamepadAbilitySelectRight;
     prevGamepadAbilitySelectLeft = selectLeftNow;
     prevGamepadAbilitySelectRight = selectRightNow;
+    if (selectLeftEdge)
+        pendingAbilitySelectLeft = true;
+    if (selectRightEdge)
+        pendingAbilitySelectRight = true;
 
     // Grenade: discrete buttons mirroring the keyboard path. D-pad Left cycles
     // to the next grenade type with ammo; B (East) throws the selected one.
@@ -696,8 +723,6 @@ inline void runGamepadWeapon(Registry& registry, SDL_Gamepad* gamepad, const Inp
         snap.switchToPrimary |= padPrimary;
         snap.switchToSecondary |= padSecondary;
         snap.abilitySelectHeld |= abilityMenuHeld;
-        snap.abilitySelectLeft |= selectLeftEdge;
-        snap.abilitySelectRight |= selectRightEdge;
     });
 }
 

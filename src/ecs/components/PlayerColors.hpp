@@ -29,12 +29,12 @@ inline constexpr float k_blendFactor = 1.0f;
 /// for separation in a busy scene under HDR + tonemap; saturated, mid-bright.
 inline constexpr std::array<glm::vec3, 10> k_palette = {{
     {0.95f, 0.20f, 0.20f}, // 0 red
-    {0.95f, 0.55f, 0.10f}, // 1 orange
-    {0.95f, 0.90f, 0.20f}, // 2 yellow
-    {0.30f, 0.85f, 0.25f}, // 3 green
-    {0.20f, 0.85f, 0.85f}, // 4 cyan
-    {0.25f, 0.45f, 0.95f}, // 5 blue
-    {0.65f, 0.30f, 0.95f}, // 6 purple
+    {0.25f, 0.45f, 0.95f}, // 1 blue
+    {0.30f, 0.85f, 0.25f}, // 2 green
+    {0.95f, 0.55f, 0.10f}, // 3 orange
+    {0.65f, 0.30f, 0.95f}, // 4 purple
+    {0.95f, 0.90f, 0.20f}, // 5 yellow
+    {0.20f, 0.85f, 0.85f}, // 6 cyan
     {0.95f, 0.30f, 0.85f}, // 7 magenta
     {0.95f, 0.55f, 0.75f}, // 8 pink
     {0.55f, 0.95f, 0.55f}, // 9 mint

@@ -6,6 +6,8 @@
 #include <entt/entt.hpp>
 #include <glm/vec3.hpp>
 
+#include "ecs/components/WeaponState.hpp"
+
 /// @brief A burning area on the ground that damages players standing in it.
 ///
 /// Server-side authority: damage applied by FireSystem each tick.
@@ -18,4 +20,5 @@ struct FireField
     float dps = 0.0f;                ///< Damage per second to players inside.
     float tickAccumulator = 0.0f;    ///< Sub-tick accumulator for fixed-rate damage application.
     entt::entity owner = entt::null; ///< Caused-by entity (for kill credit + self-damage scaling).
+    WeaponType weaponType = WeaponType::Molotov; ///< Kill-feed icon profile for this field.
 };

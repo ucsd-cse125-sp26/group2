@@ -487,12 +487,14 @@ private:
     /// notification ("+1 RIFLE") so the side feed reflects what just changed.
     int prevPrimaryWeaponType_ = -1;
     int prevSecondaryWeaponType_ = -1;
-    int prevAmmoReserve_ = -1; ///< Drives "+N <weapon> AMMO" reserve-grow notifications.
 
     /// @brief Pickup notifications queued for the next HUD frame.  Emitted
-    /// when the local player's WeaponState gains a new weapon type or their
-    /// reserve ammo grows beyond the previous frame's reading.
+    /// when the local player's WeaponState gains a new weapon type.
     std::vector<HudPickupNotification> pendingPickupNotifications_;
+
+    /// @brief Client-side countdown for the local damage powerup HUD frame effect.
+    float damagePowerupHudTimer_ = 0.0f;
+    float damagePowerupHudDuration_ = 1.0f;
 
     /// @brief Generic popup notifications queued for the next HUD frame.
     ///
@@ -779,6 +781,9 @@ private:
     /// Prefer the weapon model's tagged muzzle marker (`is_muzzle` / socket_muzzle)
     /// when available; fall back to the old palm-derived point for untagged guns.
     [[nodiscard]] glm::vec3 muzzleFlashOrigin(const glm::vec3& fallback) const;
+
+    /// @brief Camera-relative railgun beam start used while scoped.
+    [[nodiscard]] glm::vec3 scopedRailgunBeamOrigin() const;
 
     /// @brief Offset a muzzle point to the actual transient point-light position.
     ///

@@ -45,6 +45,7 @@ void Minimap::update(float /*dt*/, const HudGameState& state, HudTweenPool& /*tw
     localX_ = state.localPlayerX;
     localZ_ = state.localPlayerZ;
     localYaw_ = state.localPlayerYaw;
+    localGravityFlipped_ = state.localGravityFlipped;
     worldRange_ = state.minimapWorldRange;
 
     enemies_.clear();
@@ -84,6 +85,8 @@ void Minimap::draw(HudContext& ctx, float x, float y)
         const float wdz = (e.worldZ - localZ_) * worldToPixel;
         float dx = wdx * cosYaw - wdz * sinYaw;
         float dz = wdx * sinYaw + wdz * cosYaw;
+        if (localGravityFlipped_)
+            dx = -dx;
         const float dist = std::sqrt(dx * dx + dz * dz);
         if (dist > maxDist && dist > 1e-3f) {
             const float scale = maxDist / dist;

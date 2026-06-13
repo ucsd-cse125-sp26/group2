@@ -21,6 +21,7 @@ struct Minimap : HudWidget
 private:
     float localX_ = 0.f, localZ_ = 0.f;
     float localYaw_ = 0.f; ///< Player yaw in radians.
+    bool localGravityFlipped_ = false;
     float worldRange_ = 100.f;
     struct Dot
     {

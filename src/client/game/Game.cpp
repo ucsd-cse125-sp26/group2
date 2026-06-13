@@ -29,6 +29,7 @@
 #include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/FireField.hpp"
+#include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/HealthPackSpawner.hpp"
@@ -142,6 +143,27 @@ CameraBasis buildCameraBasis(float yaw, float pitch, float roll)
     const glm::vec3 forward{std::sin(yaw) * cosPitch, -std::sin(pitch), std::cos(yaw) * cosPitch};
     const glm::vec3 worldUp{0.0f, 1.0f, 0.0f};
 
+    const glm::vec3 rightRaw = glm::cross(forward, worldUp);
+    const float rightLen = glm::length(rightRaw);
+    const glm::vec3 preRollRight = (rightLen > 1e-4f) ? (rightRaw / rightLen) : glm::vec3{1.0f, 0.0f, 0.0f};
+    const glm::vec3 preRollUp = glm::normalize(glm::cross(preRollRight, forward));
+    const glm::vec3 up = preRollUp * std::cos(roll) + preRollRight * std::sin(roll);
+    const glm::vec3 right = glm::normalize(glm::cross(forward, up));
+
+    return {.forward = forward, .right = right, .up = up};
+}
+
+CameraBasis buildCameraBasisFromForward(glm::vec3 forward, float roll)
+{
+    if (glm::length(forward) < 1e-4f || !std::isfinite(forward.x) || !std::isfinite(forward.y) ||
+        !std::isfinite(forward.z))
+    {
+        forward = {0.0f, 0.0f, 1.0f};
+    } else {
+        forward = glm::normalize(forward);
+    }
+
+    constexpr glm::vec3 worldUp{0.0f, 1.0f, 0.0f};
     const glm::vec3 rightRaw = glm::cross(forward, worldUp);
     const float rightLen = glm::length(rightRaw);
     const glm::vec3 preRollRight = (rightLen > 1e-4f) ? (rightRaw / rightLen) : glm::vec3{1.0f, 0.0f, 0.0f};
@@ -1281,10 +1303,18 @@ bool Game::init(AppContext& ctx)
         // viewmodel muzzle position so the lightning comes from the gun.
         glm::vec3 evtOrigin = evt.pos1;
         if (evt.source == localPlayer && evt.effectType == ParticleEffectType::HitscanBeam) {
+            bool scopedRailgun = false;
+            registry.view<LocalPlayer, InputSnapshot, WeaponState>().each(
+                [&](const InputSnapshot& input, const WeaponState& weapon) {
+                    scopedRailgun = input.scoped && getEquippedGun(weapon).type == WeaponType::RailGun;
+                });
+
             const glm::vec3 right = glm::normalize(glm::cross(cachedCamFwd_, glm::vec3{0, 1, 0}));
             const float cs = cachedGravFlipped_ ? -1.0f : 1.0f;
             evtOrigin = cachedEye_ + right * (cs * 15.f) - glm::vec3{0, 1, 0} * (cs * 8.f) + cachedCamFwd_ * 5.f;
-            if (cachedMuzzleValid_) {
+            if (scopedRailgun) {
+                evtOrigin = scopedRailgunBeamOrigin();
+            } else if (cachedMuzzleValid_) {
                 evtOrigin = cachedMuzzleWorld_;
             }
         }
@@ -1364,13 +1394,20 @@ bool Game::init(AppContext& ctx)
             spawnExplosionFlashLight(evt.pos1, WeaponType::Molotov, evt.param);
             break;
         case ParticleEffectType::PowerupPickup:
+            if (evt.source == localPlayer && evt.powerupType == PowerupType::Damage) {
+                damagePowerupHudDuration_ = std::max(0.001f, getPowerupConfig(PowerupType::Damage).duration);
+                damagePowerupHudTimer_ = damagePowerupHudDuration_;
+            }
             if (sfxSystem->isInitialized()) {
                 const audio::AudioObjectId object = audio::objectId("event.powerup.pickup");
+                const std::string_view eventName = evt.powerupType == PowerupType::Shield
+                                                       ? "powerup.overshield_pickup"
+                                                       : "powerup.damage_pickup";
                 sfxSystem->setAudioObjectTransform(object, evt.pos1);
                 if (evt.source == localPlayer)
-                    sfxSystem->postLocalAudioEvent("powerup.pickup", object, 1.0f);
+                    sfxSystem->postLocalAudioEvent(eventName, object, 1.0f);
                 else
-                    sfxSystem->postAudioEvent("powerup.pickup", object, 1.0f);
+                    sfxSystem->postAudioEvent(eventName, object, 1.0f);
             }
             break;
         }
@@ -1387,8 +1424,10 @@ bool Game::init(AppContext& ctx)
     client->onKillEvent([this](const NetKillEvent& evt) {
         killFeed.insert(killFeed.begin(),
                         KillFeedEvent{
-                            evt.killerId,
-                            evt.victimId,
+                            .killerId = evt.killerId,
+                            .victimId = evt.victimId,
+                            .weaponId = evt.weaponId,
+                            .isHeadshot = evt.isHeadshot,
                         });
 
         // TODO: Specific handling for local player deaths (display enemy health)
@@ -1800,6 +1839,8 @@ void Game::clearGameplayInputForChat()
     systems::prevAbilitySelectRight = false;
     systems::prevGamepadAbilitySelectLeft = false;
     systems::prevGamepadAbilitySelectRight = false;
+    systems::pendingAbilitySelectLeft = false;
+    systems::pendingAbilitySelectRight = false;
     pendingScrollSwitch_ = 0;
 
     registry.view<InputSnapshot, LocalPlayer>().each([](InputSnapshot& snap) {
@@ -2197,6 +2238,14 @@ glm::vec3 Game::muzzleFlashOrigin(const glm::vec3& fallback) const
     return muzzleFlashLightPosition(muzzleOrigin);
 }
 
+glm::vec3 Game::scopedRailgunBeamOrigin() const
+{
+    constexpr float k_forwardOffset = 8.0f;
+    constexpr float k_downOffset = 12.0f;
+    const CameraBasis basis = buildCameraBasisFromForward(cachedCamFwd_, currentCameraRoll_);
+    return cachedEye_ + basis.forward * k_forwardOffset - basis.up * k_downOffset;
+}
+
 glm::vec3 Game::muzzleFlashLightPosition(const glm::vec3& muzzleOrigin) const
 {
     constexpr glm::vec3 k_worldUp{0.0f, 1.0f, 0.0f};
@@ -2367,6 +2416,7 @@ SDL_AppResult Game::iterate()
         phaseStats.timestampMs = static_cast<double>(SDL_GetTicksNS()) / 1000000.0;
         phaseStats.wallFrameMs = frameTime * 1000.0f;
     }
+    damagePowerupHudTimer_ = std::max(0.0f, damagePowerupHudTimer_ - frameTime);
 
     // Hot-reload: poll weapon hold-pose TOMLs at ~4 Hz. If the mtime moved,
     // reload the pose in place. Filesystem stats are cheap, but doing them every
@@ -2741,6 +2791,8 @@ SDL_AppResult Game::iterate()
     bool throwGrenadeThisFrame = false;
     bool grenadeCycleNextThisFrame = false;
     bool grenadeCyclePrevThisFrame = false;
+    bool abilitySelectLeftThisFrame = false;
+    bool abilitySelectRightThisFrame = false;
     int emoteRequestThisFrame = -1;
 
     if (accumulator >= k_physicsDt) {
@@ -2749,6 +2801,8 @@ SDL_AppResult Game::iterate()
         throwGrenadeThisFrame = systems::consumePendingGrenadeThrow();
         grenadeCycleNextThisFrame = systems::consumePendingGrenadeCycleNext();
         grenadeCyclePrevThisFrame = systems::consumePendingGrenadeCyclePrev();
+        abilitySelectLeftThisFrame = systems::consumePendingAbilitySelectLeft();
+        abilitySelectRightThisFrame = systems::consumePendingAbilitySelectRight();
         emoteRequestThisFrame = systems::consumePendingEmote();
         // Predict the emote locally for instant third-person feedback; the
         // server confirms it for everyone else via PlayerVisState/AnimSnapshot.
@@ -2856,6 +2910,8 @@ SDL_AppResult Game::iterate()
                 snap.throwGrenade = false;
                 snap.grenadeCycleNext = false;
                 snap.grenadeCyclePrev = false;
+                snap.abilitySelectLeft = false;
+                snap.abilitySelectRight = false;
             });
             registry.view<LocalPlayer, InputSnapshot>().each(
                 [this](const InputSnapshot& snap) { inputRing_.push(clientPredictTick, snap); });
@@ -2885,11 +2941,18 @@ SDL_AppResult Game::iterate()
         // ticks are pulled from `Client::inputRing_` (which the
         // sendInputSnapshot path appends to internally).
         registry.view<LocalPlayer, InputSnapshot>().each(
-            [this, throwGrenadeThisFrame, grenadeCycleNextThisFrame, grenadeCyclePrevThisFrame, emoteRequestThisFrame](
-                InputSnapshot& snap) {
+            [this,
+             throwGrenadeThisFrame,
+             grenadeCycleNextThisFrame,
+             grenadeCyclePrevThisFrame,
+             abilitySelectLeftThisFrame,
+             abilitySelectRightThisFrame,
+             emoteRequestThisFrame](InputSnapshot& snap) {
                 snap.throwGrenade = throwGrenadeThisFrame;
                 snap.grenadeCycleNext = grenadeCycleNextThisFrame;
                 snap.grenadeCyclePrev = grenadeCyclePrevThisFrame;
+                snap.abilitySelectLeft = abilitySelectLeftThisFrame;
+                snap.abilitySelectRight = abilitySelectRightThisFrame;
                 snap.emoteRequest = static_cast<std::int8_t>(emoteRequestThisFrame);
                 // Local prediction: cancel the emote the moment the player moves
                 // or fights, matching the server's break condition.
@@ -2902,6 +2965,8 @@ SDL_AppResult Game::iterate()
             snap.throwGrenade = false;
             snap.grenadeCycleNext = false;
             snap.grenadeCyclePrev = false;
+            snap.abilitySelectLeft = false;
+            snap.abilitySelectRight = false;
             snap.emoteRequest = -1;
         });
 
@@ -3353,7 +3418,9 @@ SDL_AppResult Game::iterate()
 
     // Drive fresh molotov ground-fire VFX from replicated FireField entities.
     registry.view<FireField>().each([&](entt::entity e, const FireField& field) {
-        particleSystem.driveGroundFire(e, field.position, field.radius, field.remaining, field.remaining);
+        const float duration = isGrenadeType(field.weaponType) ? getGrenadeConfig(field.weaponType).fireDuration
+                                                               : field.remaining;
+        particleSystem.driveGroundFire(e, field.position, field.radius, field.remaining, duration);
     });
 
     // Update particle system (render-rate, not physics-rate) from the camera
@@ -5673,7 +5740,7 @@ SDL_AppResult Game::iterate()
             else
                 killerName = lookupPlayerName(registry, deathInfo.killerId, killerBuf, sizeof(killerBuf));
 
-            char line1[64], line2[96], line3[48];
+            char line1[64], line2[96];
             std::snprintf(line1, sizeof(line1), "Killed by: %s", killerName);
             std::snprintf(line2,
                           sizeof(line2),
@@ -5681,7 +5748,6 @@ SDL_AppResult Game::iterate()
                           static_cast<double>(deathInfo.killerHealth.health),
                           static_cast<double>(deathInfo.killerHealth.armor),
                           std::ceil(static_cast<double>(respawnTimer.timeRemaining)));
-            std::snprintf(line3, sizeof(line3), "Press SPACE to skip");
 
             int winW = 0, winH = 0;
             SDL_GetWindowSizeInPixels(window, &winW, &winH);
@@ -5695,7 +5761,7 @@ SDL_AppResult Game::iterate()
             static constexpr float k_marginB = 16.0f;
             static constexpr float k_lineGap = 4.0f;
 
-            const float boxH = fs * 3.0f + k_lineGap * 2.0f + k_padY * 2.0f;
+            const float boxH = fs * 2.0f + k_lineGap + k_padY * 2.0f;
             const float boxW = static_cast<float>(winW) * 0.4f;
             const float x = (static_cast<float>(winW) - boxW) * 0.5f;
             const float y = static_cast<float>(winH) - boxH - k_marginB;
@@ -5703,12 +5769,10 @@ SDL_AppResult Game::iterate()
             const ImU32 bg = ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.65f));
             const ImU32 fg = ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
             const ImU32 fg2 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.85f, 0.85f, 0.85f, 0.85f));
-            const ImU32 fg3 = ImGui::ColorConvertFloat4ToU32(ImVec4(0.6f, 0.9f, 0.6f, 0.9f));
 
             dl->AddRectFilled(ImVec2(x, y), ImVec2(x + boxW, y + boxH), bg, 4.0f);
             dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY), fg, line1);
             dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs + k_lineGap), fg2, line2);
-            dl->AddText(font, fs, ImVec2(x + k_padX, y + k_padY + fs * 2.0f + k_lineGap * 2.0f), fg3, line3);
         }
     }
 
@@ -6067,6 +6131,10 @@ SDL_AppResult Game::iterate()
         });
         registry.view<LocalPlayer, PlayerVisState>().each(
             [&](const PlayerVisState& ps) { hudState.isAlive = !ps.isDead; });
+        if (!hudState.isAlive)
+            damagePowerupHudTimer_ = 0.0f;
+        hudState.damagePowerupProgress =
+            std::clamp(damagePowerupHudTimer_ / std::max(0.001f, damagePowerupHudDuration_), 0.0f, 1.0f);
         registry.view<LocalPlayer, AbilityState>().each([&](const AbilityState& ability) {
             hudState.abilityLevelProgress = std::clamp(ability.accumDamage / systems::dmgThreshold, 0.f, 1.f);
             hudState.abilityLevel = ability.level;
@@ -6157,6 +6225,8 @@ SDL_AppResult Game::iterate()
                     entry.victimName = "You";
                 else
                     entry.victimName = lookupPlayerName(registry, evt.victimId, nameBuf, sizeof(nameBuf));
+                entry.weaponId = evt.weaponId;
+                entry.isHeadshot = evt.isHeadshot;
                 hudKillEntries.push_back(entry);
             }
         }
@@ -6248,11 +6318,12 @@ SDL_AppResult Game::iterate()
         hudState.enemyScore = 0;
 
         // ── Minimap: local player + all other player positions ──
-        registry.view<LocalPlayer, Position, InputSnapshot>().each(
-            [&](const Position& pos, const InputSnapshot& input) {
+        registry.view<LocalPlayer, Position, InputSnapshot, PlayerVisState>().each(
+            [&](const Position& pos, const InputSnapshot& input, const PlayerVisState& vis) {
                 hudState.localPlayerX = pos.value.x;
                 hudState.localPlayerZ = pos.value.z;
                 hudState.localPlayerYaw = input.yaw;
+                hudState.localGravityFlipped = vis.gravityFlipped;
             });
 
         thread_local std::vector<HudMinimapDot> hudMinimapDots;
@@ -6506,19 +6577,16 @@ SDL_AppResult Game::iterate()
         });
 
         // ── Voidfall HUD: pickup notifications (slide-in) ──
-        // Detect new weapons or ammo growth on the local player vs. the
+        // Detect new weapons on the local player vs. the
         // previous frame's snapshot.  This means picking up a Rifle from a
         // spawner — or any other source that mutates a WeaponState slot —
         // surfaces in the right-side feed.
         {
             int curPrim = -1;
             int curSec = -1;
-            int curReserve = 0;
             registry.view<LocalPlayer, WeaponState>().each([&](const WeaponState& ws) {
                 curPrim = static_cast<int>(getSlot(ws, WeaponSlot::PRIMARY).type);
                 curSec = static_cast<int>(getSlot(ws, WeaponSlot::SECONDARY).type);
-                const GunInstance& gun = getEquippedGun(ws);
-                curReserve = gun.currentMagAmmo + gun.totalAmmo;
             });
 
             auto pushPickup = [&](const std::string& label, int qty) {
@@ -6535,12 +6603,8 @@ SDL_AppResult Game::iterate()
                 const char* nm = (curSec >= 0 && curSec < 4) ? names[curSec] : "WEAPON";
                 pushPickup(nm, 1);
             }
-            if (prevAmmoReserve_ >= 0 && curReserve > prevAmmoReserve_ + 5) {
-                pushPickup("AMMO", curReserve - prevAmmoReserve_);
-            }
             prevPrimaryWeaponType_ = curPrim;
             prevSecondaryWeaponType_ = curSec;
-            prevAmmoReserve_ = curReserve;
 
             // Ship the pending list and drain — each notification is a
             // one-shot event; the widget owns its lifetime.

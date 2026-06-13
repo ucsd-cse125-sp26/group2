@@ -118,6 +118,34 @@ float softClip(float value) noexcept
     return std::clamp(value / (1.0f + std::fabs(value) * 0.35f), -1.0f, 1.0f);
 }
 
+void trimClipToDuration(SoundClip& clip, float maxSeconds, float fadeSeconds)
+{
+    if (!clip.loaded || clip.frameCount == 0 || maxSeconds <= 0.0f)
+        return;
+
+    const std::size_t maxFrames =
+        static_cast<std::size_t>(std::ceil(maxSeconds * static_cast<float>(audio::k_mixerSampleRate)));
+    if (clip.frameCount <= maxFrames)
+        return;
+
+    const std::size_t newFrameCount = std::max<std::size_t>(1, maxFrames);
+    const std::size_t fadeFrames = std::min(
+        newFrameCount, static_cast<std::size_t>(std::ceil(fadeSeconds * static_cast<float>(audio::k_mixerSampleRate))));
+
+    if (fadeFrames > 0) {
+        for (std::size_t frame = newFrameCount - fadeFrames; frame < newFrameCount; ++frame) {
+            const float fade = static_cast<float>(newFrameCount - frame) / static_cast<float>(fadeFrames);
+            const std::size_t sample = frame * static_cast<std::size_t>(audio::k_mixerChannels);
+            clip.samples[sample] *= fade;
+            clip.samples[sample + 1u] *= fade;
+        }
+    }
+
+    clip.samples.resize(newFrameCount * static_cast<std::size_t>(audio::k_mixerChannels));
+    clip.frameCount = newFrameCount;
+    clip.durationSeconds = static_cast<float>(newFrameCount) / static_cast<float>(audio::k_mixerSampleRate);
+}
+
 std::string_view reloadEventForWeapon(WeaponType type) noexcept
 {
     switch (type) {
@@ -238,7 +266,9 @@ bool SfxSystem::init()
     loadClip(SfxId::Death, "Death.wav", SfxCategory::Player, 1.0f, 2.00f);
     loadClip(SfxId::KillConfirm, "Voicy_Pilot Killed Indicator SFX.mp3", SfxCategory::Player, 0.9f, 0.30f);
     loadClip(SfxId::Healing, "Health.wav", SfxCategory::Player, 0.35f, 1.00f);
-    loadClip(SfxId::PowerupPickup, "csgo-case-open.mp3", SfxCategory::Player, 0.75f, 0.15f);
+    loadClip(SfxId::PowerupPickup, "damage_powerup.mp3", SfxCategory::Player, 0.5625f, 0.15f);
+    loadClip(SfxId::DamagePowerupPickup, "damage_powerup.mp3", SfxCategory::Player, 0.5625f, 0.15f);
+    loadClip(SfxId::OvershieldPowerupPickup, "overshield_powerup.mp3", SfxCategory::Player, 0.75f, 0.15f);
 
     synthesizeClip(SfxId::FootstepLight, SfxCategory::Footsteps, 0.40f, 0.06f);
     synthesizeClip(SfxId::FootstepHeavy, SfxCategory::Footsteps, 0.55f, 0.06f);
@@ -313,6 +343,7 @@ bool SfxSystem::init()
     loadClip(SfxId::UiDanger01, "MenuSFX/Access_Denied_High_DDM16.wav", SfxCategory::UI, 0.44f, 0.02f);
 
     convertClipsToMixer();
+    trimClipToDuration(clips_[static_cast<std::size_t>(SfxId::RifleFire)], 0.16f, 0.025f);
 
     std::vector<std::string> manifestErrors;
     const char* base = SDL_GetBasePath();
@@ -1287,9 +1318,7 @@ bool SfxSystem::openDevice()
     if (mixStream_)
         return true;
 
-#ifdef __APPLE__
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "1024");
-#endif
 
     const SDL_AudioDeviceID requestedDevice = findAudioDeviceByName(playbackDeviceName_, false);
     if (!playbackDeviceName_.empty() && requestedDevice == SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK) {

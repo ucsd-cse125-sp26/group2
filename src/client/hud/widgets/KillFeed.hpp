@@ -3,10 +3,10 @@
 ///
 /// Each entry is a thin bracketed pill:
 ///   ┌──────────────────────────┐
-///   │ VYRE-07  ARC-9  ✕  RAIDEN│
+///   │ VYRE-07   ◆   ✕  RAIDEN│
 ///   └──────────────────────────┘
 /// - Killer name in white (amber-tinted if local player).
-/// - Weapon abbreviation in amber.
+/// - Generic diamond marker between the player names.
 /// - Headshot glyph (small red circle-with-tick).
 /// - Victim name in red (or local-player red highlight when victim is "You").
 ///
@@ -25,6 +25,7 @@ struct KillFeed : HudWidget
     float entryPadding = 30.f;
     float entryLifetime = 5.f;
     float fontSize = 20.f;
+    float diamondSize = 10.f;
     float fadeOutDuration = 0.6f;
     int maxEntries = 4;
 

@@ -4,6 +4,8 @@
 #pragma once
 #include "glm/fwd.hpp"
 
+#include <cstdint>
+
 enum class PowerupType : uint8_t
 {
     Damage,

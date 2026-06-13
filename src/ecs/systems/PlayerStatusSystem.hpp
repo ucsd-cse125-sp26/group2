@@ -44,6 +44,7 @@ void applyBulletSlow(entt::entity player, Registry& registry);
 /// @param registry   The ECS registry.
 /// @param killEvents Accumulates kill events for network broadcast.
 /// @param hitRegion  Body region that was hit (for kill feed / headshot tracking).
+/// @param weaponId   WeaponType ordinal for weapon-caused damage, or -1 for environment/unknown damage.
 /// @param shieldMultiplier Effectiveness against shield layers (overShield + armor).
 ///        1.0 = full; <1.0 makes shields drain slower (energy-vs-energy weapons).
 ///        Damage spilling into raw health is always applied at full.
@@ -54,6 +55,7 @@ float applyDamage(float damage,
                   Registry& registry,
                   std::vector<NetKillEvent>& killEvents,
                   BodyRegion hitRegion = BodyRegion::UpperTorso,
+                  int weaponId = -1,
                   float shieldMultiplier = 1.0f);
 
 /// @brief Run one tick of player status: respawn timers and passive healing.

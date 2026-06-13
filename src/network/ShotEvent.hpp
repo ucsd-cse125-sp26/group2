@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ecs/components/PowerupSpawner.hpp"
 #include "ecs/components/Projectile.hpp"
 
 #include <entt/entt.hpp>
@@ -17,7 +18,7 @@ enum class ParticleEffectType : uint8_t
     Explosion,     ///< pos1=position, param=blastRadius
     Smoke,         ///< pos1=position, param=radius
     Fire,          ///< Persistent flame billboards from a FireField. pos1=position, param=radius.
-    PowerupPickup, ///< pos1=pickup position, source=player that collected it.
+    PowerupPickup, ///< pos1=pickup position, source=player that collected it, powerupType.
 };
 
 /// @brief Wire-format particle event broadcast from server to all clients.
@@ -33,7 +34,7 @@ struct NetParticleEvent
     uint8_t headshot = 0;             ///< 1 if the impact hit the head region (for client hitmarker colour).
     uint8_t shieldBreak = 0;          ///< 1 if this shot depleted the target's armor to zero.
     uint8_t hadArmor = 0;             ///< 1 if target had armor at the moment of impact.
-    uint8_t _pad = 0;                 ///< Padding for alignment.
+    PowerupType powerupType = PowerupType::Damage; ///< Used by PowerupPickup.
     glm::vec3 pos1{};                 ///< Origin / position.
     glm::vec3 pos2{};                 ///< Direction / hitPos / normal.
     float param = 0;                  ///< Distance / radius.

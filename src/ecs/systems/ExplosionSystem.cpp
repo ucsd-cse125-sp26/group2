@@ -72,7 +72,13 @@ void runExplosion(Registry& registry,
             if (killer == entt::null || !registry.valid(killer)) {
                 killer = explosion.directKillTarget;
             }
-            applyDamage(1.0e6f, explosion.directKillTarget, killer, registry, killEvents);
+            applyDamage(1.0e6f,
+                        explosion.directKillTarget,
+                        killer,
+                        registry,
+                        killEvents,
+                        BodyRegion::UpperTorso,
+                        static_cast<int>(explosion.weaponType));
         }
 
         auto players = registry.view<Player, Position, CollisionShape>();
@@ -103,7 +109,13 @@ void runExplosion(Registry& registry,
                 if (killer == entt::null || !registry.valid(killer)) {
                     killer = player;
                 }
-                applyDamage(damage, player, killer, registry, killEvents);
+                applyDamage(damage,
+                            player,
+                            killer,
+                            registry,
+                            killEvents,
+                            BodyRegion::UpperTorso,
+                            static_cast<int>(explosion.weaponType));
             }
 
             // ── Knockback (rocket-jump impulse) ─────────────────────────────

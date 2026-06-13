@@ -268,7 +268,8 @@ inline void handleDeath(entt::entity& player,
                         entt::entity& killer,
                         Registry& registry,
                         std::vector<NetKillEvent>& killEvents,
-                        BodyRegion hitRegion)
+                        BodyRegion hitRegion,
+                        int weaponId)
 {
     if (playerHealth.health <= 0) {
         // Drop the player's two weapons at their current position.
@@ -311,7 +312,7 @@ inline void handleDeath(entt::entity& player,
         registry.get_or_emplace<Velocity>(player) = Velocity{};
         registry.patch<Renderable>(player, [](Renderable& rend) { rend.visible = false; });
         registry.remove<HitboxInstance>(player);
-        registry.emplace_or_replace<RespawnTimer>(player, RespawnTimer{.timeRemaining = 5.0f});
+        registry.emplace_or_replace<RespawnTimer>(player, RespawnTimer{.timeRemaining = 4.0f});
         registry.patch<PlayerMatchStats>(player, [&](PlayerMatchStats& stats) { stats.deaths++; });
 
         // Clear input so dead players don't continue shooting/moving.
@@ -331,6 +332,7 @@ inline void handleDeath(entt::entity& player,
             .killerId = killerId,
             .victimId = registry.get<ClientId>(player),
             .killerHealth = killerHealth,
+            .weaponId = weaponId,
             .hitRegion = hitRegion,
             .isHeadshot = (hitRegion == BodyRegion::Head),
         };
@@ -413,6 +415,7 @@ float applyDamage(float damage,
                   Registry& registry,
                   std::vector<NetKillEvent>& killEvents,
                   BodyRegion hitRegion,
+                  int weaponId,
                   float shieldMultiplier)
 {
     // If player is dead, ignore damage
@@ -442,7 +445,7 @@ float applyDamage(float damage,
     if (remainingDamage > 0.0f) {
         if (playerHealth.health <= remainingDamage) {
             playerHealth.health = 0.0f;
-            handleDeath(player, playerHealth, killer, registry, killEvents, hitRegion);
+            handleDeath(player, playerHealth, killer, registry, killEvents, hitRegion, weaponId);
         } else {
             playerHealth.health -= remainingDamage;
         }
@@ -472,11 +475,11 @@ void runPlayerStatus(Registry& registry, float dt)
         if (registry.all_of<RespawnTimer>(e)) {
             auto& respawnTimer = registry.get<RespawnTimer>(e);
 
-            // Allow skipping the respawn timer early by pressing space.
-            if (snap.skipRespawn) {
-                snap.skipRespawn = false;
-                respawnTimer.timeRemaining = 0.0f;
-            }
+            // DEBUG: Allow skipping the respawn timer early by pressing space.
+            // if (snap.skipRespawn) {
+            //     snap.skipRespawn = false;
+            //     respawnTimer.timeRemaining = 0.0f;
+            // }
 
             respawnTimer.timeRemaining -= dt;
             if (respawnTimer.timeRemaining <= 0) {

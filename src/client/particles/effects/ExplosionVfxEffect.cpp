@@ -300,19 +300,23 @@ void ExplosionVfxEffect::driveGroundFire(entt::entity fieldEntity,
                                          float remaining,
                                          float duration)
 {
+    const float replicatedRemaining = std::max(0.0f, remaining);
     auto it = std::find_if(groundFire_.begin(), groundFire_.end(), [&](const GroundFireAnchor& a) {
         return a.entity == fieldEntity;
     });
     if (it == groundFire_.end()) {
         GroundFireAnchor anchor;
         anchor.entity = fieldEntity;
+        anchor.remaining = replicatedRemaining;
+        anchor.duration = safeDuration(replicatedRemaining, duration);
         anchor.seed = nextSeed();
         it = groundFire_.insert(groundFire_.end(), anchor);
+    } else {
+        it->remaining = std::min(it->remaining, replicatedRemaining);
+        it->duration = std::max(it->duration, safeDuration(replicatedRemaining, duration));
     }
     it->pos = pos;
     it->radius = std::max(16.0f, radius);
-    it->remaining = std::max(0.0f, remaining);
-    it->duration = safeDuration(remaining, duration);
 }
 
 void ExplosionVfxEffect::tickGroundFire(GroundFireAnchor& anchor, float dt)
@@ -321,6 +325,8 @@ void ExplosionVfxEffect::tickGroundFire(GroundFireAnchor& anchor, float dt)
         spawnMolotovBurst(anchor.pos, {0.0f, 1.0f, 0.0f}, anchor.radius);
         anchor.spawnedBurst = true;
     }
+
+    anchor.remaining = std::max(0.0f, anchor.remaining - dt);
 
     const float lifeFrac = anchor.duration > 0.0f ? glm::clamp(anchor.remaining / anchor.duration, 0.0f, 1.0f) : 0.0f;
     const float edgeFade = glm::clamp(lifeFrac * 4.0f, 0.0f, 1.0f);
