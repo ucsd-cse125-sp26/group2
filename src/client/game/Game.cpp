@@ -1364,6 +1364,10 @@ bool Game::init(AppContext& ctx)
             spawnExplosionFlashLight(evt.pos1, WeaponType::Molotov, evt.param);
             break;
         case ParticleEffectType::PowerupPickup:
+            if (evt.source == localPlayer && evt.powerupType == PowerupType::Damage) {
+                damagePowerupHudDuration_ = std::max(0.001f, getPowerupConfig(PowerupType::Damage).duration);
+                damagePowerupHudTimer_ = damagePowerupHudDuration_;
+            }
             if (sfxSystem->isInitialized()) {
                 const audio::AudioObjectId object = audio::objectId("event.powerup.pickup");
                 const std::string_view eventName = evt.powerupType == PowerupType::Shield
@@ -2372,6 +2376,7 @@ SDL_AppResult Game::iterate()
         phaseStats.timestampMs = static_cast<double>(SDL_GetTicksNS()) / 1000000.0;
         phaseStats.wallFrameMs = frameTime * 1000.0f;
     }
+    damagePowerupHudTimer_ = std::max(0.0f, damagePowerupHudTimer_ - frameTime);
 
     // Hot-reload: poll weapon hold-pose TOMLs at ~4 Hz. If the mtime moved,
     // reload the pose in place. Filesystem stats are cheap, but doing them every
@@ -6069,6 +6074,10 @@ SDL_AppResult Game::iterate()
         });
         registry.view<LocalPlayer, PlayerVisState>().each(
             [&](const PlayerVisState& ps) { hudState.isAlive = !ps.isDead; });
+        if (!hudState.isAlive)
+            damagePowerupHudTimer_ = 0.0f;
+        hudState.damagePowerupProgress =
+            std::clamp(damagePowerupHudTimer_ / std::max(0.001f, damagePowerupHudDuration_), 0.0f, 1.0f);
         registry.view<LocalPlayer, AbilityState>().each([&](const AbilityState& ability) {
             hudState.abilityLevelProgress = std::clamp(ability.accumDamage / systems::dmgThreshold, 0.f, 1.f);
             hudState.abilityLevel = ability.level;

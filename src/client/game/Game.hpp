@@ -492,6 +492,10 @@ private:
     /// when the local player's WeaponState gains a new weapon type.
     std::vector<HudPickupNotification> pendingPickupNotifications_;
 
+    /// @brief Client-side countdown for the local damage powerup HUD frame effect.
+    float damagePowerupHudTimer_ = 0.0f;
+    float damagePowerupHudDuration_ = 1.0f;
+
     /// @brief Generic popup notifications queued for the next HUD frame.
     ///
     /// The HUD widget consumes each entry once, then owns display lifetime,

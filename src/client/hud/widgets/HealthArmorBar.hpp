@@ -26,4 +26,5 @@ private:
     float healthFill_ = 1.f;
     float armorFill_ = 0.f;
     float overShieldFill_ = 0.f;
+    float damagePowerupFill_ = 0.f;
 };

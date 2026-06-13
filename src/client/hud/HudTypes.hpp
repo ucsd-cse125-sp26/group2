@@ -371,6 +371,7 @@ struct HudGameState
     int health = 100, maxHealth = 100;
     int armor = 0, maxArmor = 100;
     int overShield = 0, maxOverShield = 200;
+    float damagePowerupProgress = 0.f; ///< Damage powerup time remaining as 0..1.
     float abilityLevelProgress = 0.f; ///< accumDamage / systems::dmgThreshold, clamped 0..1.
     int abilityLevel = 0;
     int ammoClip = 30, ammoReserve = 90;
