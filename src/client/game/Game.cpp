@@ -29,6 +29,7 @@
 #include "ecs/components/DeathInfo.hpp"
 #include "ecs/components/DroppedWeapon.hpp"
 #include "ecs/components/FireField.hpp"
+#include "ecs/components/GrenadeConfig.hpp"
 #include "ecs/components/GrenadeState.hpp"
 #include "ecs/components/Health.hpp"
 #include "ecs/components/HealthPackSpawner.hpp"
@@ -3380,7 +3381,9 @@ SDL_AppResult Game::iterate()
 
     // Drive fresh molotov ground-fire VFX from replicated FireField entities.
     registry.view<FireField>().each([&](entt::entity e, const FireField& field) {
-        particleSystem.driveGroundFire(e, field.position, field.radius, field.remaining, field.remaining);
+        const float duration = isGrenadeType(field.weaponType) ? getGrenadeConfig(field.weaponType).fireDuration
+                                                               : field.remaining;
+        particleSystem.driveGroundFire(e, field.position, field.radius, field.remaining, duration);
     });
 
     // Update particle system (render-rate, not physics-rate) from the camera
