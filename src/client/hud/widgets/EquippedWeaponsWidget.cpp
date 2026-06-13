@@ -73,10 +73,18 @@ void drawWeaponSlot(HudContext& ctx,
 
     ctx.svg(HudIcon::WeaponFrame, frame.x, frame.y, frame.w, frame.h);
     const HudIcon weaponIcon = weaponIconForId(weaponId);
+    Rect drawIcon = icon;
+    if (weaponIcon == HudIcon::NoIcon) {
+        const float size = std::min(icon.w, icon.h) * 2;
+        drawIcon.x = icon.x + (icon.w - size) * 0.5f;
+        drawIcon.y = icon.y + (icon.h - size) * 0.5f;
+        drawIcon.w = size;
+        drawIcon.h = size;
+    }
     if (active && weaponIcon != HudIcon::NoIcon)
-        ctx.svgMask(weaponIcon, icon.x, icon.y, icon.w, icon.h, voidfall::k_cyan);
+        ctx.svgMask(weaponIcon, drawIcon.x, drawIcon.y, drawIcon.w, drawIcon.h, voidfall::k_cyan);
     else
-        ctx.svgMask(weaponIcon, icon.x, icon.y, icon.w, icon.h, voidfall::k_textDim);
+        ctx.svgMask(weaponIcon, drawIcon.x, drawIcon.y, drawIcon.w, drawIcon.h, voidfall::k_textDim);
 }
 } // namespace
 

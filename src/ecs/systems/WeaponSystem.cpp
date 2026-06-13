@@ -1066,7 +1066,7 @@ inline void handleFire(Registry& registry,
             // HUD widget reads per-pellet hit/headshot from the replicated
             // NetParticleEvents.
             static constexpr int k_pelletCount = 11;
-            static constexpr float k_spreadRad = 0.218f; // ~12.5° (outer ring) — 5× the original 0.0436 baseline
+            static constexpr float k_spreadRad = 0.0873f; // ~12.5° (outer ring) — 5× the original 0.0436 baseline
             // Pre-computed offsets in tangent plane. Order MUST match
             // ShotgunPelletWidget's k_pelletPositions so widget colours line
             // up with the actual ray that was fired.

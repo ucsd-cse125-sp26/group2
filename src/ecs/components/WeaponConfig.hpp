@@ -151,8 +151,8 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
         WeaponConfig{
             .fireCooldown = 0.125f,
             .magazineSize = 50,
-            .defaultAmmoCapacity = 500,
-            .damage = 18.0f,
+            .defaultAmmoCapacity = 350,
+            .damage = 17.0f,
             .hitscan = true,
             .hitscanRadius =
                 11.2f, // -30% cylinder hitreg (was 16.0); player capsules are ~2.5–6.5u radius in world space.
@@ -176,7 +176,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .fireCooldown = 1.0f,
             .magazineSize = 4,
             .defaultAmmoCapacity = 8,
-            .damage = 200.0f,
+            .damage = 180.0f,
             .hitscan = false,
             .initialProjectileSpeed = 3000.0f,
             .explosive = true,
@@ -200,18 +200,18 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .fireCooldown = 0.0f,
             .magazineSize = 400,
             .defaultAmmoCapacity = 800,
-            .damage = 6.0f,
+            .damage = 10.0f,
             .hitscan = true,
             .hitscanRadius = 12.0f,
             .initialProjectileSpeed = 0.0f,
             .explosive = false,
             .isBeam = true,
-            .dps = 32.0f, // ramp floor — starting DPS before lock ramp
+            .dps = 42.0f, // ramp floor — starting DPS before lock ramp
             .ammoPerSecond = 20.0f,
             .autoLockBeam = true,
             .maxRange = 350.0f,
             .coneHalfAngleDeg = 48.0f,      // very wide cone — strafing/jukes still hold lock
-            .dpsMax = 42.0f,                // ramp ceiling after dpsRampTime of held lock
+            .dpsMax = 52.0f,                // ramp ceiling after dpsRampTime of held lock
             .dpsRampTime = 2.0f,            // seconds of continuous lock to reach dpsMax
             .shieldDamageMultiplier = 0.9f, // energy-vs-energy, slightly more bite than before
             .reloadTime = 2.0f,
@@ -219,8 +219,8 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
         WeaponConfig{
             .fireCooldown = 0.9f,
             .magazineSize = 6,
-            .defaultAmmoCapacity = 18,
-            .damage = 16.0f,
+            .defaultAmmoCapacity = 6,
+            .damage = 8.0f,
             .hitscan = true,
             .hitscanRadius = 4.2f, // -30% cylinder hitreg (was 6.0); still tighter than rifle since the 11 pellets
                                    // compound close-range damage.
