@@ -408,6 +408,7 @@ struct HudGameState
     // Minimap.
     float localPlayerX = 0.f, localPlayerZ = 0.f;
     float localPlayerYaw = 0.f;       ///< Player facing direction (radians, 0 = +Z, CW).
+    bool localGravityFlipped = false; ///< True when the local player's gravity is inverted.
     std::span<const HudMinimapDot> enemyDots;
     float minimapWorldRange = 4000.f; ///< World units visible in each direction from center.
 

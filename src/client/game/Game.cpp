@@ -6261,11 +6261,12 @@ SDL_AppResult Game::iterate()
         hudState.enemyScore = 0;
 
         // ── Minimap: local player + all other player positions ──
-        registry.view<LocalPlayer, Position, InputSnapshot>().each(
-            [&](const Position& pos, const InputSnapshot& input) {
+        registry.view<LocalPlayer, Position, InputSnapshot, PlayerVisState>().each(
+            [&](const Position& pos, const InputSnapshot& input, const PlayerVisState& vis) {
                 hudState.localPlayerX = pos.value.x;
                 hudState.localPlayerZ = pos.value.z;
                 hudState.localPlayerYaw = input.yaw;
+                hudState.localGravityFlipped = vis.gravityFlipped;
             });
 
         thread_local std::vector<HudMinimapDot> hudMinimapDots;
