@@ -152,7 +152,7 @@ inline const WeaponConfig& getWeaponConfig(WeaponType type)
             .fireCooldown = 0.125f,
             .magazineSize = 50,
             .defaultAmmoCapacity = 350,
-            .damage = 14.0f,
+            .damage = 15.0f,
             .hitscan = true,
             .hitscanRadius =
                 11.2f, // -30% cylinder hitreg (was 16.0); player capsules are ~2.5–6.5u radius in world space.
